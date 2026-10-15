@@ -2,6 +2,7 @@
 // then prints a JSONL turn whose agent message is the content of FAKE_CODEX_OUTPUT.
 // FAKE_CODEX_SLOW_MS keeps it running (after some progress events) for that long.
 // FAKE_CODEX_FAIL fails the turn after the thread started, with that message (e.g. a usage limit).
+// FAKE_CODEX_TERM_LINE keeps running and, when terminated (SIGTERM), writes one more event before exiting.
 // FAKE_CODEX_STEPS prints that many reasoning events, FAKE_CODEX_STEP_MS apart, before the turn ends.
 import fs from "node:fs";
 import path from "node:path";
@@ -22,6 +23,15 @@ if (process.env.FAKE_CODEX_FAIL) {
   ];
   process.stdout.write(failed.map(e => JSON.stringify(e)).join("\\n") + "\\n");
   process.exit(1);
+}
+if (process.env.FAKE_CODEX_TERM_LINE) {
+  fs.writeSync(1, JSON.stringify({ type: "thread.started", thread_id: "thread-fake-1" }) + "\\n");
+  process.on("SIGTERM", () => {
+    fs.writeSync(1, JSON.stringify({ type: "item.completed", item: { id: "on_term", type: "reasoning", text: "shutting down" } }) + "\\n");
+    process.exit(0);
+  });
+  setInterval(() => {}, 1000);
+  return;
 }
 const slowMs = parseInt(process.env.FAKE_CODEX_SLOW_MS || "0", 10);
 if (slowMs > 0) {

@@ -1595,14 +1595,14 @@ function cmdPoll(argv) {
       }
     }
 
-    // Stamp the last lines before the watchdog, which stamps them otherwise, is killed
-    flushLineTimes(stateDir, state.round || 1);
-
     // Cache final JSON (after convergence is computed) and cleanup
     const jsonStr = JSON.stringify(result.json);
     atomicWrite(path.join(stateDir, "final.txt"), jsonStr);
 
     verifyAndKillReviewer(reviewer, reviewerPid, reviewerPgid);
+    // Stamp the last lines, including any written while the reviewer shut down, before
+    // the watchdog that stamps them otherwise is killed
+    flushLineTimes(stateDir, state.round || 1);
     if (watchdogPid) verifyAndKillWatchdog(watchdogPid);
   }
 
@@ -1866,6 +1866,8 @@ function cmdWatchdog(argv) {
         try { writeDeadlineMarker(stateDir, timeoutS, round); } catch {}
       }
       killTree(targetPid);
+      // The reviewer may write while it shuts down; killTree waits for that
+      if (stamping) flushLineTimes(stateDir, round, cursor);
     }
     process.exit(EXIT_SUCCESS);
   }, timeoutS * 1000);

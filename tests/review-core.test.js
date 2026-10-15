@@ -572,6 +572,25 @@ test("the watchdog stamps output lines and exits after the reviewer", async () =
   }
 });
 
+test("output written while the deadline stops the reviewer is stamped", async () => {
+  setCodexOutput("### VERDICT\n- Status: APPROVE\n");
+  process.env.FAKE_CODEX_TERM_LINE = "1";
+  try {
+    const init = execFileSync(process.execPath, [RUNNER, "init", "--skill-name", "review-plan", "--working-dir", workDir], { encoding: "utf8" }).trim();
+    const dir = init.slice("SESSION:".length);
+    execFileSync(process.execPath, [RUNNER, "start", dir, "--timeout", "2"], { input: "prompt", encoding: "utf8" });
+    const st = readJson(path.join(dir, "state.json"));
+    // Deadline at 2 s, then the watchdog's SIGTERM, a 2 s grace period and the watchdog's exit; no poll
+    await until(() => !aliveNow(st.watchdog_pid), 15000, "watchdog exit");
+    const out = fs.readFileSync(path.join(dir, "output.jsonl"), "utf8");
+    assert.ok(out.includes("on_term"), "the reviewer wrote while being stopped");
+    assert.equal(lastCount(timesRows(dir, 1)), completeLines(path.join(dir, "output.jsonl")));
+    execFileSync(process.execPath, [RUNNER, "stop", dir], { encoding: "utf8" });
+  } finally {
+    delete process.env.FAKE_CODEX_TERM_LINE;
+  }
+});
+
 test("a review that ends before the first tick still has every line stamped", async () => {
   setCodexOutput("### VERDICT\n- Status: APPROVE\n");
   const begun = await beginSession({ skill: "review-plan", inputText: inputFor("review-plan", "ft"), workingDir: workDir });
