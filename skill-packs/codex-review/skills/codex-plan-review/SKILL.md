@@ -1,6 +1,6 @@
 ---
 name: codex-plan-review
-description: Review/debate plans before implementation between Claude Code and Codex CLI. Can run in plan mode — debates the plan and edits the plan file to fix accepted issues.
+description: Review/debate plans before implementation with Codex CLI. Can run in plan mode — debates the plan and edits the plan file to fix accepted issues.
 ---
 
 # Codex Plan Review

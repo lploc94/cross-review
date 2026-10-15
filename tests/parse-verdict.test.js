@@ -176,3 +176,19 @@ test("finalize still accepts a verdict override on stdin", () => {
   assert.equal(r.out.meta.verdict, "CONSENSUS");
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test("only review formats the pack still uses are detected", () => {
+  const cweIssue = `${ISSUE_BLOCK}\n- Evidence: unescaped input (CWE-79)\n\n### VERDICT\n- Status: REVISE\n`;
+  assert.equal(parseOutputMarkdown(cweIssue).format, "review", "a CWE mention does not switch to a security format");
+
+  const responses = "### RESPONSE-1: Re: ISSUE-1\n- Action: accept\n- Reason: fixed\n\n### VERDICT\n- Status: CONSENSUS\n";
+  const parsed = parseOutputMarkdown(responses);
+  assert.equal(parsed.format, "response");
+  assert.equal(parsed.blocks[0].prefix, "RESPONSE");
+  assert.equal(parsed.blocks[0].action, "accept");
+
+  const cross = "### CROSS-1: Shared cache\n- Severity: high\n\n### VERDICT\n- Status: REVISE\n";
+  const crossParsed = parseOutputMarkdown(cross);
+  assert.equal(crossParsed.blocks.length, 0, "CROSS blocks belonged to the removed codebase review");
+  assert.equal(crossParsed.verdict.status, "REVISE");
+});

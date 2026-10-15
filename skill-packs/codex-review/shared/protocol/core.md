@@ -1,8 +1,8 @@
 ## Running the review
 The runner keeps all session state; you supply content and follow `next`.
 
-- **Tools.** Use the MCP tools `review_begin`, `review_wait`, `review_reply`, `review_end` (server `codex-review`). Without them, run the same verbs through the CLI: `node "{{RUNNER_PATH}}" begin|wait|reply|end ...` with the input in a file or on stdin (`--input -`); each prints JSON.
-- **Input.** One markdown string with the template's placeholder values: optional front-matter of `NAME: value` lines between `---` lines, then one `## NAME` section per multi-line value. Omitted optional placeholders fall back to the template's defaults.
+- **Tools.** Use the MCP tools `review_begin`, `review_wait`, `review_reply`, `review_end` (server `codex-review`). Without them, run the same verbs through the CLI: `node "{{RUNNER_PATH}}" begin|wait|reply|end ...` with the input in a file or on stdin (`--input -`); each prints JSON. Run every verb of one session from the same sandbox context: a process started outside a sandbox can look dead to a `wait` run inside one.
+- **Input.** One markdown string with the template's placeholder values: `NAME: value` lines first (optionally between `---` lines), then one `## NAME` section per multi-line value. Omitted optional placeholders fall back to the template's defaults.
 - **Start:** `review_begin {skill, mode?, input, working_dir, model?, effort?}` (CLI: `begin --skill <skill> [--mode <mode>] --input <file|-> --working-dir "$PWD" [--model M] [--effort E]`). Effort defaults to `high`.
 - **Model.** Pass `model` only when the user names one or the plan's review checkpoint does; otherwise omit it and Codex uses its default. The runner remembers model and effort for later rounds; pass them again only to change them.
 - **Wait:** call `review_wait {session_dir}` (CLI: `wait <session_dir>`) until `next` is not `running`. Report the specific `activities` (e.g. "Codex: reading src/auth.js"), never just "running".

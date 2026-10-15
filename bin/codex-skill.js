@@ -23,16 +23,30 @@ const __dirname = path.dirname(__filename);
 const packageRoot = path.resolve(__dirname, '..');
 
 const skillPackDir = path.join(packageRoot, 'skill-packs', 'codex-review');
-const skillsRoot = path.join(os.homedir(), '.claude', 'skills');
-const runnerDir = path.join(skillsRoot, 'codex-review');
-const runnerPath = path.join(runnerDir, 'scripts', 'codex-runner.js');
+const home = os.homedir();
+// Claude Code skills, plus the shared runtime (runner, MCP server, dependencies)
+const claudeSkillsRoot = path.join(home, '.claude', 'skills');
+// Codex reads user skills from ~/.agents/skills; $CODEX_HOME/skills is its deprecated location
+const agentsSkillsRoot = path.join(home, '.agents', 'skills');
+const codexHome = process.env.CODEX_HOME || path.join(home, '.codex');
+const legacyCodexSkillsRoot = path.join(codexHome, 'skills');
 
-// RUNNER_SKILLS drive Codex through codex-runner.js; their SKILL.md templates are rendered with the shared protocol and need references/.
+const runtimeDir = path.join(claudeSkillsRoot, 'codex-review');
+const runnerPath = path.join(runtimeDir, 'scripts', 'codex-runner.js');
+const mcpServerPath = path.join(runtimeDir, 'scripts', 'mcp-server.js');
+
+// RUNNER_SKILLS drive Codex through the runner; their SKILL.md templates are rendered with the shared protocol.
 // PLAIN_SKILLS are self-contained SKILL.md templates rendered only with the client's {{CLIENT_*}} values.
 const RUNNER_SKILLS = ['codex-plan-review', 'codex-impl-review', 'codex-think-about', 'codex-commit-review', 'codex-pr-review'];
 const PLAIN_SKILLS = ['loop-plan', 'loop-implement'];
 // Skills removed from the pack; previously installed copies are deleted on install.
 const REMOVED_SKILLS = ['codex-parallel-review', 'codex-codebase-review', 'codex-security-review'];
+
+const MCP_NAME = 'codex-review';
+const MCP_TOOLS = ['review_begin', 'review_wait', 'review_reply', 'review_end'];
+// Seconds review_wait blocks by default. Codex allows 60 s per MCP tool call (tool_timeout_sec);
+// Claude Code allows far longer, so fewer calls are needed there.
+const WAIT_DEFAULT_S = { claude: 300, codex: 50 };
 
 const autoMode = process.argv.includes('--auto');
 const SKILLS = [...RUNNER_SKILLS, ...PLAIN_SKILLS];
@@ -40,11 +54,6 @@ const SKILLS = [...RUNNER_SKILLS, ...PLAIN_SKILLS];
 if (process.argv.includes('-full')) {
   console.warn('Note: -full is no longer needed; parallel, codebase and security reviews were removed from the pack.');
 }
-
-// All directories managed by this installer (runner + skills)
-// INSTALL_DIRS: dirs in staging to swap in. CLEANUP_DIRS: removed skills to delete from earlier installs.
-const INSTALL_DIRS = ['codex-review', ...SKILLS];
-const CLEANUP_DIRS = REMOVED_SKILLS;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -69,99 +78,164 @@ function copyDirSync(src, dest) {
   }
 }
 
+/** Run a CLI quietly; returns { ok, output }. */
+function run(cmd, args, opts = {}) {
+  try {
+    const output = execFileSync(cmd, args, {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      shell: process.platform === 'win32',
+      timeout: 120_000,
+      ...opts,
+    });
+    return { ok: true, output };
+  } catch (e) {
+    return { ok: false, output: `${e.stdout || ''}${e.stderr || ''}`.trim() || e.message };
+  }
+}
+
+function commandExists(cmd) {
+  return run(process.platform === 'win32' ? 'where' : 'which', [cmd], { timeout: 5000 }).ok;
+}
+
+/**
+ * Node binary for the MCP registration. Prefer the PATH entry (e.g. /opt/homebrew/bin/node)
+ * when it is the node running this installer: versioned paths such as
+ * /opt/homebrew/Cellar/node/<version>/bin/node disappear on upgrade.
+ */
+function stableNodePath() {
+  const found = run(process.platform === 'win32' ? 'where' : 'which', ['node'], { timeout: 5000 });
+  const candidate = found.ok ? found.output.split(/\r?\n/)[0].trim() : '';
+  try {
+    if (candidate && fs.realpathSync(candidate) === fs.realpathSync(process.execPath)) return candidate;
+  } catch { /* fall through */ }
+  return process.execPath;
+}
+
+/**
+ * Pre-approve this server's tools in Codex's config.toml. `codex exec` runs with approval
+ * policy "never", which rejects MCP tool calls that need approval; `codex mcp add` drops
+ * these tables on re-add, so they are rewritten after every registration.
+ */
+function approveCodexTools(configPath) {
+  const prefix = `[mcp_servers.${MCP_NAME}.tools.`;
+  const kept = [];
+  let skipping = false;
+  for (const line of fs.readFileSync(configPath, 'utf8').split('\n')) {
+    if (line.startsWith('[')) skipping = line.startsWith(prefix);
+    if (!skipping) kept.push(line);
+  }
+  let text = kept.join('\n').replace(/\n*$/, '\n');
+  for (const tool of MCP_TOOLS) text += `\n${prefix}${tool}]\napproval_mode = "approve"\n`;
+  fs.writeFileSync(configPath, text, 'utf8');
+}
+
+/** True when a directory in a skills root was installed by this pack (safe to delete). */
+function isPackInstall(dir, name) {
+  if (name === 'codex-review') return fs.existsSync(path.join(dir, 'scripts', 'codex-runner.js'));
+  try {
+    const skillMd = fs.readFileSync(path.join(dir, 'SKILL.md'), 'utf8');
+    return new RegExp(`^name:\\s*${name}\\s*$`, 'm').test(skillMd);
+  } catch {
+    return false;
+  }
+}
+
 // ---------------------------------------------------------------------------
-// Build staging directory
+// Build staging directories (one per skills root, so the final renames stay on one filesystem)
 // ---------------------------------------------------------------------------
 
 const uid = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-const stagingDir = path.join(skillsRoot, `.codex-staging-${uid}`);
+const targets = [
+  { root: claudeSkillsRoot, dirs: ['codex-review', ...SKILLS] },
+  { root: agentsSkillsRoot, dirs: [...SKILLS] },
+];
+for (const t of targets) t.staging = path.join(t.root, `.codex-staging-${uid}`);
+const [claudeTarget, agentsTarget] = targets;
 
 try {
-  fs.mkdirSync(stagingDir, { recursive: true });
+  for (const t of targets) fs.mkdirSync(t.staging, { recursive: true });
 
-  // 1. Copy codex-runner.js into staging/codex-review/scripts/
-  const runnerSrc = path.join(skillPackDir, 'scripts', 'codex-runner.js');
-  const runnerDest = path.join(stagingDir, 'codex-review', 'scripts', 'codex-runner.js');
-  fs.mkdirSync(path.dirname(runnerDest), { recursive: true });
-  fs.copyFileSync(runnerSrc, runnerDest);
-  // Runner modules imported by codex-runner.js
-  copyDirSync(path.join(skillPackDir, 'scripts', 'lib'), path.join(path.dirname(runnerDest), 'lib'));
-
-  // Ensure ESM works on Node 22 even if --experimental-detect-module is disabled
-  fs.writeFileSync(path.join(stagingDir, 'codex-review', 'package.json'), '{"type":"module"}\n', 'utf8');
-
-  // chmod +x on Unix
+  // 1. Shared runtime: runner, its modules, MCP server, and the MCP SDK from the lock file
+  const stagedRuntime = path.join(claudeTarget.staging, 'codex-review');
+  const stagedScripts = path.join(stagedRuntime, 'scripts');
+  fs.mkdirSync(stagedScripts, { recursive: true });
+  for (const file of ['codex-runner.js', 'mcp-server.js']) {
+    fs.copyFileSync(path.join(skillPackDir, 'scripts', file), path.join(stagedScripts, file));
+  }
+  copyDirSync(path.join(skillPackDir, 'scripts', 'lib'), path.join(stagedScripts, 'lib'));
+  for (const file of ['package.json', 'package-lock.json']) {
+    fs.copyFileSync(path.join(skillPackDir, file), path.join(stagedRuntime, file));
+  }
   if (process.platform !== 'win32') {
-    fs.chmodSync(runnerDest, 0o755);
+    fs.chmodSync(path.join(stagedScripts, 'codex-runner.js'), 0o755);
   }
 
-  // 2. Process each skill: render SKILL.md, copy references/
-  const escapedRunnerPath = escapeForDoubleQuotedShell(runnerPath);
-  const escapedSkillsRoot = escapeForDoubleQuotedShell(skillsRoot);
+  console.log('Installing MCP server dependencies ...');
+  const npmCi = run('npm', ['ci', '--omit=dev', '--no-audit', '--no-fund'], { cwd: stagedRuntime, timeout: 300_000 });
+  const mcpReady = npmCi.ok;
+  if (!mcpReady) {
+    console.warn('⚠️  Warning: npm ci failed; the MCP server will not be registered. The skills still work through the runner CLI.');
+    console.warn(`   ${npmCi.output.split('\n').slice(-3).join('\n   ')}`);
+  }
 
+  // 2. Skills for both clients. Codex copies use the shared runtime under ~/.claude/skills.
+  const renderOpts = {
+    runnerPath: escapeForDoubleQuotedShell(runnerPath),
+    skillsDir: escapeForDoubleQuotedShell(claudeSkillsRoot),
+  };
   for (const skill of SKILLS) {
     const skillSrcDir = path.join(skillPackDir, 'skills', skill);
-    const skillDestDir = path.join(stagingDir, skill);
-    fs.mkdirSync(skillDestDir, { recursive: true });
-
-    if (PLAIN_SKILLS.includes(skill)) {
-      const rendered = renderSkillTemplate(skillPackDir, skill, { client: 'claude' });
+    const isRunnerSkill = RUNNER_SKILLS.includes(skill);
+    for (const [target, client] of [[claudeTarget, 'claude'], [agentsTarget, 'codex']]) {
+      const skillDestDir = path.join(target.staging, skill);
+      fs.mkdirSync(skillDestDir, { recursive: true });
+      const rendered = renderSkillTemplate(skillPackDir, skill, isRunnerSkill ? renderOpts : { client });
       fs.writeFileSync(path.join(skillDestDir, 'SKILL.md'), rendered, 'utf8');
-      continue;
     }
-    // Inline the shared protocol and inject runner path and skills dir
-    const rendered = renderSkillTemplate(skillPackDir, skill, {
-      runnerPath: escapedRunnerPath,
-      skillsDir: escapedSkillsRoot,
-    });
-    fs.writeFileSync(path.join(skillDestDir, 'SKILL.md'), rendered, 'utf8');
-
-    // Copy references/ (prompt templates and output formats the runner renders)
-    const refsSrc = path.join(skillSrcDir, 'references');
-    if (!fs.existsSync(refsSrc)) {
-      throw new Error(`Missing references/ directory for ${skill}`);
+    if (isRunnerSkill) {
+      // Prompt templates and output formats the runner renders (read from ~/.claude/skills only)
+      const refsSrc = path.join(skillSrcDir, 'references');
+      if (!fs.existsSync(refsSrc)) throw new Error(`Missing references/ directory for ${skill}`);
+      copyDirSync(refsSrc, path.join(claudeTarget.staging, skill, 'references'));
     }
-    copyDirSync(refsSrc, path.join(skillDestDir, 'references'));
+    // Codex UI metadata
+    const agentsMeta = path.join(skillSrcDir, 'agents');
+    if (fs.existsSync(agentsMeta)) copyDirSync(agentsMeta, path.join(agentsTarget.staging, skill, 'agents'));
   }
 
   // 3. Verify runner works
   console.log('Verifying codex-runner.js ...');
-  const runnerTestPath = path.join(stagingDir, 'codex-review', 'scripts', 'codex-runner.js');
-  const versionOutput = execFileSync(process.execPath, [runnerTestPath, 'version'], {
+  const versionOutput = execFileSync(process.execPath, [path.join(stagedScripts, 'codex-runner.js'), 'version'], {
     encoding: 'utf8',
     timeout: 10_000,
   }).trim();
   console.log(`  codex-runner.js version: ${versionOutput}`);
 
-  // Check Codex CLI availability (warning only)
-  try {
-    const whichCmd = process.platform === 'win32' ? 'where' : 'which';
-    execFileSync(whichCmd, ['codex'], { encoding: 'utf8', timeout: 5000 });
-  } catch {
+  if (!commandExists('codex')) {
     console.warn('');
     console.warn('⚠️  Warning: codex CLI not found in PATH.');
     console.warn('   Skills require the Codex CLI to run.');
     console.warn('   Install: npm install -g @openai/codex');
   }
 
-  // 4. Atomic swap per directory: backup old → move staging → cleanup
-  fs.mkdirSync(skillsRoot, { recursive: true });
+  // 4. Atomic swap per directory: backup old → move staging → cleanup. Any failure rolls back every root.
   const backups = [];    // dirs that had a previous install → backed up
   const swapped = [];    // dirs successfully moved from staging → target
   try {
-    for (const dir of INSTALL_DIRS) {
-      const target = path.join(skillsRoot, dir);
-      const staged = path.join(stagingDir, dir);
-      if (fs.existsSync(target)) {
-        const backup = path.join(skillsRoot, `.${dir}-backup-${uid}`);
-        fs.renameSync(target, backup);
-        backups.push({ dir, target, backup });
+    for (const t of targets) {
+      for (const dir of t.dirs) {
+        const target = path.join(t.root, dir);
+        if (fs.existsSync(target)) {
+          const backup = path.join(t.root, `.${dir}-backup-${uid}`);
+          fs.renameSync(target, backup);
+          backups.push({ dir, target, backup });
+        }
+        fs.renameSync(path.join(t.staging, dir), target);
+        swapped.push({ dir, target });
       }
-      fs.renameSync(staged, target);
-      swapped.push({ dir, target });
     }
   } catch (err) {
-    // Swap failed → full rollback: remove new targets, restore backups
     const rollbackErrors = [];
     for (const { dir, target } of swapped) {
       try { fs.rmSync(target, { recursive: true, force: true }); } catch (e) {
@@ -180,7 +254,7 @@ try {
     throw new Error(`Installation failed: ${err.message}`);
   }
 
-  // Cleanup backups and empty staging dir (non-critical — install already succeeded)
+  // Cleanup (non-critical — install already succeeded)
   for (const { backup } of backups) {
     try {
       fs.rmSync(backup, { recursive: true, force: true });
@@ -188,42 +262,71 @@ try {
       console.warn(`Warning: could not remove backup at ${backup}`);
     }
   }
-  // Remove skills that are no longer part of the pack
-  for (const dir of CLEANUP_DIRS) {
-    const target = path.join(skillsRoot, dir);
-    if (fs.existsSync(target)) {
-      try {
-        fs.rmSync(target, { recursive: true, force: true });
-      } catch {
-        console.warn(`Warning: could not remove old skill at ${target}`);
+  // Remove skills no longer in the pack, and this pack's copies in Codex's deprecated skills root
+  const stale = [
+    ...[claudeSkillsRoot, agentsSkillsRoot].flatMap(root => REMOVED_SKILLS.map(name => ({ root, name }))),
+    ...['codex-review', ...SKILLS, ...REMOVED_SKILLS].map(name => ({ root: legacyCodexSkillsRoot, name })),
+  ];
+  for (const { root, name } of stale) {
+    const dir = path.join(root, name);
+    if (!fs.existsSync(dir)) continue;
+    if (!isPackInstall(dir, name)) {
+      console.warn(`Warning: left ${dir} in place; it does not look like a codex-review install`);
+      continue;
+    }
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+    } catch {
+      console.warn(`Warning: could not remove old skill at ${dir}`);
+    }
+  }
+  for (const t of targets) {
+    try { fs.rmSync(t.staging, { recursive: true, force: true }); } catch { /* already gone */ }
+  }
+
+  // 5. Register the MCP server with both clients (idempotent: remove then add for Claude; Codex overwrites)
+  const registered = [];
+  if (mcpReady) {
+    const serverCmd = ['--', stableNodePath(), mcpServerPath];
+    if (commandExists('claude')) {
+      run('claude', ['mcp', 'remove', '-s', 'user', MCP_NAME]);
+      const r = run('claude', ['mcp', 'add', '-s', 'user', MCP_NAME, '-e', `REVIEW_WAIT_DEFAULT_S=${WAIT_DEFAULT_S.claude}`, ...serverCmd]);
+      if (r.ok) registered.push('Claude Code');
+      else console.warn(`Warning: could not register the MCP server with Claude Code: ${r.output}`);
+    }
+    if (commandExists('codex')) {
+      fs.mkdirSync(codexHome, { recursive: true });
+      const r = run('codex', ['mcp', 'add', MCP_NAME, '--env', `REVIEW_WAIT_DEFAULT_S=${WAIT_DEFAULT_S.codex}`, ...serverCmd]);
+      if (r.ok) {
+        approveCodexTools(path.join(codexHome, 'config.toml'));
+        registered.push('Codex');
+      } else {
+        console.warn(`Warning: could not register the MCP server with Codex: ${r.output}`);
       }
     }
   }
-  try {
-    fs.rmSync(stagingDir, { recursive: true, force: true });
-  } catch {
-    // staging dir may already be gone
-  }
 
-  // 5. Success message
+  // 6. Success message
   console.log('');
   console.log('codex-review skills installed successfully!');
-  console.log(`  Runner:  ${runnerDir}`);
-  console.log(`  Skills:  ${SKILLS.map(s => s.replace('codex-', '')).join(', ')}`);
+  console.log(`  Runtime:       ${runtimeDir}`);
+  console.log(`  Claude Code:   ${claudeSkillsRoot}`);
+  console.log(`  Codex:         ${agentsSkillsRoot}`);
+  console.log(`  MCP server:    ${registered.length ? `registered with ${registered.join(' and ')}` : 'not registered (runner CLI fallback)'}`);
   console.log('');
-  console.log('Skills available in Claude Code:');
-  console.log('  /loop-plan             — write a phased, code-grounded implementation plan');
-  console.log('  /loop-implement        — execute an approved loop plan phase by phase');
-  console.log('  /codex-plan-review     — debate plans before implementation');
-  console.log('  /codex-impl-review     — review uncommitted or branch changes');
-  console.log('  /codex-think-about     — peer reasoning/debate');
-  console.log('  /codex-commit-review   — review committed code before push');
-  console.log('  /codex-pr-review       — review PRs (branch diff + description)');
+  console.log('Skills (Claude Code: /name, Codex: $name):');
+  console.log('  loop-plan             — write a phased, code-grounded implementation plan');
+  console.log('  loop-implement        — execute an approved loop plan phase by phase');
+  console.log('  codex-plan-review     — debate plans before implementation');
+  console.log('  codex-impl-review     — review uncommitted or branch changes');
+  console.log('  codex-think-about     — peer reasoning/debate');
+  console.log('  codex-commit-review   — review committed code before push');
+  console.log('  codex-pr-review       — review PRs (branch diff + description)');
 
   // --auto: inject review guidance into global ~/.claude/CLAUDE.md
   if (autoMode) {
     try {
-      const claudeDir = path.join(os.homedir(), '.claude');
+      const claudeDir = path.join(home, '.claude');
       const claudeMdPath = path.join(claudeDir, 'CLAUDE.md');
       const START_MARKER = '<!-- codex-auto-review-start -->';
       const END_MARKER = '<!-- codex-auto-review-end -->';
@@ -298,8 +401,8 @@ try {
   }
 } catch (err) {
   // Cleanup staging on any error
-  if (fs.existsSync(stagingDir)) {
-    fs.rmSync(stagingDir, { recursive: true, force: true });
+  for (const t of targets) {
+    if (fs.existsSync(t.staging)) fs.rmSync(t.staging, { recursive: true, force: true });
   }
   console.error(err.message || err);
   process.exit(1);

@@ -1,6 +1,6 @@
 ---
 name: codex-impl-review
-description: Review uncommitted code changes or branch diff against the plan/target — verify correctness, catch unacceptable deviations and bugs (logic/security/memory/runtime). No new features or over-engineering beyond the plan. Claude applies valid fixes, rebuts invalid points, iterates until consensus or stalemate.
+description: Review uncommitted code changes or branch diff against the plan/target — verify correctness, catch unacceptable deviations and bugs (logic/security/memory/runtime). No new features or over-engineering beyond the plan. You apply valid fixes, rebut invalid points, and iterate until consensus or stalemate.
 ---
 
 # Codex Implementation Review
@@ -28,5 +28,5 @@ APPROVE: done. Stalemate: present the deadlocked issues and ask the user. Report
 
 ## Rules
 - If in plan mode, exit plan mode first; this skill edits code.
-- Codex reviews only and never edits files. Every accepted issue becomes a concrete code change.
+- The Codex reviewer only reviews and never edits files; you make the changes. Every accepted issue becomes a concrete code change.
 - Never hide review-originated scope expansion inside a bug fix, test adjustment, helper refactor, dependency change, or rebuttal.

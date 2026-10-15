@@ -1,7 +1,15 @@
 {
   "name": "codex-review",
-  "version": "7.0.0",
-  "runner": "scripts/codex-runner.js",
+  "version": "8.0.0",
+  "runtime": {
+    "runner": "scripts/codex-runner.js",
+    "mcp_server": "scripts/mcp-server.js",
+    "dependencies": "package-lock.json"
+  },
+  "targets": {
+    "claude": "~/.claude/skills",
+    "codex": "~/.agents/skills"
+  },
   "skills": [
     "codex-plan-review",
     "codex-impl-review",

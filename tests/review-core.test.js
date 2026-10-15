@@ -152,6 +152,12 @@ test("parseReviewInput: front-matter scalars and multi-line sections", () => {
   assert.equal(v.DIFF_CONTEXT, "+## NOT_A_KEY\n## Not upper\nend");
 });
 
+test("parseReviewInput: scalar lines before the first section count without --- fences", () => {
+  const names = new Set(["PLAN_PATH", "BASE_BRANCH", "USER_REQUEST"]);
+  const v = parseReviewInput("PLAN_PATH: /tmp/p.md\nBASE_BRANCH: main\nNOTE: ignored\n\n## USER_REQUEST\nDo X\nBASE_BRANCH: stays text\n", names);
+  assert.deepEqual(v, { PLAN_PATH: "/tmp/p.md", BASE_BRANCH: "main", USER_REQUEST: "Do X\nBASE_BRANCH: stays text" });
+});
+
 test("parseReviewInput: CRLF input parses like LF", () => {
   const names = new Set(["USER_REQUEST", "PLAN_PATH"]);
   const v = parseReviewInput("---\r\nPLAN_PATH: /tmp/plan.md\r\n---\r\n## USER_REQUEST\r\nReview this plan\r\nline 2\r\n", names);

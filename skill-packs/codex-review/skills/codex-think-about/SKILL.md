@@ -1,12 +1,12 @@
 ---
 name: codex-think-about
-description: Peer debate between Claude Code and Codex on any technical question. Both think independently, challenge each other, converge to consensus or explicit disagreement.
+description: Peer debate with Codex on any technical question. Both think independently, challenge each other, converge to consensus or explicit disagreement.
 ---
 
 # Codex Think About
 
 ## Purpose
-Peer reasoning, not code review: Claude and Codex analyze a technical question independently, challenge each other, and converge to consensus or an explicit disagreement.
+Peer reasoning, not code review: you and Codex analyze a technical question independently, challenge each other, and converge to consensus or an explicit disagreement.
 
 ## When to Use
 Before implementing: architecture choices, technology comparisons, tradeoffs.
@@ -28,13 +28,13 @@ Show the rewrite in the user's language as `Sharpened question: "…"` plus `Inf
 
 {{PROTOCOL_VARIANT}}
 
-For this skill: your analysis may use web search and documentation tools. Compare with Codex's `review.insights`, `considerations`, `recommendations` and `sources` (fallback `review.raw_markdown`), classifying genuine agreement, genuine disagreement, Claude-only and Codex-only insights, and same direction with different depth; cross-check sources. **Exit rule:** consensus once no significant disagreement remains; stalemate when the same disagreements repeat for two rounds.
+For this skill: your analysis may use web search and documentation tools. Compare with Codex's `review.insights`, `considerations`, `recommendations` and `sources` (fallback `review.raw_markdown`), classifying genuine agreement, genuine disagreement, insights only you or only Codex raised, and same direction with different depth; cross-check sources. **Exit rule:** consensus once no significant disagreement remains; stalemate when the same disagreements repeat for two rounds.
 
 **File modification guard.** Snapshot file contents before and after each round. In git: `GIT_INDEX_FILE="$(mktemp -u)" sh -c 'git add -A && git write-tree'` hashes tracked and untracked files without touching the real index, and skips ignored paths such as the runner's `.codex-review/`; compare two snapshots with `git diff --name-status <before> <after>`. Outside git: `find` + `shasum` of the files. If Codex added, deleted or modified anything, stop immediately: list every changed file, tell the user Codex broke the no-modification rule, do not revert, call `review_end` without an outcome, and wait for the user.
 
 ## Completion
-Report consensus points, remaining disagreements (point | Claude | Codex), recommendations, consolidated sources, open questions, and confidence. On stalemate, recommend which side to favor and ask the user.
+Report consensus points, remaining disagreements (point | you | Codex), recommendations, consolidated sources, open questions, and confidence. On stalemate, recommend which side to favor and ask the user.
 
 ## Rules
-- Claude and Codex are analytical peers; the user's operational decisions control the debate.
+- You and Codex are analytical peers; the user's operational decisions control the debate.
 - Codex must not modify project files and must cite sources for web claims. Separate researched facts (with sources) from opinions.

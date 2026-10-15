@@ -897,3 +897,34 @@ Checkpoint cuối: `/codex-impl-review` trên diff cộng dồn từ `51d4351`.
     - low: renderer chỉ bắt placeholder dạng `{{A_Z}}`. Sửa: còn bất kỳ `{{` nào cũng báo lỗi.
   - Ghi chú cho Phase 7: theo docs Codex hiện hành (`codex-rs/ext/skills/src/host_roots.rs`), `$CODEX_HOME/skills` là chỗ deprecated, giữ để tương thích ngược; chỗ chuẩn cho skill của người dùng là `~/.agents/skills`.
 - 2026-10-15: user nói rõ `~/projects/codex_skill` là nguồn dev; các chỗ khác (bản cài trong HOME) được sửa nếu đúng, không cần cứng nhắc.
+- 2026-10-15: user quyết sandbox của reviewer. Giữ `danger-full-access` cho think-about để chạy được `curl`, `npm view`, `git fetch`; các skill review khác cũng mở như vậy khi cần nghiên cứu trên web. Hiện thực ở `76b84d3`: cả 5 skill chạy reviewer với `danger-full-access`; prompt cấm sửa, stage hay commit file của dự án, file nháp đặt trong `mktemp -d`.
+  - Bằng chứng: web search của Codex chạy được cả trong `read-only` (6/147 phiên plan/impl thật có dùng); sandbox chỉ chặn lệnh shell. Ở checkpoint Phase 4–6, reviewer `read-only` không tự chạy được test (`EPERM` khi tạo thư mục tạm).
+  - Lỗi lộ ra nhờ test mới: `resume` không truyền sandbox, vì `codex exec resume` không có `--sandbox`. Rollout thật `01a05602` cho thấy vòng 1 chạy `danger-full-access` nhưng vòng 2–3 chạy `workspace-write` không có mạng. Sửa: truyền `-c sandbox_mode="<sandbox đã lưu>"`. Kiểm trên rollout thật của plan-review 2 vòng (`01a13d84`): cả 2 vòng đều `danger-full-access`.
+- 2026-10-15: user quyết không sao lưu bản cũ trong `~/.codex/skills`; gỡ thẳng.
+- 2026-10-15 Phase 7 xong. Global Gate 1: ba test cũ pass, `node --test tests/` 76/76. Global Gate 2: install-check ok.
+  - Lệch so với plan:
+    - Đích Codex là `~/.agents/skills`, không phải `~/.codex/skills`. Docs Codex (`codex-rs/ext/skills/src/host_roots.rs`) ghi `$CODEX_HOME/skills` là deprecated; session Codex thật trên máy (0.162.1) đã đọc skill từ `~/.agents/skills`.
+    - Installer gỡ bản cài của pack trong `$CODEX_HOME/skills`, nhận ra bằng `name:` trong frontmatter hoặc `scripts/codex-runner.js`; thư mục lạ trùng tên được để nguyên.
+    - Runtime dùng chung một bản ở `~/.claude/skills/codex-review`; bản Codex chỉ có SKILL.md trỏ vào đó.
+    - Parser: plan ghi "bỏ nhánh `codebase-validation`", nhưng prompt vòng 2+ của commit-review và pr-review vẫn dùng block `RESPONSE-{N}`. Bỏ CROSS và nhận diện security (CWE/OWASP); giữ RESPONSE dưới tên format `response`. So parser cũ và mới trên 928 output thật: 0 output đổi kết quả.
+  - Sửa thêm:
+    - MCP đăng ký bằng `/opt/homebrew/bin/node` khi nó cùng file với node đang chạy, vì đường dẫn Cellar có version sẽ mất khi nâng cấp.
+    - Codex: ghi `approval_mode = "approve"` cho 4 tool. Chạy thật cho thấy `codex exec` (approval policy `never`) từ chối lệnh gọi MCP chưa duyệt. Khoá theo từng tool lấy từ source Codex (`codex-mcp/src/mcp/mod.rs`) và đã spike. `codex mcp add` xoá các bảng này khi đăng ký lại, nên installer ghi lại sau mỗi lần.
+    - Input: dòng `NAME: value` trước section đầu tiên được nhận dù không có `---`. Trước đây các dòng này bị bỏ qua im lặng: `BASE_BRANCH` ở checkpoint Phase 4–6 đã bị mất theo cách đó.
+    - SKILL.md của review skill viết trung tính ("you" và "the Codex reviewer") để Codex điều phối không hiểu nhầm là chính mình không được sửa code. Protocol thêm ý: mọi verb của một phiên chạy cùng ngữ cảnh sandbox.
+  - AC-7.1: Global Gate 2 exit 0.
+  - AC-7.2: `tests/installer.test.js` cài 2 lần lên bản cũ giả lập (có flavor-text, protocol.md, skill đã gỡ, bản Codex cũ, skill lạ trùng tên), rồi chạy install-check: không trùng đăng ký MCP, bảng duyệt tool đúng 1 lần. Test đỏ với installer cũ.
+  - AC-7.3, chạy thật từ bản cài tạm (repo demo nhỏ, effort low):
+
+    | Đường chạy | Skill | Kết quả |
+    |---|---|---|
+    | CLI | think-about | `next=cross_check`, 2 insight, có `analysis_prompt` |
+    | CLI | plan-review | Vòng 1 REVISE (3 issue), vòng 2 APPROVE (`next=done`) |
+    | CLI | pr-review | `cross_check`, 3 finding, CONTINUE |
+    | CLI | commit-review (last) | `cross_check`, 3 finding, CONTINUE |
+    | MCP, Claude điều phối (`claude -p --strict-mcp-config`) | impl-review | REVISE (1 issue), `review_end` |
+    | MCP, Codex điều phối (`codex exec`, `-c mcp_servers...`) | impl-review | REVISE (5 issue), begin/wait/end đều completed |
+
+    Repo demo sau các vòng không có file lạ.
+  - AC-7.4: `grep -c 'Node.js stdlib only\|40–70' CLAUDE.md` = 0.
+  - Kiểm "skill tải được": install-check kiểm frontmatter `name`/`description` của 14 SKILL.md, thay cho một vòng loop-plan thật.

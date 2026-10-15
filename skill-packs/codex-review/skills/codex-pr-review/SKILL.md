@@ -1,6 +1,6 @@
 ---
 name: codex-pr-review
-description: Peer debate between Claude Code and Codex on PR quality and merge readiness. No code modifications.
+description: Peer debate with Codex on PR quality and merge readiness. No code modifications.
 ---
 
 # Codex PR Review
@@ -28,4 +28,4 @@ Report rounds, verdict, findings, agreed/disagreed counts, the FINDING↔ISSUE m
 
 ## Rules
 - Never edit code or create commits.
-- Claude and Codex are equal peers; Codex reviews only and never edits.
+- You and the Codex reviewer are equal peers; the reviewer only reviews and never edits.

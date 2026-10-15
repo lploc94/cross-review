@@ -236,7 +236,7 @@ function parseThinkAboutMarkdown(md) {
 }
 
 /**
- * End of an ISSUE/CROSS/RESPONSE block: the next heading of level 1-3 or a verdict
+ * End of an ISSUE/RESPONSE block: the next heading of level 1-3 or a verdict
  * marker line, ignoring lines inside fenced code blocks (evidence may quote markdown).
  */
 function findBlockEnd(md, start) {
@@ -265,31 +265,21 @@ export function parseOutputMarkdown(md, skillHint) {
 
   // Step 1: Detect format variant
   const hasResponse = /^### RESPONSE-\d+:/m.test(md);
-  const hasCross = /^### CROSS-\d+:/m.test(md);
   const hasIssue = /^### ISSUE-\d+:/m.test(md);
-  const hasCWE = /\bCWE:/m.test(md) || /\bCWE-\d+/m.test(md);
-  const hasOWASP = /\bOWASP:/m.test(md) || /\bA\d{2}:2021/m.test(md);
-  const hasAttackVector = /\bAttack Vector:/m.test(md);
   const hasOverallAssessment = /^### Overall Assessment/m.test(md);
   const hasKeyInsights = /^### Key Insight/m.test(md);
   const hasConsiderations = /^### Considerations/m.test(md);
 
   let format;
-  if (hasResponse && !hasIssue && !hasCross) {
-    format = "codebase-validation";
-  } else if (hasCross) {
-    format = "codebase-cross";
-  } else if (hasIssue && (hasCWE || hasOWASP || hasAttackVector)) {
-    format = "security-review";
-  } else if (hasIssue && hasOverallAssessment) {
+  if (hasIssue && hasOverallAssessment) {
     format = "commit-pr-review";
   } else if (hasIssue) {
     format = "review";
   } else if (hasKeyInsights || hasConsiderations) {
     return parseThinkAboutMarkdown(md);
   } else if (hasResponse) {
-    // Standalone RESPONSE blocks (round 2+ security review)
-    format = "codebase-validation";
+    // Round 2+ of commit and PR reviews answers earlier findings with RESPONSE blocks
+    format = "response";
   } else {
     // Verdict-only output (e.g. APPROVE with zero issues) is a review with no blocks
     const verdict = parseVerdict(md);
@@ -300,7 +290,7 @@ export function parseOutputMarkdown(md, skillHint) {
   }
 
   // Step 2: Extract blocks
-  const blockRegex = /^### (ISSUE|CROSS|RESPONSE)-(\d+):\s*(.+)$/gm;
+  const blockRegex = /^### (ISSUE|RESPONSE)-(\d+):\s*(.+)$/gm;
   const blockPositions = [];
   let m;
 
@@ -314,7 +304,7 @@ export function parseOutputMarkdown(md, skillHint) {
     });
   }
 
-  // Find end of each block (next ### heading that is ISSUE/CROSS/RESPONSE or VERDICT or Overall Assessment)
+  // Find end of each block (next ### heading that is ISSUE/RESPONSE or VERDICT or Overall Assessment)
   const blocks = [];
   for (let i = 0; i < blockPositions.length; i++) {
     const start = blockPositions[i].startContent;
@@ -333,10 +323,8 @@ export function parseOutputMarkdown(md, skillHint) {
     // Common fields for all block-based formats
     const fieldMapping = {
       "review": ["category", "severity", "location", "problem", "evidence", "why it matters", "suggested fix", "plan section", "file"],
-      "security-review": ["category", "severity", "location", "problem", "evidence", "suggested fix", "cwe", "owasp", "attack vector", "confidence", "file"],
       "commit-pr-review": ["category", "severity", "problem", "evidence", "suggested fix", "commit", "why it matters", "file"],
-      "codebase-cross": ["category", "severity", "problem", "evidence", "suggested fix", "modules affected"],
-      "codebase-validation": ["action", "reason", "revised finding", "counter-evidence", "maintained assessment"],
+      "response": ["action", "reason", "revised finding", "counter-evidence", "maintained assessment"],
     };
 
     const expectedFields = fieldMapping[format] || [];

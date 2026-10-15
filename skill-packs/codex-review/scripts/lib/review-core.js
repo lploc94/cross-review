@@ -176,6 +176,10 @@ export function parseReviewInput(text, knownNames) {
       buffer = [];
     } else if (current) {
       buffer.push(line);
+    } else {
+      // `NAME: value` lines before the first section, written without --- fences
+      const scalar = line.match(/^([A-Z][A-Z_0-9]+)[ \t]*:[ \t]*(.*)$/);
+      if (scalar && knownNames.has(scalar[1])) values[scalar[1]] = scalar[2].trim();
     }
   }
   flush();

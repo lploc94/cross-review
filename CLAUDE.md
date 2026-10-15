@@ -1,158 +1,126 @@
 # CLAUDE.md
 
-This repository provides a single-command installer (`npx github:lploc94/codex_skill`) that installs the `codex-review` skill pack into `~/.claude/skills/codex-review/`.
+This repository provides a single-command installer (`npx github:lploc94/codex_skill`) that installs the `codex-review` skill pack for Claude Code (`~/.claude/skills/`) and Codex (`~/.agents/skills/`), and registers its MCP server with both.
 
 ## Project Overview
 
-`codex-review` provides seven skills: five powered by OpenAI Codex CLI and two plain planning/execution skills:
-- `/loop-plan` — write a phased, code-grounded implementation plan (`loop-plan/v1`)
-- `/loop-implement` — execute an approved loop plan phase by phase with TDD, reviews, and commits
-- `/codex-plan-review` — debate plans before implementation
-- `/codex-impl-review` — review uncommitted or branch changes before commit/merge
-- `/codex-think-about` — peer reasoning/debate on technical topics
-- `/codex-commit-review` — review committed code quality before push (report + suggest)
-- `/codex-pr-review` — review PRs (branch diff, commit hygiene, description)
+`codex-review` provides seven skills: five powered by OpenAI Codex CLI and two plain planning/execution skills (Claude Code: `/name`, Codex: `$name`):
+- `loop-plan` — write a phased, code-grounded implementation plan (`loop-plan/v1`)
+- `loop-implement` — execute an approved loop plan phase by phase with TDD, checkpoint reviews, and commits
+- `codex-plan-review` — debate plans before implementation
+- `codex-impl-review` — review uncommitted or branch changes before commit/merge
+- `codex-think-about` — peer reasoning/debate on technical topics
+- `codex-commit-review` — review committed code quality before push (report + suggest)
+- `codex-pr-review` — review PRs (branch diff, commit hygiene, description)
 
-`/codex-parallel-review`, `/codex-codebase-review`, and `/codex-security-review` were removed; the installer deletes previously installed copies.
-
+`codex-parallel-review`, `codex-codebase-review`, and `codex-security-review` were removed; the installer deletes previously installed copies.
 
 ## Distribution Model
 
 - Single command install: `npx github:lploc94/codex_skill`
-- Installs to: `~/.claude/skills/codex-review/`
-- No global npm install, no CLI left behind, no node_modules on user machine
+- Installs to `~/.claude/skills/` (skills + shared runtime in `codex-review/`) and `~/.agents/skills/` (Codex copies)
+- Runtime dependencies (`@modelcontextprotocol/sdk`, `zod`) are installed with `npm ci --omit=dev` from the committed lock file into `~/.claude/skills/codex-review/node_modules`
+- Removes this pack's old copies from Codex's deprecated `$CODEX_HOME/skills`; foreign skills there are left in place
 
 ## Requirements
 
-- Node.js >= 22
-- Claude Code CLI
-- OpenAI Codex CLI in PATH (`codex`)
-- OpenAI API key configured for Codex
+- Node.js >= 22 and npm
+- Claude Code CLI and/or Codex CLI (`codex` in PATH; the reviewer always runs through Codex)
 
 ## Development Commands
 
 ```bash
-node ./bin/codex-skill.js                                          # run installer locally
-node ./bin/codex-skill.js --auto                                   # install + inject guidance into ~/.claude/CLAUDE.md
-node skill-packs/codex-review/scripts/codex-runner.js version      # runner version
+npm ci --prefix skill-packs/codex-review                          # MCP SDK for tests and the MCP server
+node test-default-timeout.js && node test-stall-recovery.js && node test-timeout-resume.js && node --test tests/
+H=$(mktemp -d) && HOME="$H" CODEX_HOME="$H/.codex" node bin/codex-skill.js && node tests/install-check.mjs "$H"
+node skill-packs/codex-review/scripts/codex-runner.js version     # runner version
 ```
 
-There is no build system, test suite, or linter. The project is JavaScript + Markdown + JSON.
+Never test the installer against the real HOME; use a temporary `HOME` and `CODEX_HOME`.
 
 ## Architecture
 
 ### Installer
 
-`bin/codex-skill.js` — single file, Node.js stdlib only, no dependencies:
-1. Parse CLI arguments (`--auto`; `-full` is accepted but only prints a notice)
-2. Runtime guard: Node.js >= 22
-3. Build staging directory alongside install target
-4. Copy `codex-runner.js` from `skill-packs/`
-5. Runner skills (`codex-*`): read SKILL.md templates (contain `{{RUNNER_PATH}}`), inject absolute path, write to staging, copy `references/` and `shared/` files. Plain skills (`loop-plan`, `loop-implement`): copy SKILL.md as-is
-6. Verify runner by spawning `node codex-runner.js version`
-7. Atomic swap: backup old install → rename staging → cleanup; delete installed copies of removed skills
-8. If `--auto`: inject review guidance into `~/.claude/CLAUDE.md` (idempotent, append-only)
+`bin/codex-skill.js` with `bin/lib/render-skill.js`:
+1. Runtime guard: Node.js >= 22; `--auto` injects guidance into `~/.claude/CLAUDE.md`; `-full` only prints a notice
+2. Stage the shared runtime (runner, `lib/`, `mcp-server.js`, `package.json`, lock) and run `npm ci --omit=dev` in it
+3. Render every SKILL.md template. Review skills get `{{PROTOCOL_CORE}}`, `{{PROTOCOL_VARIANT}}` (from `shared/protocol/`) and `{{RUNNER_PATH}}`; loop skills get `{{CLIENT_*}}` values per client. Any leftover `{{` fails the install
+4. Verify the runner (`node codex-runner.js version`)
+5. Atomic swap in both skill roots with full rollback; delete removed skills and this pack's copies in `$CODEX_HOME/skills`
+6. Register MCP server `codex-review` (Claude: `claude mcp remove` + `add -s user`, `REVIEW_WAIT_DEFAULT_S=300`; Codex: `codex mcp add`, `REVIEW_WAIT_DEFAULT_S=50`). Skipped with a warning when `npm ci` failed
 
-### Skill Pack Layout (templates + runner)
+### Skill Pack Layout
 
 ```text
 skill-packs/codex-review/
 ├── manifest.json
+├── package.json, package-lock.json   ← runtime dependencies (MCP server only)
+├── shared/protocol/                  ← core.md, apply-rebut.md, cross-analysis.md (inlined at install)
 ├── scripts/
-│   └── codex-runner.js          ← single shared Node.js runner
+│   ├── codex-runner.js               ← runner CLI (stdlib only)
+│   ├── mcp-server.js                 ← MCP stdio server: review_begin/wait/reply/end
+│   └── lib/                          ← parse.js, review-core.js (the four verbs)
 └── skills/
-    ├── codex-plan-review/
-    │   ├── SKILL.md             ← template with {{RUNNER_PATH}}
-    │   └── references/
-    ├── codex-impl-review/
-    │   ├── SKILL.md
-    │   └── references/
-    ├── codex-think-about/
-    │   ├── SKILL.md
-    │   └── references/
-    ├── codex-commit-review/
-    │   ├── SKILL.md
-    │   └── references/
-    ├── codex-pr-review/
-    │   ├── SKILL.md
-    │   └── references/
-    ├── loop-plan/
-    │   └── SKILL.md             ← plain skill, no runner, copied as-is
-    └── loop-implement/
-        └── SKILL.md
+    ├── codex-*-review/, codex-think-about/
+    │   ├── SKILL.md                  ← template
+    │   └── references/               ← prompts.md, output-format.md, analysis templates
+    └── loop-plan/, loop-implement/
+        ├── SKILL.md                  ← two-client template
+        └── agents/openai.yaml        ← Codex UI metadata
 ```
 
-### Installed Output (on user machine)
+### Installed Output
 
 ```text
 ~/.claude/skills/
-├── codex-review/
-│   └── scripts/
-│       └── codex-runner.js              ← shared runner
-├── codex-plan-review/
-│   ├── SKILL.md                         ← RUNNER="/abs/path/codex-runner.js" hardcoded
-│   └── references/
-├── codex-impl-review/
-│   ├── SKILL.md
-│   └── references/
-├── codex-think-about/
-│   ├── SKILL.md
-│   └── references/
-├── codex-commit-review/
-│   ├── SKILL.md
-│   └── references/
-├── codex-pr-review/
-│   ├── SKILL.md
-│   └── references/
-├── loop-plan/
-│   └── SKILL.md
-└── loop-implement/
-    └── SKILL.md
+├── codex-review/        ← runtime: scripts/, node_modules/, package.json (shared by both clients)
+├── codex-*/             ← SKILL.md (rendered) + references/
+└── loop-plan/, loop-implement/
+~/.agents/skills/
+├── codex-*/             ← SKILL.md only; points at the shared runtime
+└── loop-plan/, loop-implement/   ← SKILL.md + agents/openai.yaml
 ```
 
 ### Core Execution Flow
 
-1. **Skill invocation** (`/codex-plan-review`, `/codex-impl-review`, `/codex-think-about`, `/codex-commit-review`, or `/codex-pr-review`) follows SKILL.md step-by-step. `/loop-plan` and `/loop-implement` do not use the runner
-2. **Runner path**: SKILL.md contains hardcoded absolute path to `codex-runner.js`
-3. **Prompt rendering**: SKILL.md calls `render --skill X --template Y --skills-dir $SKILLS_DIR` with JSON vars on stdin → receives rendered prompt on stdout
-4. **Session lifecycle**: `init` → `start` (stdin prompt) → `poll` (JSON response) → `resume` (stdin prompt) → `poll` → ... → `finalize` → `stop` for a normal terminal outcome; a qualifying runner-deadline timeout preserves the same session for later `stop` → `resume`, while all other timeout/error paths use `stop` only and preserve the unfinalized session
-5. **codex-runner.js** spawns `codex exec --json --sandbox read-only` as a detached process, polls JSONL output, parses markdown into structured JSON
-6. **Review debate loop** (plan-review, impl-review, commit-review, pr-review): Claude reads `poll` JSON → `review.blocks[].id` ISSUE-{N} → fixes/rebuts → `render` rebuttal → `resume` → repeats until `APPROVE` or stalemate
-7. **Peer debate loop** (think-about): Claude and Codex think independently → compare JSON responses → exchange perspectives → repeat until consensus or stalemate → present to user
-8. **All state managed by runner**: Claude NEVER writes directly to session dir. `rounds.json`, `meta.json`, `prompt.txt`, JSONL archival all handled by runner commands.
+1. A review skill calls `review_begin` (MCP) or `codex-runner.js begin` (CLI fallback) with the skill, mode and a markdown input of placeholder values
+2. `begin` renders round 1 from `references/prompts.md`, starts `codex exec --json --sandbox danger-full-access` detached, and returns `session_dir` (peer skills also get `analysis_prompt`)
+3. `wait` polls until the round ends and returns `next`: `running`, `respond`, `cross_check`, `done`, `ask_user`, or `stopped`
+4. The orchestrator fixes/rebuts (`respond`, plan/impl) or compares its own analysis (`cross_check`, peer skills), then calls `reply`; the runner renders the right reply template and resumes the same Codex thread with the stored model, effort and sandbox
+5. `end` finalizes (`meta.json`) and stops. Session state lives in `.codex-review/sessions/<skill>-<yyyymmdd>-<NNN>/`; the runner writes `.codex-review/.gitignore` (`*`)
 
 ### Key Design Decisions
 
-- **Node.js runner**: `codex-runner.js` uses Node.js stdlib only — no Python/bash dependency
-- **Cross-platform**: Works on Windows, macOS, and Linux
-- **JSON-only output**: All commands return structured JSON (except `version`, `init`, `render`). No text protocol parsing needed.
-- **Built-in output parsers**: Runner parses Codex markdown into structured blocks (ISSUE, CROSS, RESPONSE, think-about format) with variant detection
-- **Prompt template engine**: `render` command reads `prompts.md`, resolves placeholders, auto-injects output format
-- **Prompt minimalism**: Prompts contain only file paths and context; Codex reads files/diffs itself
-- **Structured output**: Review skills use `ISSUE-{N}` format with `VERDICT` block; think-about uses Key Insights / Considerations / Recommendations
-- **Thread persistence**: `init` creates a session; `start` begins round 1; `resume` continues with auto thread_id lookup
-- **Review timeout**: The runner defaults to 18,000 seconds (5 hours) so long-running exhaustive reviews can finish while Codex is still making progress; callers may still pass `--timeout` for bounded tests or deliberately shorter runs
-- **Timeout recovery metadata**: A timeout is resumable only when poll JSON reports `timeout_reason: "runner_deadline"`, `recoverable: true`, a non-empty `thread_id`, and `progress_observed: true`; `turn.failed`, process/runner errors, missing or invalid state/thread context, `CODEX_NOT_FOUND`, and stalled results are stop-only
-- **ABSOLUTE USER AUTHORITY**: For review-operation decisions, the user's latest explicit instruction is final, binding, and absolute. It overrides default skill rules, the shared protocol, loop rules, and Codex findings/recommendations. Follow a clear user decision exactly; never resist, reinterpret, delay, or refuse it by citing a protocol or rule. Ask only when genuinely ambiguous. This does not override higher-priority system/developer instructions or authorize an unrequested product behavior, API, schema, persistence, or compatibility change
-- **Stalemate detection**: Stops if same points repeat for 2 consecutive rounds with no progress
-- **PID-reuse protection**: `verifyCodex()` and `verifyWatchdog()` check process cmdline before killing — prevents killing wrong process if OS reuses the PID
-- **Atomic install**: Uses staging dir + rename for safe install/update with rollback on failure
+- **One core, two shells**: `lib/review-core.js` implements `begin/wait/reply/end` on top of the low-level runner commands (called as a child process); the CLI verbs and the MCP server share it
+- **Runner is stdlib only**; only the MCP server needs the SDK
+- **Reviewer access**: review skills run Codex with `danger-full-access` so it can run tests, builds and network commands to verify claims; prompts forbid changing project files. The low-level `start` keeps its `read-only` default
+- **Self-contained SKILL.md**: protocol text is inlined at install; no `references/protocol.md`, no flavor text
+- **Built-in output parsers**: ISSUE, RESPONSE (commit/PR round 2+) and think-about formats; the verdict is parsed independently of the format, including verdict-only output
+- **Review timeout**: default 18,000 s (5 h); a timeout is resumable only when `poll` reports `timeout_reason: "runner_deadline"`, `recoverable: true`, a `thread_id`, and `progress_observed: true`
+- **ABSOLUTE USER AUTHORITY**: for review-operation decisions the user's latest explicit instruction is final. It does not authorize unrequested product, API, schema, persistence, or compatibility changes
+- **PID-reuse protection**: `verifyCodex()` and `verifyWatchdog()` check the process cmdline before killing
+- **Atomic install** with staging, rename and rollback
 
-### codex-runner.js Commands (v13)
+### codex-runner.js Commands (v14)
 
 | Command | Input | Output |
 |---------|-------|--------|
-| `version` | (none) | Plain text: `13` |
+| `begin --skill S [--mode M] --input <file\|-> [--working-dir D] [--model] [--effort] [--timeout] [--skills-dir]` | Markdown placeholder values | JSON: `{ session_dir, round, status, analysis_prompt? }` |
+| `wait <session_dir> [--max-wait <s>]` | (none) | JSON: poll result plus `next`, `next_reason` |
+| `reply <session_dir> --input <file\|-> [--model] [--effort]` | Markdown placeholder values | JSON: `{ status, session_dir, round, thread_id }` |
+| `end <session_dir> [--outcome consensus\|stalemate]` | (none) | JSON: `{ status: "ended", finalized, verdict }` |
+| `version` | (none) | Plain text: `14` |
 | `init --skill-name X --working-dir Y` | (none) | Plain text: `CODEX_SESSION:/path` |
-| `start <session_dir> [--model <name>] [--effort] [--timeout] [--sandbox]` | Prompt on stdin | JSON: `{ status, session_dir, round }` |
-| `resume <session_dir> [--model <name>] [--effort] [--timeout]` | Prompt on stdin | JSON: `{ status, session_dir, round, thread_id }` |
+| `start <session_dir> [--model] [--effort] [--timeout] [--sandbox]` | Prompt on stdin | JSON: `{ status, session_dir, round }` |
+| `resume <session_dir> [--model] [--effort] [--timeout]` | Prompt on stdin | JSON: `{ status, session_dir, round, thread_id }` |
 | `poll <session_dir>` | (none) | JSON: `{ status, round, elapsed_seconds, review, activities, recovery metadata when terminal }` |
 | `stop <session_dir>` | (none) | JSON: `{ status: "stopped", session_dir }` |
 | `finalize <session_dir>` | Override JSON on stdin | JSON: `{ status: "finalized", meta }` |
 | `status <session_dir>` | (none) | JSON: `{ status, session_id, rounds, ... }` |
 | `render --skill X --template Y --skills-dir Z` | Placeholder JSON on stdin | Plain text: rendered prompt |
 
-`--model <name>` forwards the exact model name to Codex CLI. Omit it to keep CLI default selection. The runner does not persist this override; pass it on every `resume`, including recovery, to explicitly keep the selected model.
+`start` and `resume --model` store the model in `state.json`; later rounds reuse the stored model, effort and sandbox.
 
 ### codex-runner.js Exit Codes
 
@@ -166,64 +134,31 @@ skill-packs/codex-review/
 
 ## Design Principles
 
-- Progressive disclosure: keep `SKILL.md` lean (~40–70 lines).
-- Move long prompts/protocol details into `references/`.
-- Single shared runner at skill-pack level, not duplicated per skill.
-- `skill-packs/` is the single source of truth for templates and runner.
+- `SKILL.md` is self-contained: everything the orchestrator must follow is in it after rendering; prompt templates the runner renders stay in `references/`.
+- Add a rule to a skill only with evidence that it changes behavior; process decisions the user made go in directly.
+- Single shared runtime at skill-pack level, used by both clients.
+- `skill-packs/` is the single source of truth for templates, runtime and prompts.
 
 ## Breaking Changes
 
-### v10: review.txt → review.md
-- **Output file renamed**: `review.txt` is no longer created. All markdown review output is now written to `review.md`.
-- **format="both" simplified**: Previously wrote `review.txt` + `review.json` + `review.sarif.json` + `review.md` (re-rendered from JSON). Now writes `review.md` (original markdown) + `review.json` + `review.sarif.json`. The re-rendered markdown is removed since `review.md` is the primary output.
-- **CI/CD impact**: Any scripts referencing `review.txt` must be updated to use `review.md`.
-- **Existing state directories**: Old runs in `.codex-review/runs/*/` may still contain `review.txt` from v9. These are not retroactively renamed.
-- **Historical docs**: SESSION_SUMMARY.md, PROGRESS_REPORT.md, FINAL_REPORT.md reference v9 behavior and are not updated.
-- See v11 — format options fully removed.
+### v14: Review verbs, MCP server, two clients
+- **New verbs** `begin`, `wait`, `reply`, `end` and MCP tools `review_begin/wait/reply/end`; skills no longer drive `init/render/start/poll/resume/finalize` themselves (the low-level commands are unchanged).
+- **Verdict parsing**: verdict-only output is parsed as `format: "review"` with no blocks; `finalize` uses only the last round's verdict and fails when it has none.
+- **Formats removed**: `codebase-cross` (CROSS blocks) and `security-review`; RESPONSE-only output is now `format: "response"` (was `codebase-validation`).
+- **Reviewer sandbox**: the verbs start and resume Codex with `danger-full-access`; `resume` now passes the stored sandbox (`-c sandbox_mode=...`).
+- **Installer**: installs Codex copies to `~/.agents/skills`, removes this pack's copies from `$CODEX_HOME/skills`, installs the MCP SDK and registers the MCP server with Claude Code and Codex. `shared/flavor-text.md`, `shared/protocol.md` and per-skill `references/protocol.md` are gone.
 
-### v11: Remove JSON/SARIF output formats
-- **`--format` flag removed**: Runner only produces markdown. `review.md` is the sole output.
-- **Files no longer generated**: `review.json`, `review.sarif.json`
-- **Test files deleted**: `test-converters.js`, `test-converters-comprehensive.js`, `test-integration.js`
-- **Schema doc deleted**: `docs/CANONICAL_JSON_SCHEMA.md`
-
-### v12: Unified session directories (runs/ → sessions/)
-- **New runner commands**: `init` (creates session dir), `resume` (round 2+ with auto thread_id).
-- **`start` changed**: Now takes session dir as positional arg (from `init`), no longer creates dir.
-- **`poll` enhanced**: Adds `SUMMARY:` line to stdout with activity summary. Claude no longer needs to parse stderr for reporting.
-- **Run directories removed**: `.codex-review/runs/` no longer created. All state lives in `.codex-review/sessions/{skill}-{yyyymmdd}-{NNN}/`.
-- **Session naming**: Human-readable `{skill}-{yyyymmdd}-{NNN}` (e.g., `codex-plan-review-20260321-001`).
-- **`stop` no longer deletes**: Session dir persists. All files retained for debugging.
-- **state.json**: `run_id` → `session_id`.
-- **New files**: `rounds.json` (round history), `meta.json` written to session dir.
-- **Backward compat**: `poll`/`stop` accept both old `runs/` and new `sessions/` paths. Legacy removed in v13.
-
-### v13: Runner-centric architecture (JSON-only, no backward compat)
-- **All commands output JSON** (except `version`, `init`, `render`): `start`, `resume`, `poll`, `stop`, `finalize`, `status` return structured JSON on stdout.
-- **Text protocol removed**: `POLL:status:elapsed:...` text format is gone. `poll` returns `{ status, round, elapsed_seconds, review, activities }` JSON.
-- **New commands**: `finalize` (writes `meta.json`), `status` (read-only query), `render` (prompt template engine).
-- **Runner manages all state**: Claude Code NEVER writes directly to session dir. All writes go through runner commands.
-- **Round tracking auto-managed**: Runner creates/updates `rounds.json` automatically in `start`, `resume`, `poll`, `stop`.
-- **Output parsing built-in**: Runner parses Codex markdown output into structured JSON (ISSUE blocks, VERDICT, etc.) — returned in `poll` response.
-- **Prompt template engine** (`render`): Runner reads `references/prompts.md`, resolves `{PLACEHOLDER}` from stdin JSON, auto-injects `{OUTPUT_FORMAT}` and `{CLAUDE_ANALYSIS_FORMAT}`.
-- **`init` creates subdirectories**: `prompts/` and `outputs/` created at init time for round-level archival.
-- **`start`/`resume` read prompt from stdin**: Prompt piped via stdin, runner writes `prompt.txt` + archives to `prompts/round-NNN.txt`.
-- **`resume` archives prior artifacts**: Previous `output.jsonl`, partial `review.md`, and the cached terminal result `final.txt` are copied into round-specific files under `outputs/` before the new round clears active artifacts.
-- **`finalize` replaces manual meta.json**: Aggregates timing from `rounds.json`, accepts verdict override via stdin JSON.
-- **`status` is read-only**: Reports session state without side effects.
-- **`stop` outputs JSON**: `{ status: "stopped", session_dir }` instead of silent exit.
-- **SKILL.md simplified**: ~40-60% less boilerplate. No file I/O instructions for session files. Workflow references updated to use JSON poll parsing.
-- **Installer updated**: Now injects `{{SKILLS_DIR}}` placeholder alongside `{{RUNNER_PATH}}` for `render --skills-dir`.
-- **No backward compat with v12**: Text protocol, `CODEX_STARTED:` output, manual `prompt.txt` writing, manual `rounds.json` management — all removed.
-- **manifest.json**: version `7.0.0` (major breaking)
+### v10–v13
+- v13: runner-centric architecture; JSON-only output; `finalize`, `status`, `render`; runner manages all session state; `manifest.json` 7.0.0.
+- v12: unified session directories `.codex-review/sessions/{skill}-{yyyymmdd}-{NNN}/`; `init` and `resume`.
+- v11: `--format` removed; `review.md` is the only output.
+- v10: `review.txt` renamed to `review.md`.
 
 ## Verification
 
-1. `node bin/codex-skill.js` — installer chạy thành công
-2. `node skill-packs/codex-review/scripts/codex-runner.js version` — in version `13`
-3. `ls ~/.claude/skills/codex-review/` — chứa `scripts/`
-4. SKILL.md chứa absolute path, không search loop
-5. Invoke `/loop-plan`, `/loop-implement`, `/codex-plan-review`, `/codex-impl-review`, `/codex-think-about`, `/codex-commit-review`, `/codex-pr-review` trong Claude Code
+1. Development Commands above: both gates exit 0
+2. `node skill-packs/codex-review/scripts/codex-runner.js version` prints `14`
+3. Invoke a review skill from a temporary install in Claude Code (`/codex-impl-review`) and Codex (`$codex-impl-review`)
 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence

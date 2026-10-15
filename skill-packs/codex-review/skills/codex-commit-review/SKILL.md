@@ -1,6 +1,6 @@
 ---
 name: codex-commit-review
-description: Peer debate between Claude Code and Codex on committed code quality. Report + suggest only, no modifications.
+description: Peer debate with Codex on committed code quality. Report + suggest only, no modifications.
 ---
 
 # Codex Commit Review
@@ -24,8 +24,8 @@ Before committing (staged) or after committing, before pushing (last).
 For this skill: write FINDING-{N} entries from the diff as `analysis_prompt` describes; in last mode each finding's evidence names the commit SHA and subject. Compare them with Codex's `review.blocks[]` and `review.overall_assessment`. **Exit rule:** consensus once no disagreement of severity medium or higher remains.
 
 ## Completion
-Report rounds, verdict, Claude and Codex findings, agreed/disagreed counts, files reviewed, the FINDING↔ISSUE mapping, and the overall assessment (code quality, security, test coverage, maintainability).
+Report rounds, verdict, your findings and Codex's, agreed/disagreed counts, files reviewed, the FINDING↔ISSUE mapping, and the overall assessment (code quality, security, test coverage, maintainability).
 
 ## Rules
 - Never `git commit`, `git add`, `git rebase`, or modify code or history.
-- Claude and Codex are equal peers; Codex reviews only and never edits.
+- You and the Codex reviewer are equal peers; the reviewer only reviews and never edits.
