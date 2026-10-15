@@ -17,6 +17,7 @@ import {
   replySession,
   waitSession,
 } from "./lib/review-core.js";
+import { DEFAULT_REVIEWER, REVIEWER_NAMES } from "./lib/reviewers/index.js";
 
 // Codex allows 60 s per tool call by default (tool_timeout_sec); Claude Code allows far
 // longer. The installer sets REVIEW_WAIT_DEFAULT_S per client at registration.
@@ -69,6 +70,7 @@ function createServer() {
       model: z.string().optional().describe("Codex model; omit to use the Codex default. Remembered for later rounds."),
       effort: z.string().optional().describe("Reasoning effort, default high. Remembered for later rounds."),
       timeout_seconds: z.number().int().positive().optional(),
+      reviewer: z.enum(REVIEWER_NAMES).optional().describe(`Reviewer CLI, default ${DEFAULT_REVIEWER}. Remembered for later rounds.`),
     },
   }, tool(a => beginSession({
     skill: a.skill,
@@ -78,6 +80,7 @@ function createServer() {
     model: a.model,
     effort: a.effort,
     timeout: a.timeout_seconds,
+    reviewer: a.reviewer,
   })));
 
   server.registerTool("review_wait", {

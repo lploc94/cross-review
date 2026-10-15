@@ -9,6 +9,7 @@ import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { getReviewer } from "./reviewers/index.js";
 
 const SCRIPTS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const RUNNER = path.join(SCRIPTS_DIR, "codex-runner.js");
@@ -19,9 +20,8 @@ export const POLL_INTERVAL_S = 120;
 export const DEFAULT_MAX_WAIT_S = 110;
 const CHECK_INTERVAL_MS = 2000;
 // Reviewers run tests, builds and network commands (curl, npm view, git fetch) to verify
-// claims; the prompts forbid changing project files. The low-level `start` keeps its
-// read-only default.
-export const REVIEWER_SANDBOX = "danger-full-access";
+// claims, so sessions use the reviewer's full-access sandbox; the prompts forbid changing
+// project files. The low-level `start` keeps the reviewer's default sandbox.
 
 /**
  * Template names per skill and mode. `round1` starts the session, `reply` renders
@@ -73,7 +73,7 @@ function resolveTemplates(skill, mode) {
   if (!key || !entry.modes[key]) {
     throw new ReviewError(`Skill ${skill} needs --mode, one of: ${modeNames.join(", ")}`, "INVALID_INPUT");
   }
-  return { peer: entry.peer, mode: key, templates: entry.modes[key], sandbox: entry.sandbox || REVIEWER_SANDBOX };
+  return { peer: entry.peer, mode: key, templates: entry.modes[key] };
 }
 
 export function isPeerSkill(skill) {
@@ -208,11 +208,12 @@ function readInput({ inputText, inputFile }) {
 }
 
 /**
- * Start a review: init the session, render round 1, launch Codex.
+ * Start a review: init the session, render round 1, launch the reviewer (default codex).
  * Returns { session_dir, round: 1, status: "running", analysis_prompt? }.
  */
-export async function beginSession({ skill, mode, inputText, inputFile, workingDir, model, effort, timeout, skillsDir }) {
+export async function beginSession({ skill, mode, inputText, inputFile, workingDir, model, effort, timeout, reviewer, skillsDir }) {
   const resolved = resolveTemplates(skill, mode);
+  const reviewerModule = getReviewer(reviewer);
   // Absolute, so later replies from another working directory find the same prompts
   const dir = path.resolve(skillsDir || defaultSkillsDir(skill));
   const values = parseReviewInput(readInput({ inputText, inputFile }), placeholderNames(dir, skill));
@@ -222,7 +223,7 @@ export async function beginSession({ skill, mode, inputText, inputFile, workingD
     ? await render(skill, resolved.templates.analysis, dir, values)
     : null;
 
-  const init = await runRunner(["init", "--skill-name", skill, "--working-dir", workingDir || process.cwd()]);
+  const init = await runRunner(["init", "--skill-name", skill, "--working-dir", workingDir || process.cwd(), "--reviewer", reviewerModule.name]);
   const line = init.stdout.trim();
   if (init.code !== 0 || !line.startsWith("CODEX_SESSION:")) throw runnerFailure(init, "INIT_FAILED");
   const sessionDir = line.slice("CODEX_SESSION:".length);
@@ -232,7 +233,7 @@ export async function beginSession({ skill, mode, inputText, inputFile, workingD
   const startArgs = ["start", sessionDir, "--effort", effort || "high"];
   if (model) startArgs.push("--model", model);
   if (timeout) startArgs.push("--timeout", String(timeout));
-  if (resolved.sandbox) startArgs.push("--sandbox", resolved.sandbox);
+  startArgs.push("--sandbox", reviewerModule.fullAccessSandbox);
   await runnerJson(startArgs, prompt, "START_FAILED");
 
   const out = { session_dir: sessionDir, round: 1, status: "running" };

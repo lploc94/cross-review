@@ -14,6 +14,7 @@ import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
 import { parseOutputMarkdown } from "./lib/parse.js";
 import { beginSession, waitSession, replySession, endSession, DEFAULT_MAX_WAIT_S } from "./lib/review-core.js";
+import { getReviewer } from "./lib/reviewers/index.js";
 
 const __filename = fileURLToPath(import.meta.url);
 
@@ -44,84 +45,12 @@ const ABSOLUTE_USER_AUTHORITY = [
 // Process management
 // ============================================================
 
-/**
- * Resolve the codex CLI command for spawning.
- *
- * On Windows, npm-installed CLIs are .cmd wrappers (e.g. codex.cmd).
- * Node.js spawn() cannot resolve .cmd files without shell: true,
- * but shell: true + detached: true drops stdio on Windows.
- * Instead, resolve the underlying codex.js entry point and invoke
- * it directly via node.exe — no shell needed.
- */
-function resolveCodexCommand() {
-  if (!IS_WIN) {
-    return { cmd: "codex", prependArgs: [] };
-  }
-
-  // Try to find codex.js via npm global prefix
-  const r = spawnSync("npm", ["config", "get", "prefix"], {
-    encoding: "utf8",
-    shell: true,
-    timeout: 10000,
-  });
-  if (r.status === 0 && r.stdout) {
-    const prefix = r.stdout.trim();
-    const codexJs = path.join(
-      prefix, "node_modules", "@openai", "codex", "bin", "codex.js",
-    );
-    if (fs.existsSync(codexJs)) {
-      return { cmd: process.execPath, prependArgs: [codexJs] };
-    }
-  }
-
-  // Fallback: try common npm global path on Windows
-  const appData = process.env.APPDATA;
-  if (appData) {
-    const codexJs = path.join(
-      appData, "npm", "node_modules", "@openai", "codex", "bin", "codex.js",
-    );
-    if (fs.existsSync(codexJs)) {
-      return { cmd: process.execPath, prependArgs: [codexJs] };
-    }
-  }
-
-  // Last resort: assume "codex" is directly executable (non-npm install)
-  return { cmd: "codex", prependArgs: [] };
-}
-
-function launchCodex(stateDir, workingDir, timeoutS, threadId, effort, model, sandbox = "read-only") {
+function launchReviewer(reviewer, stateDir, workingDir, threadId, effort, model, sandbox) {
   const promptFile = path.join(stateDir, "prompt.txt");
   const jsonlFile = path.join(stateDir, "output.jsonl");
   const errFile = path.join(stateDir, "error.log");
 
-  const { cmd: resolvedCmd, prependArgs } = resolveCodexCommand();
-  // Omit the override when absent so Codex keeps its default model selection.
-  const modelArgs = model === undefined ? [] : ["--model", model];
-  let cmd = resolvedCmd;
-  let args;
-  let cwd;
-
-  if (threadId) {
-    // `exec resume` has no --sandbox flag; without the override a resumed turn falls back
-    // to the config default (seen in real rollouts: danger-full-access → workspace-write)
-    args = [
-      ...prependArgs, "exec", "--skip-git-repo-check", "--json",
-      "--config", `model_reasoning_effort=${effort}`,
-      "--config", `sandbox_mode="${sandbox}"`,
-      "resume", ...modelArgs, threadId, "-",
-    ];
-    cwd = workingDir;
-  } else {
-    args = [
-      ...prependArgs,
-      "exec", "--skip-git-repo-check", "--json",
-      ...modelArgs,
-      "--sandbox", sandbox,
-      "--config", `model_reasoning_effort=${effort}`,
-      "-C", workingDir,
-    ];
-    cwd = undefined;
-  }
+  const { cmd, args, cwd } = reviewer.buildCommand({ threadId, workingDir, model, effort, sandbox });
 
   const fin = fs.openSync(promptFile, "r");
   const fout = fs.openSync(jsonlFile, "w");
@@ -143,7 +72,7 @@ function launchCodex(stateDir, workingDir, timeoutS, threadId, effort, model, sa
   const pid = child.pid;
 
   if (pid === undefined) {
-    throw new Error(`Failed to spawn "${cmd}" — process did not start (ENOENT). Is codex installed globally?`);
+    throw new Error(`Failed to spawn "${cmd}" — process did not start (ENOENT). Install: ${reviewer.installHint}`);
   }
 
   // Close file descriptors in parent
@@ -295,14 +224,11 @@ function getCmdline(pid) {
   }
 }
 
-function verifyCodex(pid) {
+function verifyReviewer(reviewer, pid) {
   if (!isAlive(pid)) return "dead";
   const cmdline = getCmdline(pid);
   if (cmdline === null) return "unknown";
-  if (cmdline.includes("codex exec") || cmdline.includes("codex.exe exec") || (cmdline.includes("codex.js") && cmdline.includes("exec"))) {
-    return "verified";
-  }
-  return "mismatch";
+  return reviewer.matchesCmdline(cmdline) ? "verified" : "mismatch";
 }
 
 function verifyWatchdog(pid) {
@@ -444,10 +370,10 @@ function jsonError(error, code = "UNKNOWN_ERROR") {
 
 
 // ============================================================
-// JSONL parsing — v13 (structured JSON output)
+// Round log parsing (the reviewer module reads its own event format)
 // ============================================================
 
-function parseJsonlV13(stateDir, lastLineCount, elapsed, processAlive, timeoutVal, state, runnerDeadlineObserved = false) {
+function parseRoundLog(reviewer, stateDir, lastLineCount, elapsed, processAlive, timeoutVal, state, runnerDeadlineObserved = false) {
   const jsonlFile = path.join(stateDir, "output.jsonl");
   const errFile = path.join(stateDir, "error.log");
 
@@ -457,80 +383,14 @@ function parseJsonlV13(stateDir, lastLineCount, elapsed, processAlive, timeoutVa
     allLines = content.split("\n").filter(l => l.trim());
   }
 
-  let turnCompleted = false;
-  let turnFailed = false;
-  let turnFailedMsg = "";
-  let extractedThreadId = "";
-  let reviewText = "";
-  let progressObserved = false;
-
-  // Parse ALL lines for terminal state + data extraction
-  for (const rawLine of allLines) {
-    const line = rawLine.trim();
-    if (!line) continue;
-    let d;
-    try {
-      d = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    const t = d.type || "";
-
-    if (t === "turn.started" || t === "item.started" || t === "item.completed") {
-      progressObserved = true;
-    }
-
-    if (t === "thread.started" && normalizeThreadId(d.thread_id)) {
-      extractedThreadId = normalizeThreadId(d.thread_id);
-    }
-
-    if (t === "turn.completed") {
-      turnCompleted = true;
-    } else if (t === "turn.failed") {
-      turnFailed = true;
-      turnFailedMsg = (d.error && d.error.message) || "unknown error";
-    }
-
-    if (t === "item.completed") {
-      const item = d.item || {};
-      if (item.type === "agent_message") {
-        reviewText = item.text || "";
-      }
-    }
-  }
-
-  // Parse NEW lines for activities (structured)
-  const activities = [];
-  const newLines = allLines.slice(lastLineCount);
-  for (const rawLine of newLines) {
-    const line = rawLine.trim();
-    if (!line) continue;
-    let d;
-    try {
-      d = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    const t = d.type || "";
-    const item = d.item || {};
-    const itemType = item.type || "";
-
-    if (t === "turn.started") {
-      activities.push({ time: elapsed, type: "thinking", detail: "started new turn" });
-    } else if (t === "item.completed" && itemType === "reasoning") {
-      let text = item.text || "";
-      if (text.length > 150) text = text.slice(0, 150) + "...";
-      activities.push({ time: elapsed, type: "thinking", detail: text });
-    } else if (t === "item.started" && itemType === "command_execution") {
-      activities.push({ time: elapsed, type: "command_started", detail: item.command || "" });
-    } else if (t === "item.completed" && itemType === "command_execution") {
-      activities.push({ time: elapsed, type: "command_completed", detail: item.command || "" });
-    } else if (t === "item.completed" && itemType === "file_change") {
-      for (const c of (item.changes || [])) {
-        activities.push({ time: elapsed, type: "file_change", detail: `${c.path || "?"} (${c.kind || "?"})` });
-      }
-    }
-  }
+  const events = reviewer.parseEvents(allLines, allLines.slice(lastLineCount), elapsed);
+  let turnCompleted = events.turnCompleted;
+  const turnFailed = events.turnFailed;
+  const turnFailedMsg = events.failMessage;
+  const extractedThreadId = events.threadId;
+  const reviewText = events.reviewText;
+  const progressObserved = events.progressObserved;
+  const activities = events.activities;
 
   function sanitizeMsg(s) {
     if (s == null) return "unknown error";
@@ -589,7 +449,7 @@ function parseJsonlV13(stateDir, lastLineCount, elapsed, processAlive, timeoutVa
         round: currentRound,
         elapsed_seconds: elapsed,
         exit_code: EXIT_TURN_FAILED,
-        error: `Codex turn failed: ${sanitizeMsg(turnFailedMsg)}`,
+        error: `${reviewer.label} turn failed: ${sanitizeMsg(turnFailedMsg)}`,
         failure_reason: "turn_failed",
         recoverable: false,
         thread_id: threadId || null,
@@ -629,7 +489,7 @@ function parseJsonlV13(stateDir, lastLineCount, elapsed, processAlive, timeoutVa
       if (fs.existsSync(errFile)) {
         errContent = fs.readFileSync(errFile, "utf8").trim();
       }
-      let errorMsg = "Codex process exited unexpectedly";
+      let errorMsg = `${reviewer.label} process exited unexpectedly`;
       if (errContent) {
         errorMsg += ": " + sanitizeMsg(errContent.slice(0, 200));
       }
@@ -705,9 +565,9 @@ function validateStateDir(stateDir) {
   return { dir: resolved, err: null };
 }
 
-function verifyAndKillCodex(pid, pgid) {
+function verifyAndKillReviewer(reviewer, pid, pgid) {
   if (!pid || pid <= 1 || !pgid || pgid <= 1) return;
-  const status = verifyCodex(pid);
+  const status = verifyReviewer(reviewer, pid);
   if (status === "verified" || status === "unknown") {
     killTree(pgid);
   }
@@ -991,12 +851,20 @@ function cmdInit(argv) {
     options: {
       "skill-name": { type: "string" },
       "working-dir": { type: "string" },
+      reviewer: { type: "string" },
     },
     strict: true,
   });
 
   const skillName = values["skill-name"];
   const workingDir = values["working-dir"];
+  let reviewer;
+  try {
+    reviewer = getReviewer(values.reviewer);
+  } catch (e) {
+    process.stderr.write(`Error: ${e.message}\n`);
+    return EXIT_ERROR;
+  }
 
   if (!skillName) {
     process.stderr.write("Error: --skill-name is required\n");
@@ -1068,6 +936,7 @@ function cmdInit(argv) {
     session_id: sessionId,
     runner_version: CODEX_RUNNER_VERSION,
     skill_name: skillName,
+    reviewer: reviewer.name,
     state_dir: sessionDir,
     working_dir: resolvedWorkingDir,
     round: 0,
@@ -1104,7 +973,7 @@ function cmdStart(argv) {
       model: { type: "string" },
       effort: { type: "string", default: "high" },
       timeout: { type: "string", default: String(DEFAULT_TIMEOUT_S) },
-      sandbox: { type: "string", default: "read-only" },
+      sandbox: { type: "string" },
       "stall-threshold": { type: "string", default: "" },
     },
     strict: true,
@@ -1112,17 +981,10 @@ function cmdStart(argv) {
 
   const effort = values.effort || "high";
   const timeout = parseInt(values.timeout || String(DEFAULT_TIMEOUT_S), 10);
-  const sandbox = values.sandbox || "read-only";
   const stallThreshold = parseInt(values["stall-threshold"] || "12", 10);
 
   if (isNaN(stallThreshold) || stallThreshold < 1) {
     jsonError("--stall-threshold must be a positive integer (>= 1)", "INVALID_INPUT");
-    return EXIT_ERROR;
-  }
-
-  const VALID_SANDBOXES = ["read-only", "workspace-write", "danger-full-access"];
-  if (!VALID_SANDBOXES.includes(sandbox)) {
-    jsonError(`--sandbox must be one of: ${VALID_SANDBOXES.join(", ")}`, "INVALID_INPUT");
     return EXIT_ERROR;
   }
 
@@ -1153,11 +1015,20 @@ function cmdStart(argv) {
   const sessionId = state.session_id || path.basename(resolvedSessionDir);
   const skillName = state.skill_name || "";
 
-  // Check codex in PATH
-  const whichCmd = IS_WIN ? "where" : "which";
-  const probe = spawnSync(whichCmd, ["codex"], { encoding: "utf8" });
-  if (probe.status !== 0) {
-    jsonError("codex CLI not found in PATH", "CODEX_NOT_FOUND");
+  let reviewer;
+  try {
+    reviewer = getReviewer(state.reviewer);
+  } catch (e) {
+    jsonError(e.message, e.code);
+    return EXIT_ERROR;
+  }
+  const sandbox = values.sandbox || reviewer.defaultSandbox;
+  if (!reviewer.sandboxes.includes(sandbox)) {
+    jsonError(`--sandbox must be one of: ${reviewer.sandboxes.join(", ")}`, "INVALID_INPUT");
+    return EXIT_ERROR;
+  }
+  if (!reviewer.isAvailable()) {
+    jsonError(`${reviewer.name} CLI not found in PATH. Install: ${reviewer.installHint}`, "CODEX_NOT_FOUND");
     return EXIT_CODEX_NOT_FOUND;
   }
 
@@ -1184,30 +1055,30 @@ function cmdStart(argv) {
   fs.writeFileSync(path.join(resolvedSessionDir, "prompts", "round-001.txt"), prompt, "utf8");
 
   // Track for rollback
-  let codexPgid = null;
+  let reviewerPgid = null;
   let watchdogPid = null;
 
   clearDeadlineMarker(resolvedSessionDir);
 
   function startupCleanup() {
-    if (codexPgid !== null) killTree(codexPgid);
+    if (reviewerPgid !== null) killTree(reviewerPgid);
     if (watchdogPid !== null && isAlive(watchdogPid)) killSingle(watchdogPid);
   }
 
   try {
-    const { pid: codexPid, pgid } = launchCodex(
-      resolvedSessionDir, resolvedWorkingDir, timeout, "", effort, values.model, sandbox,
+    const { pid: reviewerPid, pgid } = launchReviewer(
+      reviewer, resolvedSessionDir, resolvedWorkingDir, "", effort, values.model, sandbox,
     );
-    codexPgid = pgid;
+    reviewerPgid = pgid;
 
-    watchdogPid = launchWatchdog(timeout, codexPgid, resolvedSessionDir, 1);
+    watchdogPid = launchWatchdog(timeout, reviewerPgid, resolvedSessionDir, 1);
 
     // Update state.json
     const now = Math.floor(Date.now() / 1000);
     updateState(resolvedSessionDir, {
       round: 1,
-      pid: codexPid,
-      pgid: codexPgid,
+      pid: reviewerPid,
+      pgid: reviewerPgid,
       watchdog_pid: watchdogPid,
       effort,
       model: values.model || null,
@@ -1336,11 +1207,15 @@ function cmdResume(argv) {
     }
   }
 
-  // Check codex in PATH
-  const whichCmd = IS_WIN ? "where" : "which";
-  const probe = spawnSync(whichCmd, ["codex"], { encoding: "utf8" });
-  if (probe.status !== 0) {
-    jsonError("codex CLI not found in PATH", "CODEX_NOT_FOUND");
+  let reviewer;
+  try {
+    reviewer = getReviewer(prevState.reviewer);
+  } catch (e) {
+    jsonError(e.message, e.code);
+    return EXIT_ERROR;
+  }
+  if (!reviewer.isAvailable()) {
+    jsonError(`${reviewer.name} CLI not found in PATH. Install: ${reviewer.installHint}`, "CODEX_NOT_FOUND");
     return EXIT_CODEX_NOT_FOUND;
   }
 
@@ -1408,31 +1283,31 @@ function cmdResume(argv) {
   }
 
   // Track for rollback
-  let codexPgid = null;
+  let reviewerPgid = null;
   let watchdogPid = null;
 
   clearDeadlineMarker(resolvedSessionDir);
 
   function startupCleanup() {
-    if (codexPgid !== null) killTree(codexPgid);
+    if (reviewerPgid !== null) killTree(reviewerPgid);
     if (watchdogPid !== null && isAlive(watchdogPid)) killSingle(watchdogPid);
   }
 
   try {
-    const { pid: codexPid, pgid } = launchCodex(
-      resolvedSessionDir, resolvedWorkingDir, timeout, threadId, effort, values.model,
-      prevState.sandbox || "read-only",
+    const { pid: reviewerPid, pgid } = launchReviewer(
+      reviewer, resolvedSessionDir, resolvedWorkingDir, threadId, effort, values.model,
+      prevState.sandbox || reviewer.defaultSandbox,
     );
-    codexPgid = pgid;
+    reviewerPgid = pgid;
 
-    watchdogPid = launchWatchdog(timeout, codexPgid, resolvedSessionDir, newRound);
+    watchdogPid = launchWatchdog(timeout, reviewerPgid, resolvedSessionDir, newRound);
 
     // Update state.json
     const now = Math.floor(Date.now() / 1000);
     updateState(resolvedSessionDir, {
       round: newRound,
-      pid: codexPid,
-      pgid: codexPgid,
+      pid: reviewerPid,
+      pgid: reviewerPgid,
       watchdog_pid: watchdogPid,
       effort,
       timeout,
@@ -1535,8 +1410,9 @@ function cmdPoll(argv) {
 
   // Read state
   const state = readState(stateDir);
-  const codexPid = state.pid || 0;
-  const codexPgid = state.pgid || 0;
+  const reviewer = getReviewer(state.reviewer);
+  const reviewerPid = state.pid || 0;
+  const reviewerPgid = state.pgid || 0;
   const watchdogPid = state.watchdog_pid || 0;
   const timeoutVal = state.timeout || DEFAULT_TIMEOUT_S;
   const startedAt = state.started_at || Math.floor(Date.now() / 1000);
@@ -1547,7 +1423,7 @@ function cmdPoll(argv) {
   const now = Math.floor(Date.now() / 1000);
   const elapsed = now - startedAt;
 
-  const processAlive = isAlive(codexPid);
+  const processAlive = isAlive(reviewerPid);
   const deadlineReached = timeoutVal > 0 && elapsed >= timeoutVal;
   const runnerDeadlineObserved = deadlineReached
     && (processAlive || hasDeadlineMarker(stateDir, state.round || 1));
@@ -1569,9 +1445,9 @@ function cmdPoll(argv) {
     ? (state.last_output_at || startedAt)
     : now;
 
-  // Parse JSONL → structured JSON
-  let result = parseJsonlV13(
-    stateDir, lastLineCount, elapsed, processAlive, timeoutVal, state, runnerDeadlineObserved,
+  // Parse the round log → structured JSON
+  let result = parseRoundLog(
+    reviewer, stateDir, lastLineCount, elapsed, processAlive, timeoutVal, state, runnerDeadlineObserved,
   );
 
   // Override: stall/timeout detection for still-running process
@@ -1726,7 +1602,7 @@ function cmdPoll(argv) {
     const jsonStr = JSON.stringify(result.json);
     atomicWrite(path.join(stateDir, "final.txt"), jsonStr);
 
-    verifyAndKillCodex(codexPid, codexPgid);
+    verifyAndKillReviewer(reviewer, reviewerPid, reviewerPgid);
     if (watchdogPid) verifyAndKillWatchdog(watchdogPid);
   }
 
@@ -1758,12 +1634,12 @@ function cmdStop(argv) {
   // Read state and kill processes
   try {
     const state = readState(stateDir);
-    const codexPid = state.pid || 0;
-    const codexPgid = state.pgid || 0;
+    const reviewerPid = state.pid || 0;
+    const reviewerPgid = state.pgid || 0;
     const watchdogPid = state.watchdog_pid || 0;
 
-    if (codexPid && codexPgid) {
-      verifyAndKillCodex(codexPid, codexPgid);
+    if (reviewerPid && reviewerPgid) {
+      verifyAndKillReviewer(getReviewer(state.reviewer), reviewerPid, reviewerPgid);
     }
     if (watchdogPid) {
       verifyAndKillWatchdog(watchdogPid);
@@ -1857,11 +1733,13 @@ function cmdFinalize(argv) {
   }
 
   // Build meta.json
+  const reviewer = getReviewer(state.reviewer);
   const meta = {
     skill: state.skill_name || "",
+    reviewer: reviewer.name,
     runner_version: CODEX_RUNNER_VERSION,
     effort: state.effort || "high",
-    sandbox: state.sandbox || "read-only",
+    sandbox: state.sandbox || reviewer.defaultSandbox,
     scope: overrides.scope || null,
     base_branch: overrides.base_branch || null,
     rounds: rounds.length,
@@ -1920,6 +1798,7 @@ function cmdStatus(argv) {
     status: "ok",
     session_id: state.session_id,
     skill: state.skill_name,
+    reviewer: state.reviewer || "codex",
     runner_version: state.runner_version || CODEX_RUNNER_VERSION,
     round: state.round,
     effort: state.effort,
@@ -2003,6 +1882,7 @@ function cmdBegin(argv) {
       model: { type: "string" },
       effort: { type: "string" },
       timeout: { type: "string" },
+      reviewer: { type: "string" },
       "skills-dir": { type: "string" },
     },
     strict: true,
@@ -2019,6 +1899,7 @@ function cmdBegin(argv) {
       model: values.model,
       effort: values.effort,
       timeout: values.timeout,
+      reviewer: values.reviewer,
       skillsDir: values["skills-dir"],
     });
   });

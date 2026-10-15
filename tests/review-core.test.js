@@ -249,6 +249,45 @@ test("every review skill starts and resumes Codex with full access for verificat
   await endSession(p.session_dir);
 });
 
+test("the session remembers its reviewer; codex is the default", async () => {
+  setCodexOutput("### VERDICT\n- Status: REVISE\n");
+  const input = inputFor("codex-plan-review", "rv");
+  const named = await beginSession({ skill: "codex-plan-review", inputText: input, workingDir: workDir, reviewer: "codex" });
+  const unnamed = await beginSession({ skill: "codex-plan-review", inputText: input, workingDir: workDir });
+  for (const s of [named, unnamed]) {
+    await waitSession(s.session_dir, { maxWaitSeconds: 30 });
+    assert.equal(JSON.parse(fs.readFileSync(path.join(s.session_dir, "state.json"), "utf8")).reviewer, "codex");
+    await endSession(s.session_dir);
+  }
+});
+
+test("an unknown reviewer is rejected before any session is created", async () => {
+  const sessions = path.join(workDir, ".codex-review", "sessions");
+  const before = fs.existsSync(sessions) ? fs.readdirSync(sessions).length : 0;
+  await assert.rejects(
+    beginSession({ skill: "codex-plan-review", inputText: inputFor("codex-plan-review", "x"), workingDir: workDir, reviewer: "nope" }),
+    e => e.code === "UNKNOWN_REVIEWER" && /Available: codex/.test(e.message),
+  );
+  assert.equal(fs.existsSync(sessions) ? fs.readdirSync(sessions).length : 0, before);
+});
+
+test("a session whose state predates the reviewer field still resumes with codex", async () => {
+  resetLog();
+  setCodexOutput("### VERDICT\n- Status: REVISE\n");
+  const input = inputFor("codex-plan-review", "old");
+  const begun = await beginSession({ skill: "codex-plan-review", inputText: input, workingDir: workDir });
+  await waitSession(begun.session_dir, { maxWaitSeconds: 30 });
+  const stateFile = path.join(begun.session_dir, "state.json");
+  const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  delete state.reviewer;
+  fs.writeFileSync(stateFile, JSON.stringify(state));
+  await replySession(begun.session_dir, { inputText: input });
+  const w = await waitSession(begun.session_dir, { maxWaitSeconds: 30 });
+  assert.equal(w.status, "completed");
+  assert.ok(codexCalls()[1].args.includes("resume"));
+  await endSession(begun.session_dir);
+});
+
 test("reply with a new model updates the stored model", async () => {
   resetLog();
   setCodexOutput("### VERDICT\n- Status: REVISE\n");
