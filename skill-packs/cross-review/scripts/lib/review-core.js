@@ -43,13 +43,6 @@ export const SKILL_TEMPLATES = {
     peer: true,
     modes: { default: { round1: "round1", reply: "round2+", analysis: "analysis" } },
   },
-  "review-commit": {
-    peer: true,
-    modes: {
-      staged: { round1: "staged-round1", reply: "staged-round2+", analysis: "analysis-staged" },
-      last: { round1: "last-round1", reply: "last-round2+", analysis: "analysis-last" },
-    },
-  },
   "review-pr": {
     peer: true,
     modes: { default: { round1: "round1", reply: "round2+", analysis: "analysis" } },

@@ -46,6 +46,11 @@ test("upgrading from the codex-review pack removes its skills, runtime, MCP serv
     writeOldSkill(home, legacy, "codex-think-about");
     writeOldSkill(home, legacy, "codex-parallel-review");
     write(path.join(legacy, "unrelated", "SKILL.md"), "---\nname: unrelated\n---\n");
+    // review-commit, dropped from this pack: its installs carry this pack's runner path; a foreign one does not
+    const runner = path.join(claude, "cross-review", "scripts", "review-runner.js");
+    write(path.join(claude, "review-commit", "SKILL.md"), `---\nname: review-commit\n---\nnode "${runner}" begin\n`);
+    write(path.join(agents, "review-commit", "SKILL.md"), `---\nname: review-commit\n---\nnode "${runner}" begin\n`);
+    write(path.join(legacy, "review-commit", "SKILL.md"), "---\nname: review-commit\n---\nmy own commit reviewer\n");
     // The old MCP registration in Claude Code; in Codex a foreign server uses the old name (a comment quotes the old path)
     const oldServer = path.join(claude, "codex-review", "scripts", "mcp-server.js");
     const foreignServer = path.join(home, "opt", "foreign-codex-review", "scripts", "mcp-server.js");
@@ -78,11 +83,12 @@ test("upgrading from the codex-review pack removes its skills, runtime, MCP serv
 
     for (const dir of [
       path.join(claude, "codex-review"), path.join(claude, "codex-plan-review"), path.join(claude, "codex-security-review"),
-      path.join(agents, "codex-impl-review"),
+      path.join(agents, "codex-impl-review"), path.join(claude, "review-commit"), path.join(agents, "review-commit"),
       path.join(legacy, "codex-review"), path.join(legacy, "codex-think-about"), path.join(legacy, "codex-parallel-review"),
     ]) assert.ok(!fs.existsSync(dir), `${dir} removed`);
     assert.ok(fs.existsSync(path.join(agents, "codex-pr-review", "SKILL.md")), "foreign skill with an old pack name kept");
     assert.ok(fs.existsSync(path.join(legacy, "unrelated", "SKILL.md")), "unrelated skill kept");
+    assert.ok(fs.existsSync(path.join(legacy, "review-commit", "SKILL.md")), "foreign review-commit kept");
 
     if (fs.existsSync(path.join(home, ".claude.json"))) {
       const servers = JSON.parse(fs.readFileSync(path.join(home, ".claude.json"), "utf8")).mcpServers;

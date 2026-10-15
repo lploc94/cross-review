@@ -38,7 +38,7 @@ const mcpServerPath = path.join(runtimeDir, 'scripts', 'mcp-server.js');
 
 // RUNNER_SKILLS drive the reviewer through the runner; their SKILL.md templates are rendered with the shared protocol.
 // PLAIN_SKILLS are self-contained SKILL.md templates rendered only with the client's {{CLIENT_*}} values.
-const RUNNER_SKILLS = ['review-plan', 'review-impl', 'review-think', 'review-commit', 'review-pr'];
+const RUNNER_SKILLS = ['review-plan', 'review-impl', 'review-think', 'review-pr'];
 const PLAIN_SKILLS = ['loop-plan', 'loop-implement'];
 // Names from the earlier codex-review pack; copies it installed are deleted on install.
 const LEGACY_RUNTIME = 'codex-review';
@@ -47,6 +47,8 @@ const LEGACY_SKILLS = [
   'codex-parallel-review', 'codex-codebase-review', 'codex-security-review',
 ];
 const LEGACY_MCP_NAME = 'codex-review';
+// Skills this pack used to install and has since dropped (review-commit: folded into review-impl).
+const RETIRED_SKILLS = ['review-commit'];
 
 const MCP_NAME = PACK;
 const MCP_TOOLS = ['review_begin', 'review_wait', 'review_reply', 'review_end'];
@@ -148,6 +150,8 @@ function approveCodexTools(configPath) {
 // The earlier pack's runtime lived only here; its skills had this runner path rendered into them
 const legacyRuntimeDir = path.join(claudeSkillsRoot, LEGACY_RUNTIME);
 const legacyRunnerRef = escapeForDoubleQuotedShell(path.join(legacyRuntimeDir, 'scripts', 'codex-runner.js'));
+// Retired skills of this pack carry this pack's runner path instead
+const currentRunnerRef = escapeForDoubleQuotedShell(runnerPath);
 
 /**
  * True when a directory in a skills root was installed by the earlier pack (safe to delete): the runtime holds
@@ -157,7 +161,8 @@ function isLegacyInstall(dir, name) {
   if (name === LEGACY_RUNTIME) return fs.existsSync(path.join(dir, 'scripts', 'codex-runner.js'));
   try {
     const skillMd = fs.readFileSync(path.join(dir, 'SKILL.md'), 'utf8');
-    return new RegExp(`^name:\\s*${name}\\s*$`, 'm').test(skillMd) && skillMd.includes(legacyRunnerRef);
+    const runnerRef = RETIRED_SKILLS.includes(name) ? currentRunnerRef : legacyRunnerRef;
+    return new RegExp(`^name:\\s*${name}\\s*$`, 'm').test(skillMd) && skillMd.includes(runnerRef);
   } catch {
     return false;
   }
@@ -314,16 +319,17 @@ try {
       console.warn(`Warning: could not remove backup at ${backup}`);
     }
   }
-  // Remove the earlier pack's runtime and skills, including copies in Codex's deprecated skills root
+  // Remove the earlier pack's runtime and skills and this pack's retired skills, including copies in
+  // Codex's deprecated skills root
   const stale = [claudeSkillsRoot, agentsSkillsRoot, legacyCodexSkillsRoot]
-    .flatMap(root => [LEGACY_RUNTIME, ...LEGACY_SKILLS].map(name => ({ root, name })));
+    .flatMap(root => [LEGACY_RUNTIME, ...LEGACY_SKILLS, ...RETIRED_SKILLS].map(name => ({ root, name })));
   // A stale root may alias an install root (e.g. ~/.codex/skills → ~/.agents/skills); never delete what was just installed
   const installedReal = new Set(targets.flatMap(t => t.dirs.map(dir => fs.realpathSync(path.join(t.root, dir)))));
   for (const { root, name } of stale) {
     const dir = path.join(root, name);
     if (!fs.existsSync(dir) || installedReal.has(fs.realpathSync(dir))) continue;
     if (!isLegacyInstall(dir, name)) {
-      console.warn(`Warning: left ${dir} in place; it does not look like a ${LEGACY_RUNTIME} install`);
+      console.warn(`Warning: left ${dir} in place; it does not look like a ${RETIRED_SKILLS.includes(name) ? PACK : LEGACY_RUNTIME} install`);
       continue;
     }
     try {
@@ -374,9 +380,8 @@ try {
   console.log('  loop-plan             — write a phased, code-grounded implementation plan');
   console.log('  loop-implement        — execute an approved loop plan phase by phase');
   console.log('  review-plan           — debate plans before implementation');
-  console.log('  review-impl           — review uncommitted or branch changes');
+  console.log('  review-impl           — review uncommitted changes, unpushed commits, or a branch');
   console.log('  review-think          — peer reasoning/debate');
-  console.log('  review-commit         — review committed code before push');
   console.log('  review-pr             — review PRs (branch diff + description)');
 
   // Review guidance in ~/.claude/CLAUDE.md. --auto adds it; a block already there is refreshed on every

@@ -6,10 +6,9 @@ Seven skills (Claude Code: `/name`, Codex: `$name`):
 - `loop-plan` — write a phased, code-grounded implementation plan for large, multi-feature work
 - `loop-implement` — execute an approved loop plan phase by phase with TDD, checkpoint reviews, and commits
 - `review-plan` — debate implementation plans before coding
-- `review-impl` — review uncommitted or branch changes before commit/merge
+- `review-impl` — review uncommitted changes, unpushed commits, or a branch before commit/push/merge
 - `review-think` — peer reasoning/debate on technical topics
-- `review-commit` — review committed code quality before push
-- `review-pr` — review PRs (branch diff, commit hygiene, description)
+- `review-pr` — review someone else's PR as a peer (correctness, description, merge readiness); your own PR goes through `review-impl`
 
 This project was called **codex-review** (`lploc94/codex_skill`, skills `codex-plan-review`, `codex-impl-review`, `codex-think-about`, `codex-commit-review`, `codex-pr-review`). Installing removes that pack's skills, runtime and MCP server registration. Finish any review that is still running before you update: sessions started under the old names cannot be resumed.
 

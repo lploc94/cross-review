@@ -132,6 +132,37 @@ CONSENSUS
   assert.equal(r.position, null);
 });
 
+test("PR review issues expose Blocking; withdrawn notes do not leak into the last block", () => {
+  const md = `### ISSUE-1: Token never refreshed
+- Category: bug
+- Severity: high
+- Blocking: yes
+- File: src/auth.js:40-52
+- Problem: p
+- Evidence: e
+- Why it matters: w
+- Suggested fix: f
+
+### Withdrawn or Rejected
+- ISSUE-2: covered by the retry in src/http.js:12
+
+### Overall Assessment
+- Delivers what it claims: partly
+- Merge recommendation: request changes
+- Summary: s
+
+### VERDICT
+- Status: CONTINUE
+- Reason: r
+`;
+  const r = parseOutputMarkdown(md);
+  assert.equal(r.format, "commit-pr-review");
+  assert.equal(r.blocks.length, 1);
+  assert.equal(r.blocks[0].blocking, "yes");
+  assert.equal(r.blocks[0].suggested_fix, "f");
+  assert.equal(r.verdict.status, "CONTINUE");
+});
+
 test("think-about output exposes the Position section", () => {
   const md = `### Position
 - Use SQLite here; switch to Postgres once writers exceed one process.

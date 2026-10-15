@@ -9,7 +9,7 @@
 | `{USER_REQUEST}` | User's original task/PR description | No | "Review uncommitted changes for correctness and quality" |
 | `{SESSION_CONTEXT}` | Structured context block (see schema below) | No | Use structured fallback block below |
 | `{OUTPUT_FORMAT}` | Copy the entire fenced code block from `references/output-format.md` (the single block after "Use this exact shape") | Yes | — |
-| `{BASE_BRANCH}` | Base branch name (branch mode only) | Conditional | — |
+| `{BASE_BRANCH}` | Base commit of the reviewed range (branch mode only): a branch, `@{u}`, `HEAD~N`, or a SHA | Conditional | — |
 | `{REVIEW_SCOPE}` | Scope value for SESSION_CONTEXT fallback | No | `working-tree` or `branch diff against {BASE_BRANCH}` |
 | `{FIXED_ITEMS}` | Lines listing accepted+fixed issues (`ISSUE-N: title — fixed in file:line`) | No | "No issues fixed this round" |
 | `{DISPUTED_ITEMS}` | Lines listing disputed issues (`ISSUE-N: title — reason`) or "None — all issues addressed" | No | "None — all issues addressed" |
@@ -104,7 +104,7 @@ You are an advisory reviewer, not the product owner. Apply this authority order:
 - Read the commit log (git log {BASE_BRANCH}..HEAD).
 - Use plan context if available.
 
-## Base Branch
+## Base
 {BASE_BRANCH}
 
 ## User's Original Request
@@ -120,6 +120,7 @@ You are an advisory reviewer, not the product owner. Apply this authority order:
    - **Unacceptable** — wrong target, or makes the target impossible/incorrect to achieve; raise as an issue.
 3. **Bugs / defects** of any class in the changed code: logic and boundary cases, error handling, concurrency and ordering, resources, data integrity and persistence, security, runtime errors, and performance regressions that matter to the target.
 4. **Project rules**: the changed code breaks a rule in the repository's instruction files (CLAUDE.md, AGENTS.md, or similar at the root or in a changed file's directory or its parents). Quote the rule and its file.
+5. **Merge readiness**, when the base is a branch this work merges into: the branch still merges cleanly into the current base (`git merge-tree --write-tree {BASE_BRANCH} HEAD`) and works with what the base gained since the branch point; commit messages and any PR description in the request describe what the diff actually does.
 
 ## What Counts as an Issue
 - This change causes it: the changed code is wrong, or the change relies on existing code that breaks on the path it now uses. A problem in code the change does not touch or rely on is out of scope unless it blocks the target.

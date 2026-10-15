@@ -78,7 +78,7 @@ function renderExpected(skill, template, input) {
 // ---------- computeNext ----------
 
 const PLAN = { skill_name: "review-plan" };
-const COMMIT = { skill_name: "review-commit" };
+const PR = { skill_name: "review-pr" };
 const THINK = { skill_name: "review-think" };
 
 test("computeNext: running", () => {
@@ -110,7 +110,7 @@ test("computeNext: convergence stalemate ends the review", () => {
 });
 
 test("computeNext: STALEMATE status without the convergence flag ends the review", () => {
-  const r = computeNext({ status: "completed", review: { blocks: [], verdict: { status: "STALEMATE" } }, convergence: { stalemate: false } }, COMMIT);
+  const r = computeNext({ status: "completed", review: { blocks: [], verdict: { status: "STALEMATE" } }, convergence: { stalemate: false } }, PR);
   assert.deepEqual(r, { next: "done", next_reason: "stalemate" });
 });
 
@@ -125,7 +125,7 @@ test("computeNext: RESPONSE-only round of a plan review is answered", () => {
 });
 
 test("computeNext: peer skill with Codex CONSENSUS goes to cross_check, not done", () => {
-  const r = computeNext({ status: "completed", review: { blocks: [], verdict: { status: "CONSENSUS" } } }, COMMIT);
+  const r = computeNext({ status: "completed", review: { blocks: [], verdict: { status: "CONSENSUS" } } }, PR);
   assert.deepEqual(r, { next: "cross_check", next_reason: "peer_verdict_is_advisory" });
   const t = computeNext({ status: "completed", review: { format: "think-about", suggested_status: "CONSENSUS" } }, THINK);
   assert.equal(t.next, "cross_check");
@@ -185,8 +185,8 @@ for (const [skill, entry] of Object.entries(SKILL_TEMPLATES)) {
   }
 }
 
-test("there are 7 skill/mode combinations", () => {
-  assert.equal(COMBOS.length, 7);
+test("there are 5 skill/mode combinations", () => {
+  assert.equal(COMBOS.length, 5);
 });
 
 for (const combo of COMBOS) {
@@ -402,14 +402,14 @@ test("end while a plan review still needs a response only stops", async () => {
 
 test("peer end with outcome consensus finalizes as CONSENSUS; without outcome only stops", async () => {
   setCodexOutput("### ISSUE-1: x\n- Severity: low\n\n### Overall Assessment\n- Code quality: ok\n\n### VERDICT\n- Status: CONSENSUS\n");
-  const input = inputFor("review-commit", "p");
-  const a = await beginSession({ skill: "review-commit", mode: "staged", inputText: input, workingDir: workDir });
+  const input = inputFor("review-pr", "p");
+  const a = await beginSession({ skill: "review-pr", inputText: input, workingDir: workDir });
   await waitSession(a.session_dir, { maxWaitSeconds: 30 });
   const endedA = await endSession(a.session_dir, { outcome: "consensus" });
   assert.equal(endedA.finalized, true);
   assert.equal(endedA.verdict, "CONSENSUS");
 
-  const b = await beginSession({ skill: "review-commit", mode: "staged", inputText: input, workingDir: workDir });
+  const b = await beginSession({ skill: "review-pr", inputText: input, workingDir: workDir });
   await waitSession(b.session_dir, { maxWaitSeconds: 30 });
   const endedB = await endSession(b.session_dir);
   assert.equal(endedB.finalized, false);

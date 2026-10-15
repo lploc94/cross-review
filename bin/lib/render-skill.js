@@ -8,7 +8,6 @@ import path from 'node:path';
 export const PROTOCOL_VARIANTS = {
   'review-plan': 'apply-rebut',
   'review-impl': 'apply-rebut',
-  'review-commit': 'cross-analysis',
   'review-pr': 'cross-analysis',
   'review-think': 'cross-analysis',
 };

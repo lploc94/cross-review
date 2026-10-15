@@ -4,14 +4,13 @@ This repository provides a single-command installer (`npx github:lploc94/cross-r
 
 ## Project Overview
 
-`cross-review` provides seven skills: five review skills, where a second model (the reviewer; Codex CLI today) reviews the orchestrator's work, and two plain planning/execution skills (Claude Code: `/name`, Codex: `$name`):
+`cross-review` provides six skills: four review skills, where a second model (the reviewer; Codex CLI today) reviews the orchestrator's work, and two plain planning/execution skills (Claude Code: `/name`, Codex: `$name`):
 - `loop-plan` — write a phased, code-grounded implementation plan (`loop-plan/v1`)
 - `loop-implement` — execute an approved loop plan phase by phase with TDD, checkpoint reviews, and commits
 - `review-plan` — debate plans before implementation
-- `review-impl` — review uncommitted or branch changes before commit/merge
+- `review-impl` — review uncommitted changes, unpushed commits, or a branch before commit/push/merge
 - `review-think` — peer reasoning/debate on technical topics
-- `review-commit` — review committed code quality before push (report + suggest)
-- `review-pr` — review PRs (branch diff, commit hygiene, description)
+- `review-pr` — review someone else's PR as a peer (correctness, description, merge readiness); your own PR goes through `review-impl`
 
 The project was called `codex-review` (repo `lploc94/codex_skill`, skills `codex-*-review`, `codex-think-about`); the installer removes that pack's skills, runtime and MCP registration.
 
@@ -62,7 +61,7 @@ skill-packs/cross-review/
 │   ├── mcp-server.js                 ← MCP stdio server: review_begin/wait/reply/end
 │   └── lib/                          ← parse.js, review-core.js (the four verbs), reviewers/ (one adapter per reviewer CLI)
 └── skills/
-    ├── review-plan/, review-impl/, review-think/, review-commit/, review-pr/
+    ├── review-plan/, review-impl/, review-think/, review-pr/
     │   ├── SKILL.md                  ← template
     │   └── references/               ← prompts.md, output-format.md, analysis templates
     └── loop-plan/, loop-implement/
@@ -97,7 +96,7 @@ skill-packs/cross-review/
 - **Reviewer adapters**: everything specific to a reviewer CLI (command line for new and resumed turns, sandbox names, event-log parsing, process identity) lives in `scripts/lib/reviewers/<name>.js`; the runner owns spawning, watchdogs, polling and state. Sessions store `reviewer`; state without it means `codex`
 - **Reviewer access**: review skills run the reviewer with its full-access sandbox (Codex: `danger-full-access`) so it can run tests, builds and network commands to verify claims; prompts forbid changing project files. The low-level `start` keeps its `read-only` default
 - **Self-contained SKILL.md**: protocol text is inlined at install; no `references/protocol.md`, no flavor text
-- **Built-in output parsers**: ISSUE, RESPONSE (commit/PR round 2+) and think-about formats; the verdict is parsed independently of the format, including verdict-only output
+- **Built-in output parsers**: ISSUE (PR reviews add Overall Assessment), RESPONSE (older PR rounds) and think-about formats; the verdict is parsed independently of the format, including verdict-only output
 - **Review timeout**: default 18,000 s (5 h); a timeout is resumable only when `poll` reports `timeout_reason: "runner_deadline"`, `recoverable: true`, a `thread_id`, and `progress_observed: true`
 - **ABSOLUTE USER AUTHORITY**: for review-operation decisions the user's latest explicit instruction is final. It does not authorize unrequested product, API, schema, persistence, or compatibility changes
 - **PID-reuse protection**: `verifyReviewer()` and `verifyWatchdog()` check the process cmdline before killing
@@ -147,6 +146,7 @@ skill-packs/cross-review/
 - **Reviewer adapter**: `--reviewer` on `begin`/`init`, `reviewer` on `review_begin`, stored in `state.json` and `meta.json`.
 - **Renamed codes**: `init` prints `SESSION:` (was `CODEX_SESSION:`); `CODEX_NOT_FOUND` → `REVIEWER_NOT_FOUND`; failure reason `codex_process_exit` → `reviewer_process_exit`; `next_reason` `codex_running` → `reviewer_running`; analysis templates `claude-*` → `analysis*`, `{CLAUDE_ANALYSIS_FORMAT}` → `{ANALYSIS_FORMAT}`.
 - Sessions started before v15 cannot be resumed.
+- **Removed `review-commit`**: `review-impl` branch mode reviews unpushed or recent commits (base `@{u}` or `HEAD~N`) and your own PR, with fixes; the installer deletes installed `review-commit` copies that point at this pack's runner. `review-pr` now reviews other people's PRs (`HEAD_REF` placeholder; `COMMIT_COUNT` removed; round 2+ returns ISSUE blocks).
 
 ### v14: Review verbs, MCP server, two clients
 - **New verbs** `begin`, `wait`, `reply`, `end` and MCP tools `review_begin/wait/reply/end`; skills no longer drive `init/render/start/poll/resume/finalize` themselves (the low-level commands are unchanged).

@@ -4,22 +4,23 @@ Use this exact shape:
 
 ```markdown
 ### ISSUE-{N}: {Short title}
-- Category: bug | edge-case | security | performance | maintainability | pr-description | commit-hygiene | scope
+- Category: bug | security | regression | edge-case | performance | maintainability | project-rule | pr-description | merge
 - Severity: low | medium | high | critical
-- File: {file path and line range, or "PR-level" for non-code findings}
+- Blocking: yes | no — yes when the PR should not merge until it is fixed
+- File: {file:line-range, or "PR-level"}
 - Problem: {clear statement}
-- Evidence: {specific diff hunk, code reference, or PR metadata reference}
-- Why it matters: {impact on correctness, security, maintainability, or merge readiness}
+- Evidence: {code reference, command and result, or PR text}
+- Why it matters: {impact on users, correctness, security, or the codebase}
+- Suggested fix: {one fix, or a few genuinely different options each with its tradeoff; advisory — the author may fix it another way}
 
 ### Overall Assessment
-- Code quality: poor | fair | good | excellent
-- PR description accuracy: accurate | partially accurate | inaccurate | missing
-- Commit hygiene: clean | acceptable | messy
-- Scope appropriateness: focused | acceptable | too broad | too narrow
+- Delivers what it claims: yes | partly | no
+- Merge recommendation: approve | request changes
+- Summary: {two or three sentences}
 
 ### VERDICT
 - Status: CONSENSUS | CONTINUE | STALEMATE
 - Reason: {short reason}
 ```
 
-If no issues remain, return only `Overall Assessment` and `VERDICT` with `Status: CONSENSUS`.
+If no issues remain, return only `Overall Assessment` and `VERDICT`.

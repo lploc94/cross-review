@@ -13,7 +13,7 @@ Peer reasoning, not code review: you and the reviewer analyze a technical questi
 - Investigations: why something fails, how a system behaves, whether a design holds up, what a change would break.
 - Any reasoning you want challenged before acting on it.
 
-Not for reviewing a written plan (`review-plan`), uncommitted or branch changes (`review-impl`), commits (`review-commit`), or a PR (`review-pr`). When the request is one of those, say so and use that skill unless the user wants a debate.
+Not for reviewing a written plan (`review-plan`), uncommitted changes, commits, or a branch (`review-impl`), or a PR (`review-pr`). When the request is one of those, say so and use that skill unless the user wants a debate.
 
 ## Sharpen the question first
 Turn the request into a question with a clear decision or target, the context it depends on (stack, constraints, what was tried), and what a useful answer looks like. Infer missing context from the conversation and the repository (top-level listing, manifests such as `package.json`, `go.mod`, `pyproject.toml`; relevant code); list ambiguous signals instead of picking one. Do not ask the user to confirm the rewrite; ask only when the target cannot be inferred at all. Show `Sharpened question: "…"` in the user's language as you start. That text becomes `QUESTION`.

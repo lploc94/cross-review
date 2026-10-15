@@ -381,7 +381,7 @@ export function parseOutputMarkdown(md, skillHint) {
     // Common fields for all block-based formats
     const fieldMapping = {
       "review": ["category", "severity", "location", "problem", "evidence", "why it matters", "suggested fix", "plan section", "file"],
-      "commit-pr-review": ["category", "severity", "problem", "evidence", "suggested fix", "commit", "why it matters", "file"],
+      "commit-pr-review": ["category", "severity", "blocking", "problem", "evidence", "suggested fix", "commit", "why it matters", "file"],
       "response": ["action", "reason", "revised finding", "counter-evidence", "maintained assessment"],
     };
 

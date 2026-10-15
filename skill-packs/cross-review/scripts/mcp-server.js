@@ -61,10 +61,10 @@ function createServer() {
   server.registerTool("review_begin", {
     title: "Begin a review",
     annotations: ANNOTATIONS,
-    description: "Start a review session: render round 1 for the skill and launch the reviewer in the background. Returns session_dir; peer skills (think-about, commit-review, pr-review) also return analysis_prompt for the orchestrator's independent analysis.",
+    description: "Start a review session: render round 1 for the skill and launch the reviewer in the background. Returns session_dir; peer skills (review-think, review-pr) also return analysis_prompt for the orchestrator's independent analysis.",
     inputSchema: {
       skill: z.enum(SKILLS),
-      mode: z.string().optional().describe("impl-review: working-tree | branch; commit-review: staged | last"),
+      mode: z.string().optional().describe("review-impl: working-tree | branch"),
       input: z.string().describe(INPUT_HELP),
       working_dir: z.string().describe("Absolute path of the repository under review"),
       model: z.string().optional().describe("Reviewer model; omit to use the reviewer CLI default. Remembered for later rounds."),

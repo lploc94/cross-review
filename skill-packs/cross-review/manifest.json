@@ -14,7 +14,6 @@
     "review-plan",
     "review-impl",
     "review-think",
-    "review-commit",
     "review-pr",
     "loop-plan",
     "loop-implement"

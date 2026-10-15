@@ -105,3 +105,20 @@ test("review-think sharpens without confirmation, records both sides, and resist
   assert.ok(!/curl|CRITICAL RULES|danger-full-access/.test(prompts), "no network micro-rules");
   assert.ok(/```markdown\n### Position/.test(format), "Position comes first");
 });
+
+test("review-impl covers commit ranges and own PRs; review-pr reviews other people's PRs without touching the tree", () => {
+  const impl = fs.readFileSync(path.join(PACK, "skills", "review-impl", "SKILL.md"), "utf8");
+  const implPrompts = fs.readFileSync(path.join(PACK, "skills", "review-impl", "references", "prompts.md"), "utf8");
+  assert.ok(impl.includes("`@{u}`") && impl.includes("`HEAD~N`"), "unpushed and last-N bases");
+  assert.ok(impl.includes("never amend, rebase, or force-push"), "fixes are new commits");
+  assert.ok(impl.includes("resolve it once with `git rev-parse HEAD~N` and pass that SHA in every round"), "relative base pinned across fix commits");
+  assert.ok(implPrompts.includes("git merge-tree --write-tree {BASE_BRANCH} HEAD"), "branch mode checks merge readiness");
+  const pr = fs.readFileSync(path.join(PACK, "skills", "review-pr", "SKILL.md"), "utf8");
+  const prPrompts = fs.readFileSync(path.join(PACK, "skills", "review-pr", "references", "prompts.md"), "utf8");
+  assert.ok(pr.includes("use `review-impl` in branch mode"), "own work goes to review-impl");
+  assert.ok(pr.includes("only when the user asks"), "posting needs the user");
+  assert.ok(pr.includes("git worktree add --detach"), "code runs outside the user's tree");
+  assert.ok(!/scorecard|REJECT|commit-hygiene/.test(pr + prPrompts), "no threshold scorecard or hygiene category");
+  assert.ok(prPrompts.includes("Do not agree automatically"), "round 2 anti-sycophancy");
+  assert.ok(!fs.existsSync(path.join(PACK, "skills", "review-commit")), "review-commit removed");
+});

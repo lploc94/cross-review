@@ -15,7 +15,7 @@ if (!process.argv[2] || !fs.existsSync(home)) {
 }
 const codexHome = process.env.CODEX_HOME || path.join(home, ".codex");
 
-const RUNNER_SKILLS = ["review-plan", "review-impl", "review-think", "review-commit", "review-pr"];
+const RUNNER_SKILLS = ["review-plan", "review-impl", "review-think", "review-pr"];
 const PLAIN_SKILLS = ["loop-plan", "loop-implement"];
 const SKILLS = [...RUNNER_SKILLS, ...PLAIN_SKILLS];
 // The earlier codex-review pack: its runtime, skills and MCP server must be gone after install
@@ -24,6 +24,8 @@ const LEGACY_SKILLS = [
   "codex-plan-review", "codex-impl-review", "codex-think-about", "codex-commit-review", "codex-pr-review",
   "codex-parallel-review", "codex-codebase-review", "codex-security-review",
 ];
+// Skills this pack dropped; an install of them (this pack's runner path) must be gone
+const RETIRED_SKILLS = ["review-commit"];
 const TOOLS = ["review_begin", "review_end", "review_reply", "review_wait"];
 
 const claudeRoot = path.join(home, ".claude", "skills");
@@ -36,6 +38,7 @@ const mcpServer = path.join(runtime, "scripts", "mcp-server.js");
 // double-quoted shell string) and its MCP server was registered at this path ('/' separators)
 const legacyRuntime = path.join(claudeRoot, LEGACY_RUNTIME);
 const legacyRunnerRef = path.join(legacyRuntime, "scripts", "codex-runner.js").replace(/[\\"$`]/g, "\\$&");
+const runnerRef = runner.replace(/[\\"$`]/g, "\\$&");
 const slashed = s => String(s).replace(/\\+/g, "/");
 const legacyServer = slashed(path.join(legacyRuntime, "scripts", "mcp-server.js"));
 
@@ -50,6 +53,14 @@ function walk(dir, out = []) {
     if (e.isDirectory()) walk(p, out); else out.push(p);
   }
   return out;
+}
+
+/** The directory holds a retired skill of this pack (its SKILL.md renders this pack's runner path). */
+function isRetiredCopy(dir, name) {
+  const skillMd = path.join(dir, "SKILL.md");
+  if (!fs.existsSync(skillMd)) return false;
+  const text = fs.readFileSync(skillMd, "utf8");
+  return new RegExp(`^name:\\s*${name}\\s*$`, "m").test(text) && text.includes(runnerRef);
 }
 
 /** The directory was installed by the earlier codex-review pack (not a foreign skill that shares the name). */
@@ -84,6 +95,7 @@ for (const [root, client] of [[claudeRoot, "claude"], [agentsRoot, "codex"]]) {
     }
   }
   for (const name of [LEGACY_RUNTIME, ...LEGACY_SKILLS]) check(!isLegacyCopy(path.join(root, name), name), `${client}: old ${name} still installed`);
+  for (const name of RETIRED_SKILLS) check(!isRetiredCopy(path.join(root, name), name), `${client}: retired ${name} still installed`);
   for (const name of fs.existsSync(root) ? fs.readdirSync(root) : []) {
     check(!/^\.cross-review-staging-|^\..+-backup-/.test(name), `${client}: leftover ${path.join(root, name)}`);
   }

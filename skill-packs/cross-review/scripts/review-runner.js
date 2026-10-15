@@ -603,14 +603,6 @@ const TEMPLATE_MAP = {
     "analysis": "Independent Analysis Prompt",
     "round2+": "Round 2+ Response Prompt",
   },
-  "review-commit": {
-    "staged-round1": "Staged Review Prompt (Round 1)",
-    "last-round1": "Last Review Prompt (Round 1)",
-    "analysis-staged": "Independent Analysis Prompt — Staged mode",
-    "analysis-last": "Independent Analysis Prompt — Last mode",
-    "staged-round2+": "Response Prompt — Staged mode (Round 2+)",
-    "last-round2+": "Response Prompt — Last mode (Round 2+)",
-  },
   "review-pr": {
     "round1": "PR Review Prompt (Round 1)",
     "analysis": "Independent Analysis Prompt",
