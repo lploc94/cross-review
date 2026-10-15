@@ -15,9 +15,9 @@ A PR or branch written by someone else (a teammate, a contributor, another agent
 - **The PR.** GitHub: `gh pr view <n> --json number,url,title,body,baseRefName,headRefOid,commits,files` and `gh pr view <n> --comments` (decisions already made in review). Fetch the head without checking it out: `git fetch origin <baseRefName> pull/<n>/head`. A plain branch: its name, and the base it merges into.
 - `BASE_BRANCH`: the base it merges into (e.g. `origin/main`). `HEAD_REF`: the PR head as a SHA (`headRefOid`, or `git rev-parse <branch>`), so every round reviews the same version even if the author pushes meanwhile. Validate both with `git rev-parse --verify <ref>^{commit}`.
 - **Running the code.** When the review needs tests or a build, create a detached worktree outside the repository (`git worktree add --detach "$(mktemp -d)/pr" <HEAD_REF>`), name it in `SESSION_CONTEXT`, and remove it with `git worktree remove` when the review ends.
-- Round 1 placeholders: `PR_TITLE`, `PR_DESCRIPTION` (body, plus linked issues), `BASE_BRANCH`, `HEAD_REF`, `COMMIT_LIST`, `USER_REQUEST` (what the user wants from this review), `SESSION_CONTEXT` (tech stack, review discussion and decisions, worktree path).
+- Round 1 placeholders: `PR_TITLE`, `PR_DESCRIPTION` (body, plus linked issues), `BASE_BRANCH`, `HEAD_REF`, `USER_REQUEST` (what the user wants from this review), `SESSION_CONTEXT` (review discussion and decisions, worktree path).
 - Reply placeholders: `SESSION_CONTEXT`, `BASE_BRANCH`, `HEAD_REF`, `AGREED_POINTS`, `DISAGREED_POINTS`, `NEW_FINDINGS`, `CONTINUE_OR_CONSENSUS_OR_STALEMATE`.
-- Skill `review-pr`, no mode. Effort: under 10 files `medium`, 10–50 `high`, more `xhigh`.
+- Skill `review-pr`, no mode.
 
 {{PROTOCOL_CORE}}
 

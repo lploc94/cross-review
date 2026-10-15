@@ -6,35 +6,12 @@
 
 | Placeholder | Source | Required | Default |
 |-------------|--------|----------|---------|
-| `{USER_REQUEST}` | User's original task/PR description | No | "Review uncommitted changes for correctness and quality" |
-| `{SESSION_CONTEXT}` | Structured context block (see schema below) | No | Use structured fallback block below |
+| `{USER_REQUEST}` | User's original task/PR description | No | "Review these changes for correctness against their target" |
+| `{SESSION_CONTEXT}` | What the reviewer cannot find in the plan, the diff, or the repository: the user's decisions and constraints from the conversation, what was already verified | No | "None beyond the request" |
 | `{OUTPUT_FORMAT}` | Copy the entire fenced code block from `references/output-format.md` (the single block after "Use this exact shape") | Yes | — |
 | `{BASE_BRANCH}` | Base commit of the reviewed range (branch mode only): a branch, `@{u}`, `HEAD~N`, or a SHA | Conditional | — |
-| `{REVIEW_SCOPE}` | Scope value for SESSION_CONTEXT fallback | No | `working-tree` or `branch diff against {BASE_BRANCH}` |
 | `{FIXED_ITEMS}` | Lines listing accepted+fixed issues (`ISSUE-N: title — fixed in file:line`) | No | "No issues fixed this round" |
 | `{DISPUTED_ITEMS}` | Lines listing disputed issues (`ISSUE-N: title — reason`) or "None — all issues addressed" | No | "None — all issues addressed" |
-
-### SESSION_CONTEXT Schema
-
-```
-Constraints: {e.g. "must not change public API"}
-Assumptions: {e.g. "test suite covers all changed paths"}
-Tech stack: {languages, frameworks, test tools}
-Acceptance criteria: {what defines a good review outcome}
-Review scope: {working-tree | branch diff against {BASE_BRANCH}}
-```
-
-If user provides no context, inject (replace `{REVIEW_SCOPE}` with the actual scope value only):
-- Working-tree mode: `working-tree`
-- Branch mode: `branch diff against {BASE_BRANCH}`
-
-```
-Constraints: None specified
-Assumptions: None specified
-Tech stack: Not specified — infer from codebase
-Acceptance criteria: No regressions, no new bugs, maintainable code
-Review scope: {REVIEW_SCOPE}
-```
 
 ---
 
@@ -167,7 +144,7 @@ You are an advisory reviewer, not the product owner. Apply this authority order:
 1. Re-read the current diff — do NOT rely on memory of previous state.
 2. Verify that fixed issues are actually resolved in the updated code. Judge whether the problem is gone, not whether your suggested fix was used; a different fix that solves it is fine.
 3. Do NOT re-open issues marked as fixed unless you find a regression.
-4. Check acceptance criteria from Session Context still hold.
+4. Check the target and acceptance criteria (plan or request) still hold.
 5. Focus on remaining open issues, regressions, and any NEW bugs in the updated code.
 6. Stay within the approved plan: raise genuine in-target defects. A problem caused by the plan, or an option outside the plan that clearly beats it on evidence, is one `plan-gap` finding, never a preference. If a fix requires a material new contract or user-owned tradeoff, identify the decision instead of assuming it. Apply the round 1 rules on what counts as an issue and on limits. If the code matches the target and has no bugs, return APPROVE.
 7. Treat explicit user decisions in Session Context or Issues Disputed as authoritative unless they make the target technically impossible; do not repeatedly propose a rejected scope expansion.
@@ -201,7 +178,7 @@ You are an advisory reviewer, not the product owner. Apply this authority order:
 1. Re-read the branch diff against {BASE_BRANCH} — do NOT rely on memory of previous state.
 2. Verify that fixed issues are actually resolved in the committed code. Judge whether the problem is gone, not whether your suggested fix was used; a different fix that solves it is fine.
 3. Do NOT re-open issues marked as fixed unless you find a regression.
-4. Check acceptance criteria from Session Context still hold.
+4. Check the target and acceptance criteria (plan or request) still hold.
 5. Focus on remaining open issues, regressions, and any NEW bugs in the updated branch.
 6. Stay within the approved plan: raise genuine in-target defects. A problem caused by the plan, or an option outside the plan that clearly beats it on evidence, is one `plan-gap` finding, never a preference. If a fix requires a material new contract or user-owned tradeoff, identify the decision instead of assuming it. Apply the round 1 rules on what counts as an issue and on limits. If the code matches the target and has no bugs, return APPROVE.
 7. Treat explicit user decisions in Session Context or Issues Disputed as authoritative unless they make the target technically impossible; do not repeatedly propose a rejected scope expansion.

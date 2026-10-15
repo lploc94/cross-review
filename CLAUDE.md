@@ -146,7 +146,7 @@ skill-packs/cross-review/
 - **Reviewer adapter**: `--reviewer` on `begin`/`init`, `reviewer` on `review_begin`, stored in `state.json` and `meta.json`.
 - **Renamed codes**: `init` prints `SESSION:` (was `CODEX_SESSION:`); `CODEX_NOT_FOUND` → `REVIEWER_NOT_FOUND`; failure reason `codex_process_exit` → `reviewer_process_exit`; `next_reason` `codex_running` → `reviewer_running`; analysis templates `claude-*` → `analysis*`, `{CLAUDE_ANALYSIS_FORMAT}` → `{ANALYSIS_FORMAT}`.
 - Sessions started before v15 cannot be resumed.
-- **Removed `review-commit`**: `review-impl` branch mode reviews unpushed or recent commits (base `@{u}` or `HEAD~N`) and your own PR, with fixes; the installer deletes installed `review-commit` copies that point at this pack's runner. `review-pr` now reviews other people's PRs (`HEAD_REF` placeholder; `COMMIT_COUNT` removed; round 2+ returns ISSUE blocks).
+- **Removed `review-commit`**: `review-impl` branch mode reviews unpushed or recent commits (base `@{u}` or `HEAD~N`) and your own PR, with fixes; the installer deletes installed `review-commit` copies that point at this pack's runner. `review-pr` now reviews other people's PRs (`HEAD_REF` placeholder; `COMMIT_COUNT` and `COMMIT_LIST` removed; round 2+ returns ISSUE blocks). `ACCEPTANCE_CRITERIA` (review-plan) and `REVIEW_SCOPE` (review-impl) are gone; `SESSION_CONTEXT` is free text for what the reviewer cannot read itself. review-think no longer snapshots the tree around each round. `manifest.json` 10.0.0.
 
 ### v14: Review verbs, MCP server, two clients
 - **New verbs** `begin`, `wait`, `reply`, `end` and MCP tools `review_begin/wait/reply/end`; skills no longer drive `init/render/start/poll/resume/finalize` themselves (the low-level commands are unchanged).

@@ -14,9 +14,9 @@ After writing code: before committing, after committing and before pushing, befo
 ## Inputs
 - **Mode**: `working-tree` (staged or unstaged changes exist) or `branch` (commits against a base; working tree clean). Detect with `git status --short` and `git rev-list @{u}..HEAD`. The diff must be non-empty.
 - **Base** (`BASE_BRANCH`, branch mode): the commit before the commits under review. Unpushed commits: `@{u}`. The last N commits: `HEAD~N`, with N no larger than `git rev-list --count HEAD` minus one; fix commits move `HEAD~N`, so resolve it once with `git rev-parse HEAD~N` and pass that SHA in every round. A branch or your own PR before merge: the target branch, with the PR title and description in `USER_REQUEST`. Validate it with `git rev-parse --verify <base>^{commit}`. A range that would include the repository's first commit has no base; tell the user the review would cover the whole project and ask how to proceed.
-- Round 1 placeholders: `USER_REQUEST` (original request plus the user's latest decisions; name the approved plan and phase when there is one), `SESSION_CONTEXT` (constraints, assumptions, tech stack, acceptance criteria, review scope), `BASE_BRANCH` (branch mode).
+- Round 1 placeholders: `USER_REQUEST` (original request plus the user's latest decisions; name the approved plan and phase when there is one), `SESSION_CONTEXT` (only what the reviewer cannot read in the plan, the diff, or the repository: decisions and constraints from the conversation, what was already verified), `BASE_BRANCH` (branch mode).
 - Reply placeholders: `SESSION_CONTEXT`, `FIXED_ITEMS`, `DISPUTED_ITEMS`, `BASE_BRANCH` (branch mode).
-- Skill `review-impl`. Effort: under 10 files `medium`, 10–50 `high`, more `xhigh`, unless the user or plan says otherwise.
+- Skill `review-impl`.
 
 {{PROTOCOL_CORE}}
 

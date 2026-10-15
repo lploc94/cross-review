@@ -10,9 +10,8 @@
 | `{PR_DESCRIPTION}` | `gh pr view --json body`, plus linked issues | No | "Not provided" |
 | `{BASE_BRANCH}` | The base it merges into, e.g. `origin/main` | Yes | — |
 | `{HEAD_REF}` | The PR head SHA (`headRefOid`, or `git rev-parse <branch>`) | Yes | — |
-| `{COMMIT_LIST}` | `git log --oneline {BASE_BRANCH}..{HEAD_REF}` | Yes | — |
 | `{USER_REQUEST}` | What the user wants from this review | No | "Review this PR for correctness and merge readiness" |
-| `{SESSION_CONTEXT}` | Tech stack, review discussion and decisions, worktree path | No | "Not specified" |
+| `{SESSION_CONTEXT}` | Review discussion and decisions, worktree path | No | "Not specified" |
 | `{OUTPUT_FORMAT}` | Copy entire fenced code block from `references/output-format.md` | Yes | — |
 | `{ANALYSIS_FORMAT}` | Copy entire fenced code block from `references/analysis-template.md` | Yes (independent analysis only) | — |
 
@@ -40,9 +39,6 @@ You are a peer reviewer of a pull request someone else wrote. Another reviewer i
 ## Description
 {PR_DESCRIPTION}
 
-## Commits
-{COMMIT_LIST}
-
 ## Review Request
 {USER_REQUEST}
 
@@ -50,7 +46,7 @@ You are a peer reviewer of a pull request someone else wrote. Another reviewer i
 {SESSION_CONTEXT}
 
 ## How to Inspect
-- The change: `git diff {BASE_BRANCH}...{HEAD_REF}`; per commit: `git show <sha>`; a file as of the PR: `git show {HEAD_REF}:<path>`.
+- The change: `git diff {BASE_BRANCH}...{HEAD_REF}`; commits: `git log --oneline {BASE_BRANCH}..{HEAD_REF}`, each with `git show <sha>`; a file as of the PR: `git show {HEAD_REF}:<path>`.
 - Merge check: `git merge-tree --write-tree {BASE_BRANCH} {HEAD_REF}` (conflicts), and whether the change still fits what the base gained since the branch point.
 - Run tests or builds only in the worktree named in Session Context, if any.
 
@@ -94,9 +90,6 @@ You are reviewing a pull request someone else wrote, independently. Another revi
 ## Description
 {PR_DESCRIPTION}
 
-## Commits
-{COMMIT_LIST}
-
 ## Review Request
 {USER_REQUEST}
 
@@ -104,7 +97,7 @@ You are reviewing a pull request someone else wrote, independently. Another revi
 {SESSION_CONTEXT}
 
 ## Instructions
-1. Inspect with `git diff {BASE_BRANCH}...{HEAD_REF}`, `git show <sha>`, `git show {HEAD_REF}:<path>`, and `git merge-tree --write-tree {BASE_BRANCH} {HEAD_REF}`; run tests only in the worktree, if any.
+1. Inspect with `git diff {BASE_BRANCH}...{HEAD_REF}`, `git log --oneline {BASE_BRANCH}..{HEAD_REF}`, `git show <sha>`, `git show {HEAD_REF}:<path>`, and `git merge-tree --write-tree {BASE_BRANCH} {HEAD_REF}`; run tests only in the worktree, if any.
 2. Review in this order: delivers what it claims, defects, project rules, merge.
 3. Raise only what this PR causes, after checking whether it is intentional and reading callers; no style findings unless a quoted project rule; mark `Blocking: yes` only for what should stop the merge.
 4. Write in the required format below.

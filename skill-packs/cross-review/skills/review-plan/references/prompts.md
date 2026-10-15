@@ -8,26 +8,8 @@
 |-------------|--------|----------|---------|
 | `{PLAN_PATH}` | Absolute path to plan file | Yes | — |
 | `{USER_REQUEST}` | User's original task description | No | "Review this plan for quality and completeness" |
-| `{SESSION_CONTEXT}` | Structured context block (see schema below) | No | Use structured fallback block below |
+| `{SESSION_CONTEXT}` | What the reviewer cannot find in the plan or the repository: the user's decisions and constraints from the conversation | No | "None beyond the request and the plan" |
 | `{OUTPUT_FORMAT}` | Copy the entire fenced code block from `references/output-format.md` (the single block after "Use this exact shape") | Yes | — |
-| `{ACCEPTANCE_CRITERIA}` | User-provided success criteria or derived from plan | No | "Derived from plan goals and stated outcomes" |
-
-### SESSION_CONTEXT Schema
-
-```
-Constraints: {technical or resource constraints, e.g. "must use existing DB schema"}
-Assumptions: {key assumptions the plan relies on}
-Tech stack: {languages, frameworks, infrastructure}
-Acceptance criteria: {ACCEPTANCE_CRITERIA}
-```
-
-If user provides no context, inject:
-```
-Constraints: None specified
-Assumptions: None specified
-Tech stack: Not specified — infer from plan content
-Acceptance criteria: Derived from plan goals and stated outcomes
-```
 
 ---
 
@@ -79,7 +61,7 @@ Read the plan file directly at: {PLAN_PATH}
 
 ## Output Instructions
 1. Read the plan file at the path above directly and thoroughly.
-2. Review against the criteria above, anchored to the acceptance criteria in Session Context. Report every issue you find now; do not hold any back for later rounds.
+2. Review against the criteria above, anchored to the plan's target and acceptance criteria. Report every issue you find now; do not hold any back for later rounds.
 3. Do NOT propose code changes — review only the plan. You may run commands to verify claims (tests, builds, `curl`, `npm view`, `git fetch`). Do not modify, stage, or commit project files; put any scratch files in a fresh `mktemp -d` directory outside the repository.
 4. Output each finding as ISSUE-{N} using the EXACT format below.
 5. End with a VERDICT block. Do not skip it.
@@ -110,7 +92,7 @@ Read the updated plan file directly at: {PLAN_PATH}
 2. Verify that fixed issues are actually resolved in the updated plan. Judge whether the problem is gone, not whether your suggested fix was used; a different fix that solves it is fine.
 3. Start with what changed since the last round (the sections named in Issues Accepted & Fixed, or `git diff` of the plan file when it is tracked): most new problems come from these edits. Check each edit against the rest of the plan for contradictions, broken references, and steps it invalidates.
 4. Do NOT re-open issues marked as fixed unless you find a regression in the updated plan.
-5. Check the plan still meets the acceptance criteria in Session Context.
+5. Check the plan still meets its target and acceptance criteria.
 6. Focus on remaining open issues and any NEW findings that genuinely block reaching the target. Apply the round 1 rules on what counts as an issue and on plan type.
 7. Stay anchored to the target. Do NOT raise scope creep, gold-plating, or additions that are not required to achieve the stated target. If the plan now achieves the target, return APPROVE — do not invent new polish.
 8. Treat explicit user decisions described in Session Context or Issues Disputed as authoritative unless they make the target technically impossible; do not repeatedly propose a rejected scope expansion.

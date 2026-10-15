@@ -16,12 +16,12 @@ Peer reasoning, not code review: you and the reviewer analyze a technical questi
 Not for reviewing a written plan (`review-plan`), uncommitted changes, commits, or a branch (`review-impl`), or a PR (`review-pr`). When the request is one of those, say so and use that skill unless the user wants a debate.
 
 ## Sharpen the question first
-Turn the request into a question with a clear decision or target, the context it depends on (stack, constraints, what was tried), and what a useful answer looks like. Infer missing context from the conversation and the repository (top-level listing, manifests such as `package.json`, `go.mod`, `pyproject.toml`; relevant code); list ambiguous signals instead of picking one. Do not ask the user to confirm the rewrite; ask only when the target cannot be inferred at all. Show `Sharpened question: "…"` in the user's language as you start. That text becomes `QUESTION`.
+Turn the request into a question with a clear decision or target, the context it depends on (stack, constraints, what was tried), and what a useful answer looks like. Infer missing context from the conversation and, when needed, the repository; list ambiguous signals instead of picking one. Do not ask the user to confirm the rewrite; ask only when the target cannot be inferred at all. Show `Sharpened question: "…"` in the user's language as you start. That text becomes `QUESTION`.
 
 ## Inputs
 - Round 1 placeholders: `QUESTION`, `PROJECT_CONTEXT`, `RELEVANT_FILES`, `CONSTRAINTS`.
 - Reply placeholders: `AGREED_POINTS`, `DISAGREED_POINTS`, `NEW_PERSPECTIVES`, `CONTINUE_OR_CONSENSUS_OR_STALEMATE`.
-- Skill `review-think`, no mode. Effort `high` by default. The reviewer runs with full access (web, commands, scratch files outside the project); it must not change project files.
+- Skill `review-think`, no mode. The reviewer runs with full access (web, commands, scratch files outside the project); it must not change project files.
 
 {{PROTOCOL_CORE}}
 
@@ -31,8 +31,6 @@ For this skill:
 - Write your independent analysis to `<session_dir>/analysis.md` before your first `review_wait`; the debate compares against that file.
 - Your analysis may use web search, documentation tools, code reading, and experiments. Compare your `Position` with the reviewer's `review.position`, then `insights`, `considerations`, `recommendations` and `sources` (fallback `review.raw_markdown`), classifying genuine agreement, genuine disagreement, insights only you or only the reviewer raised, and same direction with different depth; cross-check sources and evidence.
 - **Exit rule:** consensus once no significant disagreement remains; stalemate when the same disagreements repeat for two rounds. A point one side gave up without new evidence or argument is not consensus; restate it as a disagreement.
-
-**File modification guard.** Snapshot file contents before and after each round. In git: `GIT_INDEX_FILE="$(mktemp -u)" sh -c 'git add -A && git write-tree'` hashes tracked and untracked files without touching the real index, and skips ignored paths such as the runner's `.cross-review/`; compare two snapshots with `git diff --name-status <before> <after>`. Outside git: `find` + `shasum` of the files. If the reviewer added, deleted or modified anything, stop immediately: list every changed file, tell the user the reviewer broke the no-modification rule, do not revert, call `review_end` without an outcome, and wait for the user.
 
 ## Completion
 Lead with the answer: your recommendation for the user's situation, confidence, and why. Then consensus points, remaining disagreements (point | you | reviewer), positions either side changed and the evidence that changed them, open questions, and consolidated sources. On stalemate, recommend which side to favor and ask the user. Write the same report to `<session_dir>/summary.md`.

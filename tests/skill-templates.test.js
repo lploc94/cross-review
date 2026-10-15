@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -10,6 +11,7 @@ import { SKILL_TEMPLATES } from "../skill-packs/cross-review/scripts/lib/review-
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PACK = path.join(ROOT, "skill-packs/cross-review");
+const RUNNER = path.join(PACK, "scripts", "review-runner.js");
 const RUNNER_SKILLS = Object.keys(PROTOCOL_VARIANTS);
 const OPTS = { runnerPath: "/home/u/.claude/skills/cross-review/scripts/review-runner.js", skillsDir: "/home/u/.claude/skills" };
 
@@ -86,10 +88,18 @@ test("rendering rejects every leftover or malformed placeholder", () => {
   }
 });
 
-test("think-about file guard snapshots contents and ignores runner artifacts", () => {
-  const text = fs.readFileSync(path.join(PACK, "skills", "review-think", "SKILL.md"), "utf8");
-  assert.ok(text.includes("git write-tree"), "content snapshot");
-  assert.ok(!text.includes("git status --porcelain"), "status-based comparison removed");
+test("omitted optional placeholders render as plain defaults, never as instructions to the orchestrator", () => {
+  for (const [skill, template, values] of [
+    ["review-plan", "round1", { PLAN_PATH: "/p/plan.md" }],
+    ["review-impl", "working-tree-round1", {}],
+    ["review-impl", "branch-round1", { BASE_BRANCH: "main" }],
+  ]) {
+    const out = execFileSync(process.execPath, [RUNNER, "render", "--skill", skill, "--template", template, "--skills-dir", path.join(PACK, "skills")],
+      { input: JSON.stringify(values), encoding: "utf8" });
+    const context = out.split("## Session Context\n")[1].split("\n")[0];
+    assert.match(context, /^"None beyond the request/, `${skill}/${template}: Session Context default`);
+    assert.ok(!/fallback block|see schema/i.test(out), `${skill}/${template}: no orchestrator instructions leak`);
+  }
 });
 
 test("review-think sharpens without confirmation, records both sides, and resists reflexive agreement", () => {
@@ -121,4 +131,13 @@ test("review-impl covers commit ranges and own PRs; review-pr reviews other peop
   assert.ok(!/scorecard|REJECT|commit-hygiene/.test(pr + prPrompts), "no threshold scorecard or hygiene category");
   assert.ok(prPrompts.includes("Do not agree automatically"), "round 2 anti-sycophancy");
   assert.ok(!fs.existsSync(path.join(PACK, "skills", "review-commit")), "review-commit removed");
+});
+
+test("effort is high unless the user asks; no skill sizes it from the diff", () => {
+  const core = fs.readFileSync(path.join(PACK, "shared", "protocol", "core.md"), "utf8");
+  assert.ok(core.includes("Omit `effort` (the runner uses `high`) unless the user asks for another"), "core rule");
+  for (const skill of RUNNER_SKILLS) {
+    const text = fs.readFileSync(path.join(PACK, "skills", skill, "SKILL.md"), "utf8");
+    assert.ok(!/effort|xhigh|`medium`/i.test(text), `${skill}: no per-skill effort rule`);
+  }
 });
