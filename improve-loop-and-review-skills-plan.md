@@ -936,3 +936,9 @@ Checkpoint cuối: `/codex-impl-review` trên diff cộng dồn từ `51d4351`.
   - Vòng 2, 1 issue, ACCEPT, sửa ở `4fcd2f4`: vỏ 4 backtick làm mất cả review. Sửa: một bộ theo dõi fence theo CommonMark, dùng chung cho che fence, tìm cuối block và bóc vỏ.
   - Mỗi issue có test hồi quy, đều đỏ trên code cũ. Parser trên 929 output thật: 0 output đổi kết quả so với `55d2ede`.
   - Gate trên `4fcd2f4`: ba test cũ pass, `node --test tests/` 80/80, install-check ok.
+- 2026-10-15: cài vào HOME thật bằng `node bin/codex-skill.js` (user cho phép sửa các chỗ ngoài repo nếu đúng), sau khi checkpoint cuối APPROVE. `node tests/install-check.mjs "$HOME"` ok.
+  - `~/.claude/skills`: thay bản v13 bằng v14; gỡ 3 skill đã bỏ.
+  - `~/.agents/skills`: thêm 7 skill.
+  - `~/.codex/skills`: gỡ 11 thư mục của pack; giữ nguyên 8 skill tavily.
+  - MCP `codex-review`: `claude mcp get` báo Connected; `codex mcp list` báo enabled.
+  - `codex mcp add` ghi lại toàn bộ `~/.codex/config.toml`. So theo ngữ nghĩa (tomllib) thì chỉ mất các giá trị mặc định (`enabled = true` ở context7 và linkup, `args = []` ở node_repl) cùng một dòng comment; không có cấu hình nào khác đổi.
