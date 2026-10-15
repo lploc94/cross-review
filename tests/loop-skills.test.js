@@ -60,6 +60,17 @@ test("loop-plan never lets the agent approve its own plan", () => {
   assert.ok(/`Plan Review`[^\n]*pending/.test(text), "Plan Review starts pending");
 });
 
+test("loop-plan and loop-implement agree on the living-plan rules", () => {
+  const plan = render("loop-plan", "claude");
+  const impl = render("loop-implement", "claude");
+  assert.ok(/fresh session, with only the repository and this file/.test(plan), "plan is self-contained");
+  assert.ok(/end-to-end scenario/.test(plan) && /end-to-end scenario/.test(impl), "end-to-end scenario planned and run");
+  assert.ok(/retry or rollback path/.test(plan) && /retry or rollback path/.test(impl), "risky steps have a recovery path");
+  for (const tag of ["`Decision:`", "`Discovery:`"]) {
+    assert.ok(plan.includes(tag) && impl.includes(tag), `${tag} lines in Progress Log`);
+  }
+});
+
 test("loop-plan stays within 1.4x of the original 80 lines", () => {
   for (const client of Object.keys(CLIENTS)) {
     const n = lineCount(render("loop-plan", client));

@@ -49,9 +49,9 @@ Read the plan file directly at: {PLAN_PATH}
 {SESSION_CONTEXT}
 
 ## What to Review (in priority order)
-1. **Achievability**: Will this plan actually accomplish the target/acceptance criteria? If not, why.
+1. **Achievability**: Will this plan actually accomplish the target/acceptance criteria? If not, why. Does its verification show the behavior working (a test, or a run of the real system), not only that code exists?
 2. **Reality check / hallucination**: Does the plan rely on technology, APIs, libraries, or capabilities that do not exist or do not behave as assumed? Does a proposed step actually solve the problem it claims to solve, or only appear to?
-3. **Missing steps**: What necessary steps, prerequisites, or integration points are absent and would block reaching the target.
+3. **Missing steps**: What necessary steps, prerequisites, or integration points are absent and would block reaching the target, including a retry or rollback path for a migration or destructive step, and context that someone with only the repository and the plan would have to guess.
 4. **Logic & design flaws**: Incorrect reasoning, broken sequencing, flawed architecture, race conditions, wrong data flow.
 5. **Bad practices / pattern violations**: Choices that violate established engineering patterns or will cause real downstream problems.
 6. **Completeness additions**: Propose adding something ONLY when it is required to actually reach the stated target.

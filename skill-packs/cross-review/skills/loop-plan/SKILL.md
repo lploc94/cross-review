@@ -5,7 +5,7 @@ description: Create an execution-ready, code-grounded phased implementation plan
 
 # Loop Plan
 
-Create a plan that another session can execute without guessing requirements. This skill plans only; it does not implement application code. Spikes live only under `.cross-review/spikes/<plan-name>/`.
+Create a plan that a fresh session, with only the repository and this file, can execute without guessing: nothing relies on this conversation, and each project-specific term is explained where first used. This skill plans only; it does not implement application code. Spikes live only under `.cross-review/spikes/<plan-name>/`.
 
 Use it for large work: several features, many files or components, or work that spans sessions. For a small fix or a single-feature change, a phased plan and its reviews cost more time than they save: tell the user, and suggest doing it directly with tests (and `{{CLIENT_SKILL}}review-impl` if they want a review). Plan it only if the user still asks.
 
@@ -13,7 +13,7 @@ Use it for large work: several features, many files or components, or work that 
 
 1. Read applicable {{CLIENT_INSTRUCTIONS}}/repository instructions, inspect `git status`, recent history, relevant files, symbols, callers, commands, and existing tests before drafting.
 2. Separate the user's target from reports, assumptions, completed work, and out-of-scope ideas. Preserve the user's expected behavior as the source of truth.
-3. For each proposed change, cite the repository pattern (path/symbol) and the current established standard for the problem (a current source). When the repository pattern is itself the tangled part, present two options, patch within it or move to the standard, as a user decision. Otherwise choose the smallest project-consistent design; do not add speculative abstractions or compatibility behavior.
+3. For each proposed change, cite the repository pattern (path/symbol) and the current established standard for the problem (a current source). When the repository pattern is itself the tangled part, present two options, patch within it or move to the standard, as a user decision. Otherwise choose the smallest project-consistent design, reusing existing helpers by name (a new helper states why they do not fit); do not add speculative abstractions or compatibility behavior.
 4. Spike every technical assumption you have not seen work here (library API, platform behavior, external capacity, performance) in `.cross-review/spikes/<plan-name>/`, and record it in `Feasibility evidence`.
 5. Resolve assumptions at plan time, by spike or by asking the user. The plan handed to implementation must not contain hard stops that depend on something nobody can verify; record what remains as an assumption with a default and a fallback. Hard stops are only for data loss, security, or irreversible actions.
 6. Resolve ordinary engineering choices autonomously. Ask only when a material product, API, schema, dependency, compatibility, or operational decision cannot be inferred safely.
@@ -57,7 +57,8 @@ loop-plan/v1
 - `Feasibility evidence`: assumption | spike or source | result | date.
 - `Capacity`: the limits described under Limits, or `N/A`.
 - `Review checkpoints`: which phases end with `{{CLIENT_SKILL}}review-impl` and why (after phases that build a contract, schema, migration, state, or money flow), plus one final checkpoint on the cumulative diff. Name a model per checkpoint when the user wants one.
-- `Plan Review`: starts as `pending`; see Quality and review.
+- `Completion Criteria`: the whole-plan outcome, including at least one end-to-end scenario on the real entry point (CLI, server, UI, installer) with its exact command and expected output.
+- `Progress Log`: written during implementation: one line per finished phase, dated `Decision:` lines for approved plan changes, and `Discovery:` lines for surprises that shaped the work, each with evidence.
 
 Repeat the complete phase block for every phase, in dependency order:
 
@@ -75,7 +76,7 @@ Repeat the complete phase block for every phase, in dependency order:
 ### Anti-shortcut coverage
 ### Implementation obligations
 ### Acceptance criteria
-- [ ] AC-N: <binary observable criterion> — proven by <test or inspection>
+- [ ] AC-N: <binary observable criterion> — proven by <test, real run, or inspection>
 ### Focused verification
 `<exact narrow command per AC>`
 ### Phase gates
@@ -86,13 +87,12 @@ Checkpoint: `{{CLIENT_SKILL}}review-impl` | None (covered by the checkpoint afte
 `<proposed commit message>`
 ```
 
-Every phase must describe code evidence, the observable contract, production obligations separately from tests, failure/boundary/state cases where relevant, an oracle that rejects the plausible naive implementation, exact commands and expected outcomes, and a single cohesive commit boundary. Test ladder: a narrow command per AC, light phase gates, and the full suite only in `Global Gates`.
+Every phase must describe code evidence, the observable contract, production obligations separately from tests, failure/boundary/state cases where relevant, for a migration, destructive, or state-changing step whether rerunning it is safe and its retry or rollback path, an oracle that rejects the plausible naive implementation, exact commands and expected outcomes, and a single cohesive commit boundary. Test ladder: a narrow command per AC, light phase gates, and the full suite only in `Global Gates`.
 
 ## Quality and review
 
-- Acceptance criteria are binary and map to tests or concrete inspection evidence.
 - Document dependencies, ownership boundaries, invariants, and explicit exclusions. Record completed baseline work so `{{CLIENT_SKILL}}loop-implement` does not repeat it.
-- Before handoff, check two things: every AC has a test and a narrow command, and every risky assumption has `Feasibility evidence` or a user decision.
+- Before handoff, check: every AC is binary, with a narrow command and a test or a run against the real system (inspection only where neither can show it); every risky assumption has `Feasibility evidence` or a user decision; the end-to-end scenario exists.
 - `Plan Review` stays `pending` until `{{CLIENT_SKILL}}review-plan` returns APPROVE or the user approves; then write `APPROVE (review-plan <session id>, <date>)` or `APPROVE (user, <date>)`.
 
 ## Talking with the user

@@ -22,25 +22,26 @@ For each phase, in order:
 3. Implement the complete production obligations through the real integration path (errors, state transitions, persistence, concurrency, invariants the phase names), minimal and project-consistent. Plan limits come with their stated soft handling.
 4. Run each AC's narrow command, then the phase gates. Smoke-test only where the plan asks.
 5. Inspect the staged diff once: phase-owned files only, no secrets, no leftovers of renamed or removed names.
-6. Commit once with the planned message, together with the phase's progress line in the plan: result, AC evidence, and any deviation from the plan. Never amend, force, skip hooks, or create an empty commit.
+6. Commit once with the planned message, together with the phase's progress line in the plan's `Progress Log`: result, AC evidence, and any deviation from the plan, plus a `Discovery:` line with evidence for each surprise that shaped the work. Never amend, force, skip hooks, or create an empty commit.
 7. If the plan lists this phase as a review checkpoint, run `{{CLIENT_SKILL}}review-impl` with the model the plan names, if any. The review skill governs how findings are handled. Then report the phase and move on.
 
 Gate discipline:
 - A gate that cannot run is a problem to solve (install, build, start what the plan names), not something to note and skip.
 - A failure that also occurs without your changes is a baseline failure: record it in the progress line and continue. Only new failures block.
 - An AC that is not fully met is reported `not done` with the reason, never as done.
+- When a migration, destructive, or state-changing step fails partway, follow the plan's retry or rollback path; without one, stop and ask rather than improvise a destructive recovery.
 
 Plan changes:
 - Do not add technology, dependencies, limits, or mechanisms the plan does not contain on your own.
-- When implementation exposes a real problem in the plan, or an option outside it (yours or a reviewer's) that holds up on its merits, propose a change as one decision. Judge such an option on its merits, not by the plan's silence; drop it only with evidence that it is unsound. The decision gives: context, the problem with a concrete example, options (what changes, cost, risk, reversible or not), your recommendation with evidence, its benefit, harm and impact, and what happens next if agreed. If the user agrees, record it in the plan with the date; do not rerun plan review.
+- When implementation exposes a real problem in the plan, or an option outside it (yours or a reviewer's) that holds up on its merits, propose a change as one decision. Judge such an option on its merits, not by the plan's silence; drop it only with evidence that it is unsound. The decision gives: context, the problem with a concrete example, options (what changes, cost, risk, reversible or not), your recommendation with evidence, its benefit, harm and impact, and what happens next if agreed. If the user agrees, record it as a dated `Decision:` line in `Progress Log`, update the plan sections it changes, and do not rerun plan review.
 
 ## Finalization
 
 1. Run every `Global Gates` command once, exactly as written, on final `HEAD`.
-2. Reuse each phase's AC evidence; check only what spans phases: invariants, ownership boundaries, exclusions.
+2. Run the end-to-end scenario in `Completion Criteria` on final `HEAD` and compare with its expected output. Reuse each phase's AC evidence; check only what spans phases: invariants, ownership boundaries, exclusions.
 3. Self-audit integration over the cumulative diff and commit history: cross-phase interfaces and state boundaries.
 4. Run the plan's final review checkpoint with `{{CLIENT_SKILL}}review-impl` on the cumulative diff.
-5. Fix defects from steps 3–4 with a narrow regression test first, then the affected phase gates. Each fix still meets the plan's criteria and changes only what the defect needs; check what depends on the changed code and other places with the same pattern, since fixes are the main source of new bugs; rerun the full suite only once the fixes are in. Ask before any material scope the audit uncovers; do not hide it in a repair commit.
+5. Fix defects from steps 3–4 with a narrow regression test first, then the affected phase gates. Each fix still meets the plan's criteria and changes only what the defect needs; check what depends on the changed code and other places with the same pattern, since fixes are the main source of new bugs; rerun the full suite and the end-to-end scenario only once the fixes are in. Ask before any material scope the audit uncovers; do not hide it in a repair commit.
 6. Update `Completion Criteria` in the final commit. Verify the worktree is clean apart from recorded unrelated changes.
 
 ## Stop conditions and reporting
