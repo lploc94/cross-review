@@ -2,6 +2,7 @@
 // then prints a JSONL turn whose agent message is the content of FAKE_CODEX_OUTPUT.
 // FAKE_CODEX_SLOW_MS keeps it running (after some progress events) for that long.
 // FAKE_CODEX_FAIL fails the turn after the thread started, with that message (e.g. a usage limit).
+// FAKE_CODEX_STEPS prints that many reasoning events, FAKE_CODEX_STEP_MS apart, before the turn ends.
 import fs from "node:fs";
 import path from "node:path";
 
@@ -27,6 +28,12 @@ if (slowMs > 0) {
   fs.writeSync(1, JSON.stringify({ type: "thread.started", thread_id: "thread-fake-1" }) + "\\n");
   fs.writeSync(1, JSON.stringify({ type: "item.completed", item: { type: "reasoning", text: "reading source.js" } }) + "\\n");
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, slowMs);
+}
+const steps = parseInt(process.env.FAKE_CODEX_STEPS || "0", 10);
+const stepMs = parseInt(process.env.FAKE_CODEX_STEP_MS || "0", 10);
+for (let i = 0; i < steps; i++) {
+  fs.writeSync(1, JSON.stringify({ type: "item.completed", item: { id: "step_" + i, type: "reasoning", text: "step " + i } }) + "\\n");
+  if (stepMs > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, stepMs);
 }
 const out = [
   { type: "thread.started", thread_id: "thread-fake-1" },

@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import { parseOutputMarkdown } from "./lib/parse.js";
 import { beginSession, waitSession, replySession, endSession, DEFAULT_MAX_WAIT_S } from "./lib/review-core.js";
 import { getReviewer } from "./lib/reviewers/index.js";
+import { flushLineTimes } from "./lib/line-times.js";
 
 const __filename = fileURLToPath(import.meta.url);
 
@@ -1237,6 +1238,9 @@ function cmdResume(argv) {
     prompt, "utf8",
   );
 
+  // Stamp the previous round's last lines before its log is archived and reopened
+  if (currentRound > 0) flushLineTimes(resolvedSessionDir, currentRound);
+
   // Archive current round artifacts before any active file is cleared.
   const jsonlFile = path.join(resolvedSessionDir, "output.jsonl");
   const reviewFile = path.join(resolvedSessionDir, "review.md");
@@ -1591,6 +1595,9 @@ function cmdPoll(argv) {
       }
     }
 
+    // Stamp the last lines before the watchdog, which stamps them otherwise, is killed
+    flushLineTimes(stateDir, state.round || 1);
+
     // Cache final JSON (after convergence is computed) and cleanup
     const jsonStr = JSON.stringify(result.json);
     atomicWrite(path.join(stateDir, "final.txt"), jsonStr);
@@ -1634,6 +1641,7 @@ function cmdStop(argv) {
     if (reviewerPid && reviewerPgid) {
       verifyAndKillReviewer(getReviewer(state.reviewer), reviewerPid, reviewerPgid);
     }
+    flushLineTimes(stateDir, state.round || 1);
     if (watchdogPid) {
       verifyAndKillWatchdog(watchdogPid);
     }
@@ -1835,9 +1843,26 @@ function cmdWatchdog(argv) {
     }
   }
 
+  // Stamp output lines with wall-clock times (Codex's event log has none) and exit once
+  // the reviewer is gone. Without a session dir only the deadline below applies.
+  const stamping = Boolean(stateDir) && Number.isInteger(round) && round >= 1;
+  const cursor = {};
+  if (stamping) {
+    flushLineTimes(stateDir, round, cursor);
+    const tick = setInterval(() => {
+      const alive = isAlive(targetPid);
+      flushLineTimes(stateDir, round, cursor);
+      if (!alive) {
+        clearInterval(tick);
+        process.exit(EXIT_SUCCESS);
+      }
+    }, 1000);
+  }
+
   setTimeout(() => {
     if (isAlive(targetPid)) {
-      if (stateDir && !isNaN(round)) {
+      if (stamping) {
+        flushLineTimes(stateDir, round, cursor);
         try { writeDeadlineMarker(stateDir, timeoutS, round); } catch {}
       }
       killTree(targetPid);

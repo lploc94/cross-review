@@ -55,6 +55,16 @@ const INPUT_HELP = "Markdown with the skill's placeholder values: optional front
 // reviewer told not to modify project files. Claude Code plan mode refuses MCP tools without this hint.
 const ANNOTATIONS = { readOnlyHint: true };
 
+// The MCP client's clientInfo (e.g. {name: "claude-code", title: "Claude Code"}): who runs the review.
+function callerInfo(server) {
+  const info = server.server.getClientVersion();
+  if (!info || typeof info.name !== "string" || !info.name) return undefined;
+  const caller = { name: info.name };
+  if (typeof info.title === "string" && info.title) caller.title = info.title;
+  if (typeof info.version === "string" && info.version) caller.version = info.version;
+  return caller;
+}
+
 function createServer() {
   const server = new McpServer({ name: "cross-review", version: "15.0.0" });
 
@@ -81,6 +91,7 @@ function createServer() {
     effort: a.effort,
     timeout: a.timeout_seconds,
     reviewer: a.reviewer,
+    caller: callerInfo(server),
   })));
 
   server.registerTool("review_wait", {

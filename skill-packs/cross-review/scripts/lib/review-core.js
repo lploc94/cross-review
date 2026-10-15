@@ -127,6 +127,16 @@ function updateState(sessionDir, updates) {
   fs.renameSync(tmp, file);
 }
 
+/** Keep the round's input exactly as received (the dashboard reads replies and titles from it). */
+function writeRoundInput(sessionDir, round, text) {
+  const dir = path.join(sessionDir, "inputs");
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, `round-${String(round).padStart(3, "0")}.md`);
+  const tmp = `${file}.tmp-${process.pid}`;
+  fs.writeFileSync(tmp, text, "utf8");
+  fs.renameSync(tmp, file);
+}
+
 function placeholderNames(skillsDir, skill) {
   const promptsPath = path.join(skillsDir, skill, "references", "prompts.md");
   let md;
@@ -203,13 +213,15 @@ function readInput({ inputText, inputFile }) {
 /**
  * Start a review: init the session, render round 1, launch the reviewer (default codex).
  * Returns { session_dir, round: 1, status: "running", analysis_prompt? }.
+ * `caller` ({name, title?, version?}, from the MCP client) is stored for the dashboard.
  */
-export async function beginSession({ skill, mode, inputText, inputFile, workingDir, model, effort, timeout, reviewer, skillsDir }) {
+export async function beginSession({ skill, mode, inputText, inputFile, workingDir, model, effort, timeout, reviewer, skillsDir, caller }) {
   const resolved = resolveTemplates(skill, mode);
   const reviewerModule = getReviewer(reviewer);
   // Absolute, so later replies from another working directory find the same prompts
   const dir = path.resolve(skillsDir || defaultSkillsDir(skill));
-  const values = parseReviewInput(readInput({ inputText, inputFile }), placeholderNames(dir, skill));
+  const raw = readInput({ inputText, inputFile });
+  const values = parseReviewInput(raw, placeholderNames(dir, skill));
 
   const prompt = await render(skill, resolved.templates.round1, dir, values);
   const analysisPrompt = resolved.templates.analysis
@@ -221,13 +233,14 @@ export async function beginSession({ skill, mode, inputText, inputFile, workingD
   if (init.code !== 0 || !line.startsWith("SESSION:")) throw runnerFailure(init, "INIT_FAILED");
   const sessionDir = line.slice("SESSION:".length);
 
-  updateState(sessionDir, { skills_dir: dir, mode: resolved.mode });
+  updateState(sessionDir, { skills_dir: dir, mode: resolved.mode, ...(caller ? { caller } : {}) });
 
   const startArgs = ["start", sessionDir, "--effort", effort || "high"];
   if (model) startArgs.push("--model", model);
   if (timeout) startArgs.push("--timeout", String(timeout));
   startArgs.push("--sandbox", reviewerModule.fullAccessSandbox);
   await runnerJson(startArgs, prompt, "START_FAILED");
+  writeRoundInput(sessionDir, 1, raw);
 
   const out = { session_dir: sessionDir, round: 1, status: "running" };
   if (analysisPrompt !== null) out.analysis_prompt = analysisPrompt;
@@ -325,7 +338,8 @@ export async function replySession(sessionDir, { inputText, inputFile, model, ef
   const skill = state.skill_name;
   const resolved = resolveTemplates(skill, state.mode);
   const dir = state.skills_dir || defaultSkillsDir(skill);
-  const values = parseReviewInput(readInput({ inputText, inputFile }), placeholderNames(dir, skill));
+  const raw = readInput({ inputText, inputFile });
+  const values = parseReviewInput(raw, placeholderNames(dir, skill));
   const prompt = await render(skill, resolved.templates.reply, dir, values);
 
   // `start`/`resume` record effort and model in state.json
@@ -334,7 +348,10 @@ export async function replySession(sessionDir, { inputText, inputFile, model, ef
   const args = ["resume", sessionDir, "--effort", useEffort];
   if (useModel) args.push("--model", useModel);
   if (state.timeout) args.push("--timeout", String(state.timeout));
-  return runnerJson(args, prompt, "RESUME_FAILED");
+  const result = await runnerJson(args, prompt, "RESUME_FAILED");
+  writeRoundInput(sessionDir, result.round, raw);
+  updateState(sessionDir, { ended_at: null, end_outcome: null });
+  return result;
 }
 
 /**
@@ -376,6 +393,7 @@ export async function endSession(sessionDir, { outcome } = {}) {
     }
   }
   await runnerJson(["stop", sessionDir], "", "STOP_FAILED");
+  updateState(sessionDir, { ended_at: Math.floor(Date.now() / 1000), end_outcome: finalized ? "finalized" : "stopped" });
   const out = { status: "ended", session_dir: sessionDir, finalized };
   if (verdict) out.verdict = verdict;
   if (error) out.error = error;

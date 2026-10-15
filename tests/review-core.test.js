@@ -459,3 +459,172 @@ test("CLI begin/wait/end round-trip with --input - and version 15", () => {
   const ended = JSON.parse(execFileSync(process.execPath, [RUNNER, "end", begun.session_dir], { encoding: "utf8" }));
   assert.equal(ended.finalized, true);
 });
+
+// ---------- records for the dashboard ----------
+
+const readJson = f => JSON.parse(fs.readFileSync(f, "utf8"));
+const completeLines = f => (fs.readFileSync(f, "utf8").match(/\n/g) || []).length;
+const timesRows = (dir, round) => {
+  const f = path.join(dir, "outputs", `times-round-${String(round).padStart(3, "0")}.jsonl`);
+  return fs.existsSync(f) ? fs.readFileSync(f, "utf8").trim().split("\n").filter(Boolean).map(l => JSON.parse(l)) : [];
+};
+const lastCount = rows => (rows.length ? rows[rows.length - 1][0] : 0);
+const aliveNow = pid => { try { process.kill(pid, 0); return true; } catch { return false; } };
+async function until(cond, ms, label) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    if (cond()) return;
+    await new Promise(r => setTimeout(r, 100));
+  }
+  assert.fail(`timed out waiting for ${label}`);
+}
+
+test("begin and reply keep each round's raw input", async () => {
+  setCodexOutput("### ISSUE-1: x\n- Severity: high\n\n### VERDICT\n- Status: REVISE\n");
+  const a = "---\nPLAN_PATH: /tmp/a-plan.md\n---\n## USER_REQUEST\nfirst  round\r\n\ttabs kept\n";
+  const b = "PLAN_PATH: /tmp/a-plan.md\n## FIXED_ITEMS\nISSUE-1: x — fixed in a.md:3\n\n## DISPUTED_ITEMS\nNone — all issues addressed\n";
+  const begun = await beginSession({ skill: "review-plan", inputText: a, workingDir: workDir });
+  await waitSession(begun.session_dir, { maxWaitSeconds: 30 });
+  await replySession(begun.session_dir, { inputText: b });
+  await waitSession(begun.session_dir, { maxWaitSeconds: 30 });
+  assert.equal(fs.readFileSync(path.join(begun.session_dir, "inputs", "round-001.md"), "utf8"), a);
+  assert.equal(fs.readFileSync(path.join(begun.session_dir, "inputs", "round-002.md"), "utf8"), b);
+  await endSession(begun.session_dir);
+});
+
+test("a reply whose resume fails writes no input file", async () => {
+  setCodexOutput("### ISSUE-1: x\n- Severity: high\n\n### VERDICT\n- Status: REVISE\n");
+  const begun = await beginSession({ skill: "review-plan", inputText: inputFor("review-plan", "nf"), workingDir: workDir });
+  await waitSession(begun.session_dir, { maxWaitSeconds: 30 });
+  const savedPath = process.env.PATH;
+  process.env.PATH = "/usr/bin:/bin";
+  try {
+    await assert.rejects(replySession(begun.session_dir, { inputText: inputFor("review-plan", "nf2") }), e => e.code === "REVIEWER_NOT_FOUND");
+  } finally {
+    process.env.PATH = savedPath;
+  }
+  assert.ok(fs.existsSync(path.join(begun.session_dir, "inputs", "round-001.md")));
+  assert.ok(!fs.existsSync(path.join(begun.session_dir, "inputs", "round-002.md")));
+  await endSession(begun.session_dir);
+});
+
+test("end records ended_at and outcome; a later reply clears them", async () => {
+  setCodexOutput("### VERDICT\n- Status: APPROVE\n- Reason: ok\n");
+  const ok = await beginSession({ skill: "review-plan", inputText: inputFor("review-plan", "ea"), workingDir: workDir });
+  await waitSession(ok.session_dir, { maxWaitSeconds: 30 });
+  const before = Math.floor(Date.now() / 1000);
+  await endSession(ok.session_dir);
+  let st = readJson(path.join(ok.session_dir, "state.json"));
+  assert.equal(st.end_outcome, "finalized");
+  assert.ok(st.ended_at >= before && st.ended_at <= before + 30);
+
+  setCodexOutput("### ISSUE-1: x\n- Severity: high\n\n### VERDICT\n- Status: REVISE\n");
+  const rev = await beginSession({ skill: "review-plan", inputText: inputFor("review-plan", "eb"), workingDir: workDir });
+  await waitSession(rev.session_dir, { maxWaitSeconds: 30 });
+  await endSession(rev.session_dir);
+  st = readJson(path.join(rev.session_dir, "state.json"));
+  assert.equal(st.end_outcome, "stopped");
+  assert.ok(st.ended_at > 0);
+
+  await replySession(rev.session_dir, { inputText: inputFor("review-plan", "ec") });
+  st = readJson(path.join(rev.session_dir, "state.json"));
+  assert.equal(st.ended_at, null);
+  assert.equal(st.end_outcome, null);
+  await waitSession(rev.session_dir, { maxWaitSeconds: 30 });
+  await endSession(rev.session_dir);
+});
+
+test("CLI begin stores no caller", () => {
+  setCodexOutput("### VERDICT\n- Status: APPROVE\n");
+  const begun = JSON.parse(execFileSync(process.execPath, [RUNNER, "begin", "--skill", "review-plan", "--input", "-", "--working-dir", workDir], {
+    input: inputFor("review-plan", "nc"), encoding: "utf8",
+  }));
+  assert.equal(readJson(path.join(begun.session_dir, "state.json")).caller, undefined);
+  execFileSync(process.execPath, [RUNNER, "end", begun.session_dir], { encoding: "utf8" });
+});
+
+test("the watchdog stamps output lines and exits after the reviewer", async () => {
+  setCodexOutput("### VERDICT\n- Status: APPROVE\n");
+  process.env.FAKE_CODEX_STEPS = "4";
+  process.env.FAKE_CODEX_STEP_MS = "1200";
+  try {
+    // Low-level start without any poll: only the watchdog can stamp lines and notice the exit
+    const init = execFileSync(process.execPath, [RUNNER, "init", "--skill-name", "review-plan", "--working-dir", workDir], { encoding: "utf8" }).trim();
+    const dir = init.slice("SESSION:".length);
+    execFileSync(process.execPath, [RUNNER, "start", dir], { input: "prompt", encoding: "utf8" });
+    const st = readJson(path.join(dir, "state.json"));
+    await until(() => !aliveNow(st.pid), 20000, "reviewer exit");
+    const done = Math.floor(Date.now() / 1000);
+    await until(() => !aliveNow(st.watchdog_pid), 5000, "watchdog exit");
+    const rows = timesRows(dir, 1);
+    assert.ok(rows.length >= 2, `rows: ${JSON.stringify(rows)}`);
+    for (let i = 1; i < rows.length; i++) {
+      assert.ok(rows[i][0] > rows[i - 1][0], "counts strictly increase");
+      assert.ok(rows[i][1] >= rows[i - 1][1], "epochs never decrease");
+    }
+    assert.ok(rows[rows.length - 1][1] > rows[0][1], "rows come from different seconds");
+    assert.ok(rows[0][1] >= st.started_at && rows[rows.length - 1][1] <= done + 2);
+    assert.equal(lastCount(rows), completeLines(path.join(dir, "output.jsonl")));
+    execFileSync(process.execPath, [RUNNER, "stop", dir], { encoding: "utf8" });
+  } finally {
+    delete process.env.FAKE_CODEX_STEPS;
+    delete process.env.FAKE_CODEX_STEP_MS;
+  }
+});
+
+test("a review that ends before the first tick still has every line stamped", async () => {
+  setCodexOutput("### VERDICT\n- Status: APPROVE\n");
+  const begun = await beginSession({ skill: "review-plan", inputText: inputFor("review-plan", "ft"), workingDir: workDir });
+  await waitSession(begun.session_dir, { maxWaitSeconds: 30 });
+  assert.equal(lastCount(timesRows(begun.session_dir, 1)), completeLines(path.join(begun.session_dir, "output.jsonl")));
+  await endSession(begun.session_dir);
+});
+
+test("stop and resume flush the round's line times", async () => {
+  setCodexOutput("### ISSUE-1: x\n- Severity: high\n\n### VERDICT\n- Status: REVISE\n");
+  process.env.FAKE_CODEX_SLOW_MS = "20000";
+  let begun;
+  try {
+    begun = await beginSession({ skill: "review-plan", inputText: inputFor("review-plan", "sr"), workingDir: workDir });
+    await until(() => fs.existsSync(path.join(begun.session_dir, "output.jsonl")) && completeLines(path.join(begun.session_dir, "output.jsonl")) >= 2, 10000, "first events");
+    // One poll records the thread id, so the stopped round can be resumed
+    await waitSession(begun.session_dir, { maxWaitSeconds: 0 });
+    // Kill the watchdog first, so only stop itself can stamp the line written next
+    const wd = readJson(path.join(begun.session_dir, "state.json")).watchdog_pid;
+    process.kill(wd, "SIGKILL");
+    await until(() => !aliveNow(wd), 3000, "watchdog killed");
+    fs.appendFileSync(path.join(begun.session_dir, "output.jsonl"), JSON.stringify({ type: "item.completed", item: { id: "late", type: "reasoning", text: "late" } }) + "\n");
+    // Stop right away: the watchdog may not have ticked since the last line appeared
+    await endSession(begun.session_dir);
+  } finally {
+    delete process.env.FAKE_CODEX_SLOW_MS;
+  }
+  const r1Lines = completeLines(path.join(begun.session_dir, "output.jsonl"));
+  assert.equal(lastCount(timesRows(begun.session_dir, 1)), r1Lines);
+
+  await replySession(begun.session_dir, { inputText: inputFor("review-plan", "sr2") });
+  await waitSession(begun.session_dir, { maxWaitSeconds: 30 });
+  assert.equal(lastCount(timesRows(begun.session_dir, 1)), completeLines(path.join(begun.session_dir, "outputs", "output-round-001.jsonl")));
+  const r2 = timesRows(begun.session_dir, 2);
+  assert.ok(r2.length >= 1);
+  assert.equal(lastCount(r2), completeLines(path.join(begun.session_dir, "output.jsonl")));
+  await endSession(begun.session_dir);
+});
+
+test("flushLineTimes adds at most one row when nothing new was written", async () => {
+  const { flushLineTimes, readLineTimes } = await import("../skill-packs/cross-review/scripts/lib/line-times.js");
+  const dir = fs.mkdtempSync(path.join(tmp, "lt-"));
+  fs.mkdirSync(path.join(dir, "outputs"));
+  fs.writeFileSync(path.join(dir, "output.jsonl"), "{\"a\":1}\n{\"b\":2}\n{\"partial\":");
+  assert.equal(flushLineTimes(dir, 1), 2);
+  assert.equal(flushLineTimes(dir, 1), 2);
+  assert.equal(readLineTimes(dir, 1).length, 1);
+  fs.appendFileSync(path.join(dir, "output.jsonl"), "3}\n");
+  const cursor = {};
+  assert.equal(flushLineTimes(dir, 1, cursor), 3);
+  assert.equal(flushLineTimes(dir, 1, cursor), 3);
+  assert.deepEqual(readLineTimes(dir, 1).map(r => r[0]), [2, 3]);
+  // No output file, bad round: no row, no throw
+  assert.equal(flushLineTimes(path.join(dir, "missing"), 1), null);
+  assert.equal(flushLineTimes(dir, 0), null);
+});

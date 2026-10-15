@@ -48,14 +48,14 @@ after(() => {
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
-async function connect(extraEnv = {}) {
+async function connect(extraEnv = {}, clientInfo = { name: "mcp-server-test", version: "1.0.0" }) {
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [SERVER],
     env: { ...env, ...extraEnv },
     stderr: "pipe",
   });
-  const client = new Client({ name: "mcp-server-test", version: "1.0.0" });
+  const client = new Client(clientInfo);
   await client.connect(transport);
   return { client, transport };
 }
@@ -95,6 +95,20 @@ test("review_begin → review_wait → review_end over stdio", async () => {
     const ended = await call(client, "review_end", { session_dir: begun.body.session_dir });
     assert.equal(ended.body.finalized, true);
     assert.equal(ended.body.verdict, "APPROVE");
+  } finally {
+    await client.close();
+  }
+});
+
+test("review_begin over MCP stores the client's name, title and version as caller", async () => {
+  fs.writeFileSync(outputPath, "### VERDICT\n- Status: APPROVE\n- Reason: ok\n");
+  const { client } = await connect({}, { name: "test-client", title: "Test Client", version: "9.9.9" });
+  try {
+    const begun = await call(client, "review_begin", { skill: "review-plan", input: PLAN_INPUT, working_dir: workDir });
+    const state = JSON.parse(fs.readFileSync(path.join(begun.body.session_dir, "state.json"), "utf8"));
+    assert.deepEqual(state.caller, { name: "test-client", title: "Test Client", version: "9.9.9" });
+    await call(client, "review_wait", { session_dir: begun.body.session_dir, max_wait_seconds: 30 });
+    await call(client, "review_end", { session_dir: begun.body.session_dir });
   } finally {
     await client.close();
   }
