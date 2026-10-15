@@ -72,3 +72,22 @@ test("rendering fails loudly when a template lacks the protocol placeholders", (
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test("rendering rejects every leftover or malformed placeholder", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "render-test-"));
+  try {
+    fs.mkdirSync(path.join(tmp, "skills", "loop-plan"), { recursive: true });
+    for (const bad of ["{{CLIENT_SKILL2}}", "{{client_skill}}", "{{CLIENT_SKILL"]) {
+      fs.writeFileSync(path.join(tmp, "skills", "loop-plan", "SKILL.md"), `# x\nRun ${bad}loop-implement\n`);
+      assert.throws(() => renderSkillTemplate(tmp, "loop-plan", { client: "claude" }), /still contains/, bad);
+    }
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("think-about file guard snapshots contents and ignores runner artifacts", () => {
+  const text = fs.readFileSync(path.join(PACK, "skills", "codex-think-about", "SKILL.md"), "utf8");
+  assert.ok(text.includes("git write-tree"), "content snapshot");
+  assert.ok(!text.includes("git status --porcelain"), "status-based comparison removed");
+});

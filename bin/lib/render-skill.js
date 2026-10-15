@@ -55,9 +55,10 @@ export function renderSkillTemplate(skillPackDir, skill, { runnerPath, skillsDir
   if (runnerPath !== undefined) text = text.replaceAll('{{RUNNER_PATH}}', runnerPath);
   if (skillsDir !== undefined) text = text.replaceAll('{{SKILLS_DIR}}', skillsDir);
 
-  const leftover = text.match(/\{\{[A-Z_]+\}\}/);
+  // Any remaining "{{" is an unresolved or malformed placeholder
+  const leftover = text.match(/\{\{[^\n]{0,40}/);
   if (leftover) {
-    throw new Error(`Template ${skill}/SKILL.md still contains ${leftover[0]} after rendering`);
+    throw new Error(`Template ${skill}/SKILL.md still contains "${leftover[0]}" after rendering`);
   }
   return text;
 }
