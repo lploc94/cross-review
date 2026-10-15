@@ -10,6 +10,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { getReviewer } from "./reviewers/index.js";
+import { resolveSettings } from "./config.js";
 
 const SCRIPTS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const RUNNER = path.join(SCRIPTS_DIR, "review-runner.js");
@@ -48,6 +49,9 @@ export const SKILL_TEMPLATES = {
     modes: { default: { round1: "round1", reply: "round2+", analysis: "analysis" } },
   },
 };
+
+/** Replaceable in tests: the Follow reviews step (default: dashboard/follow.js, loaded on first use). */
+export const hooks = { follow: null };
 
 export class ReviewError extends Error {
   constructor(message, code = "UNKNOWN_ERROR") {
@@ -210,14 +214,38 @@ function readInput({ inputText, inputFile }) {
   throw new ReviewError("Review input is required", "INVALID_INPUT");
 }
 
+/** Settings for a new session; a broken config file is CONFIG_INVALID, before any session exists. */
+function sessionSettings(skill, workingDir, explicit) {
+  try {
+    return resolveSettings({ skill, workingDir, explicit });
+  } catch (e) {
+    if (e.code === "CONFIG_INVALID") throw new ReviewError(e.message, "CONFIG_INVALID");
+    throw e;
+  }
+}
+
+/** Follow reviews: open the session in the dashboard. Failures only become dashboard_error. */
+async function follow(sessionDir) {
+  try {
+    const fn = hooks.follow || (await import("./dashboard/follow.js")).followInDashboard;
+    // The workspace as init resolved it: <ws>/.cross-review/sessions/<id>
+    const r = await fn({ sessionDir, workingDir: path.dirname(path.dirname(path.dirname(sessionDir))) });
+    return r && r.url ? { dashboard_url: r.url } : { dashboard_error: (r && r.error) || "the dashboard did not answer" };
+  } catch (e) {
+    return { dashboard_error: e.message };
+  }
+}
+
 /**
  * Start a review: init the session, render round 1, launch the reviewer (default codex).
- * Returns { session_dir, round: 1, status: "running", analysis_prompt? }.
+ * Returns { session_dir, round: 1, status: "running", analysis_prompt?, dashboard_url? | dashboard_error? }.
+ * Reviewer, model and effort not passed come from the config (workspace, then global);
  * `caller` ({name, title?, version?}, from the MCP client) is stored for the dashboard.
  */
 export async function beginSession({ skill, mode, inputText, inputFile, workingDir, model, effort, timeout, reviewer, skillsDir, caller }) {
   const resolved = resolveTemplates(skill, mode);
-  const reviewerModule = getReviewer(reviewer);
+  const settings = sessionSettings(skill, workingDir || process.cwd(), { reviewer, model, effort });
+  const reviewerModule = getReviewer(settings.reviewer);
   // Absolute, so later replies from another working directory find the same prompts
   const dir = path.resolve(skillsDir || defaultSkillsDir(skill));
   const raw = readInput({ inputText, inputFile });
@@ -233,10 +261,10 @@ export async function beginSession({ skill, mode, inputText, inputFile, workingD
   if (init.code !== 0 || !line.startsWith("SESSION:")) throw runnerFailure(init, "INIT_FAILED");
   const sessionDir = line.slice("SESSION:".length);
 
-  updateState(sessionDir, { skills_dir: dir, mode: resolved.mode, ...(caller ? { caller } : {}) });
+  updateState(sessionDir, { skills_dir: dir, mode: resolved.mode, settings_sources: settings.sources, ...(caller ? { caller } : {}) });
 
-  const startArgs = ["start", sessionDir, "--effort", effort || "high"];
-  if (model) startArgs.push("--model", model);
+  const startArgs = ["start", sessionDir, "--effort", settings.effort];
+  if (settings.model) startArgs.push("--model", settings.model);
   if (timeout) startArgs.push("--timeout", String(timeout));
   startArgs.push("--sandbox", reviewerModule.fullAccessSandbox);
   await runnerJson(startArgs, prompt, "START_FAILED");
@@ -244,6 +272,7 @@ export async function beginSession({ skill, mode, inputText, inputFile, workingD
 
   const out = { session_dir: sessionDir, round: 1, status: "running" };
   if (analysisPrompt !== null) out.analysis_prompt = analysisPrompt;
+  if (settings.open_dashboard === true) Object.assign(out, await follow(sessionDir));
   return out;
 }
 

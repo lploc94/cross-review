@@ -36,8 +36,11 @@ before(() => {
   workDir = path.join(tmp, "work");
   fs.mkdirSync(workDir);
   outputPath = path.join(tmp, "codex-output.md");
+  fs.mkdirSync(path.join(tmp, "home"));
   env = {
     ...process.env,
+    // begin reads ~/.cross-review/config.json: never the real one
+    HOME: path.join(tmp, "home"),
     PATH: `${bin}${path.delimiter}${process.env.PATH}`,
     FAKE_CODEX_LOG: path.join(tmp, "codex-log.jsonl"),
     FAKE_CODEX_OUTPUT: outputPath,

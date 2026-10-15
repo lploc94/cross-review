@@ -67,6 +67,44 @@
 
 <section id="settings" class="view">
   <h1>Settings</h1>
+  <div class="scope">
+    <label><input type="radio" name="scope" value="global" checked> <span data-i="globe">Global</span></label>
+    <label><input type="radio" name="scope" value="workspace"> <span data-i="folder">Workspace</span>
+      <select id="ws" aria-label="Workspace"></select></label>
+  </div>
+  <p class="explain" id="explain"></p>
+  <p class="error" id="settings-error"></p>
+
+  <h2>Defaults</h2>
+  <div class="form">
+    <div>Reviewer</div><div><select id="f-reviewer-set" aria-label="Reviewer"></select><div class="help" id="reviewer-help"></div></div>
+    <div>Model</div><div><select id="f-model-set" aria-label="Model"></select> <input type="text" id="f-model-other" class="other" placeholder="model name" aria-label="Model name"> <a id="refresh" data-i="refresh">refresh list</a><div class="help" id="model-help"></div></div>
+    <div>Effort</div><div><select id="f-effort-set" aria-label="Effort"></select><div class="help">Only the levels the model supports.</div></div>
+    <div>Follow reviews</div><div><select id="f-follow" aria-label="Follow reviews"></select><div class="help">When on, every review that starts opens here in your browser so you can watch it. Starts the dashboard if it is not running; it closes itself after 30 minutes with no page open.</div></div>
+  </div>
+
+  <h2>Per skill</h2>
+  <table>
+    <thead><tr><th>Skill</th><th>Model</th><th>Effort</th><th>Result here</th></tr></thead>
+    <tbody id="per-skill"></tbody>
+  </table>
+  <p class="sub small">First match wins: what you tell the agent in chat · workspace, this skill · workspace · global, this skill · global · Codex's own model and effort <code>high</code>.</p>
+
+  <div id="avatars-block">
+    <h2>Avatars</h2>
+    <table>
+      <thead><tr><th>Who</th><th>Seen in</th><th class="right">Image</th></tr></thead>
+      <tbody id="avatars"></tbody>
+    </table>
+    <p class="sub small">Applies everywhere and saves as soon as you pick an image. Images stay on this computer in <span class="mono">~/.cross-review/avatars/</span>. PNG, JPEG, WebP or GIF, up to 1 MB. Without an image the default pictures are shown.</p>
+  </div>
+
+  <div class="actions">
+    <details class="push"><summary id="preview-title">Show file</summary><pre id="preview"></pre></details>
+    <span class="error" id="save-error"></span>
+    <button class="plain" id="clear-ws">Clear this workspace</button>
+    <button class="plain" id="discard">Discard</button><button id="save">Save</button>
+  </div>
 </section>
 </main>
 </body>

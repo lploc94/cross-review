@@ -71,16 +71,16 @@ function createServer() {
   server.registerTool("review_begin", {
     title: "Begin a review",
     annotations: ANNOTATIONS,
-    description: "Start a review session: render round 1 for the skill and launch the reviewer in the background. Returns session_dir; peer skills (review-think, review-pr) also return analysis_prompt for the orchestrator's independent analysis.",
+    description: "Start a review session: render round 1 for the skill and launch the reviewer in the background. Returns session_dir; peer skills (review-think, review-pr) also return analysis_prompt for the orchestrator's independent analysis. When the user turned on Follow reviews in the dashboard, also dashboard_url (the session's live page; you may give it to the user) or dashboard_error (the review runs anyway).",
     inputSchema: {
       skill: z.enum(SKILLS),
       mode: z.string().optional().describe("review-impl: working-tree | branch"),
       input: z.string().describe(INPUT_HELP),
       working_dir: z.string().describe("Absolute path of the repository under review"),
-      model: z.string().optional().describe("Reviewer model; omit to use the reviewer CLI default. Remembered for later rounds."),
-      effort: z.string().optional().describe("Reasoning effort, default high. Remembered for later rounds."),
+      model: z.string().optional().describe("Reviewer model; omit to use the dashboard settings (workspace, then global), else the reviewer CLI default. Remembered for later rounds."),
+      effort: z.string().optional().describe("Reasoning effort; omit to use the dashboard settings, else high. Remembered for later rounds."),
       timeout_seconds: z.number().int().positive().optional(),
-      reviewer: z.enum(REVIEWER_NAMES).optional().describe(`Reviewer CLI, default ${DEFAULT_REVIEWER}. Remembered for later rounds.`),
+      reviewer: z.enum(REVIEWER_NAMES).optional().describe(`Reviewer CLI; omit to use the dashboard settings, else ${DEFAULT_REVIEWER}. Remembered for later rounds.`),
     },
   }, tool(a => beginSession({
     skill: a.skill,

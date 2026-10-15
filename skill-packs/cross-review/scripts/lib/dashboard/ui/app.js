@@ -5,6 +5,7 @@
 import { ic } from "./icons.js";
 import { esc, renderInline, renderMarkdown } from "./markdown.js";
 import { PAGE, applyPage, groupReads, mergeActivity, newFeed, onSnapshot, visible } from "./feed.js";
+import { OTHER, SKILLS, effortOptions, inheritedValue, mergeForm, modelOptions, resolveHere } from "./settings.js";
 
 const $ = sel => document.querySelector(sel);
 /** Escaped text with `code` spans, as titles quote file names that way. */
@@ -72,6 +73,7 @@ function route() {
   window.scrollTo(0, 0);
   if (r.view === "sessions") connect("/api/stream?view=list", { sessions: e => apply(JSON.parse(e.data)) });
   else connect(null);
+  if (r.view === "settings") openSettings(r);
 }
 
 /** Open `url` as the tab's stream, closing the one before; null closes it. */
@@ -190,9 +192,16 @@ function party(who, d) {
   return { letters, tip: c.title || "Agent" };
 }
 
+/** The avatars key of each side: the user's image when one is uploaded. */
+function partyKey(who, d) {
+  if (who === "us") return "you";
+  if (who === "rv") return `reviewer:${d.facts.reviewer}`;
+  return `agent:${(d.facts.caller && normalCaller(d.facts.caller.name)) || "unknown"}`;
+}
+
 const mark = (who, d) => {
   const p = party(who, d);
-  return `<div class="mark ${who}" title="${esc(p.tip)}"><img src="${AVATAR[who]}" alt="${esc(p.letters)}"></div>`;
+  return `<div class="mark ${who}" title="${esc(p.tip)}"><img src="${avatarSrc(who, partyKey(who, d))}" alt="${esc(p.letters)}"></div>`;
 };
 
 const msg = (d, who, head, body, anchor) => `<div class="m ${who === "rv" ? "" : "r"} ${who === "us" ? "us" : ""}"${anchor ? ` id="${esc(anchor)}"` : ""}>
@@ -286,7 +295,8 @@ function renderFacts(d) {
   const f = d.facts;
   const reviewer = REVIEWERS[f.reviewer] || f.reviewer;
   $("#f-reviewer").textContent = reviewer;
-  $("#f-model").textContent = f.model || `${reviewer} default`;
+  const fallback = catalogInfo.codexDefault ? `${modelName(catalogInfo.codexDefault, catalogInfo.models)} · ${reviewer} default` : `${reviewer} default`;
+  $("#f-model").textContent = f.model ? modelName(f.model, catalogInfo.models) : fallback;
   const src = f.sources && f.sources.effort ? String(f.sources.effort).split(":").join(", ") : null;
   $("#f-effort").textContent = f.effort ? `${f.effort}${src ? ` · ${src}` : ""}` : "—";
   $("#f-caller").textContent = (f.caller && f.caller.title) || "Agent";
@@ -547,6 +557,269 @@ function onDetailClick(e) {
   }
 }
 
+// ---------- Settings ----------
+
+let settings = null; // /api/settings
+let catalogInfo = { models: null, codexDefault: null }; // for model names on session pages
+let avatars = { keys: [], parties: [] };
+let avatarStamp = Date.now();
+const sv = { scope: "global", ws: null, draft: {}, touched: new Set(), refreshed: false };
+
+const ALL_PATHS = ["reviewer", "model", "effort", "open_dashboard", ...SKILLS.flatMap(s => [`skills.${s}.model`, `skills.${s}.effort`])];
+const clone = x => JSON.parse(JSON.stringify(x || {}));
+const modelName = (slug, models = settings ? settings.models : catalogInfo.models) => {
+  const m = slug && models ? models.find(x => x.slug === slug) : null;
+  return m ? m.name : slug;
+};
+const savedConfig = () => (sv.scope === "global" ? settings.global : settings.workspaces[sv.ws] || {});
+const globalHere = () => (sv.scope === "global" ? sv.draft : settings.global);
+const workspaceHere = () => (sv.scope === "workspace" ? sv.draft : null);
+
+function ago(epoch) {
+  const s = Math.max(0, Math.floor(nowS() - epoch));
+  if (s < 60) return "just now";
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m} minute${m === 1 ? "" : "s"} ago`;
+  const h = Math.floor(m / 60);
+  return `${h} hour${h === 1 ? "" : "s"} ago`;
+}
+
+function setPath(obj, p, value) {
+  const keys = p.split(".");
+  let o = obj;
+  for (const k of keys.slice(0, -1)) o = o[k] = o[k] && typeof o[k] === "object" ? o[k] : {};
+  if (value === undefined || value === "") delete o[keys[keys.length - 1]]; else o[keys[keys.length - 1]] = value;
+}
+
+const optionsHtml = opts => opts.map(o => `<option value="${esc(o.value)}"${o.selected ? " selected" : ""}>${esc(o.label)}</option>`).join("");
+
+async function openSettings(r) {
+  const [s, a] = await Promise.all([getJson("/api/settings"), getJson("/api/avatars")]);
+  if (!s) {
+    $("#settings-error").textContent = "The settings could not be loaded.";
+    return;
+  }
+  settings = s;
+  catalogInfo = { models: s.models, codexDefault: s.codexDefault };
+  if (a) avatars = a;
+  const names = Object.keys(settings.workspaces);
+  sv.scope = r.ws ? "workspace" : "global";
+  sv.ws = r.ws && names.includes(r.ws) ? r.ws : (sv.ws && names.includes(sv.ws) ? sv.ws : names[0] || null);
+  if (r.ws && !names.includes(r.ws)) {
+    location.replace("#/settings");
+    return;
+  }
+  resetDraft();
+  renderSettings();
+}
+
+function resetDraft() {
+  sv.draft = clone(savedConfig());
+  sv.touched = new Set();
+  $("#save-error").textContent = "";
+}
+
+/** The model a review would use here (for the effort levels and the help line). */
+function effectiveModel() {
+  return resolveHere({ global: globalHere(), workspace: workspaceHere(), skill: null, key: "model" }).value || settings.codexDefault;
+}
+
+function renderSettings() {
+  if (!settings) return;
+  const ws = sv.ws;
+  const workspace = sv.scope === "workspace";
+  const name = ws ? settings.names[ws] || ws : "";
+  const d = sv.draft;
+  document.querySelectorAll("#settings input[name=scope]").forEach(el => { el.checked = el.value === sv.scope; });
+  $("#ws").innerHTML = Object.keys(settings.workspaces).map(w => `<option value="${esc(w)}"${w === ws ? " selected" : ""}>${esc(settings.names[w] || w)}</option>`).join("");
+  $("#ws").disabled = !ws;
+  $("#settings input[value=workspace]").disabled = !ws;
+  $("#explain").innerHTML = workspace
+    ? `<span class="path">${esc(settings.paths[ws])}</span><br>Used only in <b>${esc(name)}</b>. Fields left on Inherit take the global value. The file sits next to this workspace's sessions, so git ignores it.`
+    : `<span class="path">${esc(settings.globalPath)}</span><br>Used by every workspace unless the workspace sets its own value. Anything you tell the agent in chat still comes first.`;
+  $("#settings-error").textContent = (workspace ? settings.errors[ws] : settings.errors.global) || "";
+
+  // Defaults
+  const reviewerOpts = workspace ? [{ value: "", label: "Inherit — Codex", selected: !d.reviewer }, { value: "codex", label: "Codex", selected: d.reviewer === "codex" }]
+    : [{ value: "", label: "Codex", selected: true }];
+  $("#f-reviewer-set").innerHTML = optionsHtml(reviewerOpts);
+  const info = settings.reviewer;
+  $("#reviewer-help").textContent = info && info.version ? `${info.version}, ${info.loggedIn ? "signed in" : "not signed in"}` : "The codex CLI was not found.";
+
+  const codexDefault = settings.codexDefault ? `Codex default (${modelName(settings.codexDefault)})` : "Codex default";
+  const inhModel = inheritedValue({ global: settings.global, workspace: workspaceHere(), skill: null, key: "model" });
+  const modelInherit = workspace ? `Inherit — ${inhModel ? modelName(inhModel) : "Codex default"}` : codexDefault;
+  $("#f-model-set").innerHTML = optionsHtml(modelOptions({ catalog: settings.models, saved: d.model, inherited: modelInherit, codexDefault: settings.codexDefault }));
+  $("#f-model-set").dataset.path = "model";
+  const other = $("#f-model-other");
+  other.classList.toggle("on", $("#f-model-set").value === OTHER);
+  const em = effectiveModel();
+  const desc = settings.models && settings.models.find(m => m.slug === em);
+  $("#model-help").textContent = settings.models
+    ? `${desc ? `${desc.description} ` : ""}Listed by codex debug models, ${ago(settings.modelsFetchedAt)}.`
+    : "The model list is unavailable (codex debug models failed). Pick Other… to type a model name.";
+  $("#refresh").lastChild.textContent = sv.refreshed ? "refreshed just now" : "refresh list";
+
+  const inhEffort = inheritedValue({ global: settings.global, workspace: workspaceHere(), skill: null, key: "effort" });
+  $("#f-effort-set").innerHTML = optionsHtml(effortOptions({ catalog: settings.models, model: em, saved: d.effort, inherited: workspace ? `Inherit — ${inhEffort || "high"}` : "high (default)" }));
+  $("#f-effort-set").dataset.path = "effort";
+
+  const follow = d.open_dashboard;
+  const globalFollow = settings.global.open_dashboard === true;
+  $("#f-follow").innerHTML = optionsHtml([
+    ...(workspace ? [{ value: "", label: `Inherit — ${globalFollow ? "on" : "off"}`, selected: follow === undefined }] : []),
+    { value: "on", label: "On — open each new review", selected: follow === true },
+    { value: "off", label: "Off", selected: follow === false || (!workspace && follow !== true) },
+  ]);
+
+  // Per skill
+  $("#per-skill").innerHTML = SKILLS.map(s => {
+    const o = (d.skills && d.skills[s]) || {};
+    const model = resolveHere({ global: globalHere(), workspace: workspaceHere(), skill: s, key: "model" });
+    const effort = resolveHere({ global: globalHere(), workspace: workspaceHere(), skill: s, key: "effort" });
+    const im = inheritedValue({ global: workspace ? settings.global : sv.draft, workspace: workspaceHere(), skill: s, key: "model" });
+    const ie = inheritedValue({ global: workspace ? settings.global : sv.draft, workspace: workspaceHere(), skill: s, key: "effort" });
+    const mOpts = modelOptions({ catalog: settings.models, saved: o.model, inherited: `Inherit — ${im ? modelName(im) : "Codex default"}`, codexDefault: settings.codexDefault });
+    const eOpts = effortOptions({ catalog: settings.models, model: model.value || settings.codexDefault, saved: o.effort, inherited: `Inherit — ${ie || "high"}` });
+    const shown = model.value ? modelName(model.value) : settings.codexDefault ? modelName(settings.codexDefault) : "Codex default";
+    return `<tr><td>${esc(s)}${o.model || o.effort ? `<span class="set">set here</span>` : ""}</td>
+      <td><select data-path="skills.${s}.model" aria-label="${esc(s)} model">${optionsHtml(mOpts)}</select></td>
+      <td><select data-path="skills.${s}.effort" aria-label="${esc(s)} effort">${optionsHtml(eOpts)}</select></td>
+      <td class="soft">${esc(shown)} · ${esc(effort.value)}<div class="line2">${esc(model.source)}; ${esc(effort.source)}</div></td></tr>`;
+  }).join("");
+
+  $("#preview-title").textContent = workspace ? `Show ${name}/.cross-review/config.json` : `Show ${settings.globalPath}`;
+  $("#preview").textContent = JSON.stringify(mergeForm(savedConfig(), sv.draft, sv.touched), null, 2);
+  $("#avatars-block").classList.toggle("on", !workspace);
+  renderAvatarTable();
+  $("#clear-ws").classList.toggle("off", !workspace);
+  $("#save").textContent = workspace ? `Save for ${name}` : "Save global";
+}
+
+// ----- avatars -----
+
+const normalCaller = name => String(name || "").toLowerCase().replace(/[^a-z0-9._-]/g, "-");
+const avatarSrc = (who, key) => (avatars.keys.includes(key) ? `avatars/${encodeURIComponent(key)}?v=${avatarStamp}` : AVATAR[who]);
+
+function renderAvatarTable() {
+  $("#avatars").innerHTML = avatars.parties.map(p => {
+    const has = avatars.keys.includes(p.key);
+    const letters = p.who === "us" ? "Y" : p.who === "rv" ? "CX" : p.name ? CALLER_LETTERS[p.name] || p.label.split(" · ")[1].trim()[0].toUpperCase() : "AG";
+    return `<tr><td><div class="mark ${p.who}"><img src="${avatarSrc(p.who, p.key)}" alt="${esc(letters)}"></div>${esc(p.label)}</td>
+      <td class="soft">${esc(p.seenIn)}</td>
+      <td class="right"><label><a>${has ? "Change" : "Upload image"}</a><input type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-av="${esc(p.key)}" hidden></label>${has ? ` · <a data-av-clear="${esc(p.key)}">remove</a>` : ""}</td></tr>`;
+  }).join("");
+}
+
+async function reloadAvatars() {
+  const a = await getJson("/api/avatars");
+  if (a) avatars = a;
+  avatarStamp = Date.now();
+  renderAvatarTable();
+  if (view && view.detail) {
+    view.sig = null;
+    renderDetail(view);
+  }
+}
+
+async function uploadAvatar(input) {
+  const file = input.files[0];
+  if (!file) return;
+  if (file.size > 1024 * 1024) {
+    alert("That image is over 1 MB. Pick a smaller one.");
+    return;
+  }
+  const res = await fetch(`/api/avatars/${encodeURIComponent(input.dataset.av)}`, { method: "POST", body: file }).catch(() => null);
+  if (!res || !res.ok) {
+    const msg = res ? (await res.json().catch(() => ({}))).error : null;
+    alert(msg || "The image could not be saved.");
+    return;
+  }
+  reloadAvatars();
+}
+
+// ----- events -----
+
+function onSettingsChange(e) {
+  const t = e.target;
+  if (t.name === "scope") {
+    location.hash = t.value === "global" ? "#/settings" : `#/settings/${encodeURIComponent($("#ws").value)}`;
+    return;
+  }
+  if (t.id === "ws") {
+    location.hash = `#/settings/${encodeURIComponent(t.value)}`;
+    return;
+  }
+  if (t.dataset.av !== undefined && t.type === "file") return uploadAvatar(t);
+  if (t.id === "f-follow") {
+    const v = t.value === "on" ? true : t.value === "off" ? (sv.scope === "workspace" ? false : undefined) : undefined;
+    setPath(sv.draft, "open_dashboard", v);
+    sv.touched.add("open_dashboard");
+  } else if (t.id === "f-reviewer-set") {
+    setPath(sv.draft, "reviewer", t.value || undefined);
+    sv.touched.add("reviewer");
+  } else if (t.dataset.path) {
+    let value = t.value;
+    if (value === OTHER) {
+      if (t.dataset.path === "model") {
+        $("#f-model-other").classList.add("on");
+        $("#f-model-other").focus();
+        return;
+      }
+      value = (prompt("Model name") || "").trim();
+      if (!value) return renderSettings();
+    }
+    setPath(sv.draft, t.dataset.path, value || undefined);
+    sv.touched.add(t.dataset.path);
+  } else if (t.id === "f-model-other") {
+    const value = t.value.trim();
+    setPath(sv.draft, "model", value || undefined);
+    sv.touched.add("model");
+  } else {
+    return;
+  }
+  renderSettings();
+}
+
+async function onSettingsClick(e) {
+  const t = e.target;
+  const clear = t.closest("[data-av-clear]");
+  if (clear) {
+    await fetch(`/api/avatars/${encodeURIComponent(clear.dataset.avClear)}`, { method: "DELETE" }).catch(() => null);
+    return reloadAvatars();
+  }
+  if (t.closest("#refresh")) {
+    const m = await getJson("/api/models?refresh=1");
+    if (m && settings) {
+      Object.assign(settings, { models: m.models, modelsFetchedAt: m.fetchedAt, codexDefault: m.codexDefault, reviewer: m.reviewer });
+      catalogInfo = { models: m.models, codexDefault: m.codexDefault };
+      sv.refreshed = true;
+      renderSettings();
+    }
+    return;
+  }
+  if (t.id === "discard") {
+    resetDraft();
+    renderSettings();
+  } else if (t.id === "clear-ws") {
+    sv.draft = {};
+    sv.touched = new Set(ALL_PATHS);
+    renderSettings();
+  } else if (t.id === "save") {
+    const config = mergeForm(savedConfig(), sv.draft, sv.touched);
+    const body = sv.scope === "global" ? { scope: "global", config } : { scope: "workspace", ws: sv.ws, config };
+    const res = await fetch("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).catch(() => null);
+    if (!res || !res.ok) {
+      const msg = res ? (await res.json().catch(() => ({}))).error : null;
+      $("#save-error").textContent = msg || "The settings could not be saved.";
+      return;
+    }
+    if (sv.scope === "global") settings.global = (await res.json()).config; else settings.workspaces[sv.ws] = (await res.json()).config;
+    resetDraft();
+    renderSettings();
+  }
+}
+
 // ---------- data ----------
 
 function apply(payload) {
@@ -564,15 +837,18 @@ async function start() {
     const row = e.target.closest("tr[data-go]");
     if (row && !e.target.closest("a")) location.hash = row.dataset.go;
     if (e.target.closest("#detail")) onDetailClick(e);
+    if (e.target.closest("#settings")) onSettingsClick(e);
   });
+  $("#settings").addEventListener("change", onSettingsChange);
   // An avatar that does not load shows its letters
   document.addEventListener("error", e => {
     const img = e.target;
     if (img.tagName === "IMG" && img.parentElement && img.parentElement.classList.contains("mark")) img.replaceWith(img.alt);
   }, true);
   window.addEventListener("hashchange", route);
-  const first = await getJson("/api/sessions");
+  const [first, a] = await Promise.all([getJson("/api/sessions"), getJson("/api/avatars")]);
   if (first) apply(first);
+  if (a) avatars = a;
   route();
   setInterval(tickClocks, 1000);
 }

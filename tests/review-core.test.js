@@ -12,9 +12,11 @@ import {
   computeNext,
   endSession,
   parseReviewInput,
+  hooks,
   replySession,
   waitSession,
 } from "../skill-packs/cross-review/scripts/lib/review-core.js";
+import { followInDashboard } from "../skill-packs/cross-review/scripts/lib/dashboard/follow.js";
 import { writeFakeCodex } from "./helpers/fake-codex.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -26,8 +28,12 @@ let workDir;
 let logPath;
 let outputPath;
 
+const savedHome = process.env.HOME;
 before(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), "review-core-test-"));
+  // begin reads ~/.cross-review/config.json: never the real one
+  process.env.HOME = path.join(tmp, "home");
+  fs.mkdirSync(process.env.HOME);
   const bin = path.join(tmp, "bin");
   fs.mkdirSync(bin);
   writeFakeCodex(bin);
@@ -41,6 +47,7 @@ before(() => {
 });
 
 after(() => {
+  process.env.HOME = savedHome;
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -646,4 +653,114 @@ test("flushLineTimes adds at most one row when nothing new was written", async (
   // No output file, bad round: no row, no throw
   assert.equal(flushLineTimes(path.join(dir, "missing"), 1), null);
   assert.equal(flushLineTimes(dir, 0), null);
+});
+
+// ---------- settings from the two config levels ----------
+
+const globalConfig = () => path.join(process.env.HOME, ".cross-review", "config.json");
+function putConfig(file, value) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, typeof value === "string" ? value : JSON.stringify(value));
+}
+function freshWorkspace(name) {
+  const ws = fs.realpathSync(fs.mkdtempSync(path.join(tmp, `${name}-`)));
+  return ws;
+}
+const stateOf = dir => JSON.parse(fs.readFileSync(path.join(dir, "state.json"), "utf8"));
+const argAfter = (args, flag) => (args.includes(flag) ? args[args.indexOf(flag) + 1] : undefined);
+
+test("global effort reaches the reviewer with its source; a requested effort wins", async () => {
+  const ws = freshWorkspace("global-effort");
+  putConfig(globalConfig(), { effort: "xhigh" });
+  setCodexOutput("### VERDICT\n- Status: APPROVE\n");
+  try {
+    resetLog();
+    const a = await beginSession({ skill: "review-plan", inputText: inputFor("review-plan", "ge"), workingDir: ws });
+    await waitSession(a.session_dir, { maxWaitSeconds: 30 });
+    assert.equal(argAfter(codexCalls()[0].args, "--config"), "model_reasoning_effort=xhigh");
+    assert.equal(argAfter(codexCalls()[0].args, "--model"), undefined, "no model configured: Codex picks");
+    assert.deepEqual(stateOf(a.session_dir).settings_sources, { reviewer: "default", model: "default", effort: "global", open_dashboard: "default" });
+    resetLog();
+    const b = await beginSession({ skill: "review-plan", inputText: inputFor("review-plan", "ge"), workingDir: ws, effort: "low" });
+    await waitSession(b.session_dir, { maxWaitSeconds: 30 });
+    assert.equal(argAfter(codexCalls()[0].args, "--config"), "model_reasoning_effort=low");
+    assert.equal(stateOf(b.session_dir).settings_sources.effort, "requested");
+    assert.equal(stateOf(b.session_dir).effort, "low");
+    await endSession(a.session_dir);
+    await endSession(b.session_dir);
+  } finally {
+    fs.rmSync(globalConfig(), { force: true });
+  }
+});
+
+test("a workspace per-skill model is passed as --model; other skills there keep the default", async () => {
+  const ws = freshWorkspace("ws-model");
+  putConfig(path.join(ws, ".cross-review", "config.json"), { skills: { "review-impl": { model: "model-invented-1" } } });
+  setCodexOutput("### VERDICT\n- Status: APPROVE\n");
+  resetLog();
+  const s = await beginSession({ skill: "review-impl", mode: "working-tree", inputText: inputFor("review-impl", "wm"), workingDir: ws });
+  await waitSession(s.session_dir, { maxWaitSeconds: 30 });
+  assert.equal(argAfter(codexCalls()[0].args, "--model"), "model-invented-1");
+  assert.equal(stateOf(s.session_dir).settings_sources.model, "workspace:review-impl");
+  resetLog();
+  const p = await beginSession({ skill: "review-plan", inputText: inputFor("review-plan", "wm"), workingDir: ws });
+  await waitSession(p.session_dir, { maxWaitSeconds: 30 });
+  assert.equal(argAfter(codexCalls()[0].args, "--model"), undefined);
+  await endSession(s.session_dir);
+  await endSession(p.session_dir);
+});
+
+test("a broken config rejects begin with CONFIG_INVALID before any session exists", async () => {
+  const ws = freshWorkspace("broken");
+  putConfig(path.join(ws, ".cross-review", "config.json"), "{ broken");
+  resetLog();
+  await assert.rejects(
+    beginSession({ skill: "review-plan", inputText: inputFor("review-plan", "bc"), workingDir: ws }),
+    e => e.code === "CONFIG_INVALID" && e.message.includes(path.join(ws, ".cross-review", "config.json")),
+  );
+  assert.equal(fs.existsSync(path.join(ws, ".cross-review", "sessions")), false);
+  putConfig(globalConfig(), { skills: { "review-nope": {} } });
+  try {
+    await assert.rejects(beginSession({ skill: "review-plan", inputText: inputFor("review-plan", "bc"), workingDir: freshWorkspace("broken-g") }), e => e.code === "CONFIG_INVALID");
+  } finally {
+    fs.rmSync(globalConfig(), { force: true });
+  }
+  assert.equal(codexCalls().length, 0);
+});
+
+test("open_dashboard: a dashboard that cannot start only adds dashboard_error; unset, nothing is called", async () => {
+  const ws = freshWorkspace("follow");
+  const saved = hooks.follow;
+  let calls = 0;
+  try {
+    hooks.follow = () => { calls++; return { url: "unused" }; };
+    setCodexOutput("### VERDICT\n- Status: APPROVE\n");
+    const quiet = await beginSession({ skill: "review-plan", inputText: inputFor("review-plan", "of"), workingDir: ws });
+    assert.equal(calls, 0);
+    assert.equal(quiet.dashboard_url, undefined);
+    await waitSession(quiet.session_dir, { maxWaitSeconds: 30 });
+    await endSession(quiet.session_dir);
+
+    putConfig(path.join(ws, ".cross-review", "config.json"), { open_dashboard: true });
+    const opened = [];
+    hooks.follow = args => followInDashboard({ ...args, spawnDashboard: () => {}, waitMs: 300, openBrowser: url => opened.push(url) });
+    resetLog();
+    const s = await beginSession({ skill: "review-plan", inputText: inputFor("review-plan", "of"), workingDir: ws });
+    assert.ok(s.session_dir);
+    assert.match(s.dashboard_error, /did not start/);
+    assert.equal(s.dashboard_url, undefined);
+    assert.deepEqual(opened, []);
+    assert.equal(stateOf(s.session_dir).settings_sources.open_dashboard, "workspace");
+    const done = await waitSession(s.session_dir, { maxWaitSeconds: 30 });
+    assert.equal(done.next, "done", "the reviewer ran anyway");
+
+    hooks.follow = () => { throw new Error("invented failure"); };
+    const t = await beginSession({ skill: "review-plan", inputText: inputFor("review-plan", "of"), workingDir: ws });
+    assert.match(t.dashboard_error, /invented failure/);
+    await waitSession(t.session_dir, { maxWaitSeconds: 30 });
+    await endSession(s.session_dir);
+    await endSession(t.session_dir);
+  } finally {
+    hooks.follow = saved;
+  }
 });

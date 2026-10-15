@@ -173,3 +173,14 @@ th.w-for { width: 90px; }
 .past { margin-top: 6px; }
 .past pre { white-space: pre-wrap; max-height: 420px; }
 .notfound { color: var(--muted); margin-top: 20px; }
+
+/* settings: the mock's inline styles as classes */
+.sub.small { font-size: 12.5px; }
+th.right, td.right { text-align: right; }
+.actions .push { margin-right: auto; }
+.error { color: var(--red); font-size: 13px; margin: 6px 0 0; }
+.error:empty { display: none; }
+input.other { display: none; width: 220px; flex: none; }
+input.other.on { display: inline-block; }
+#clear-ws.off { display: none; }
+#per-skill select { max-width: 220px; }

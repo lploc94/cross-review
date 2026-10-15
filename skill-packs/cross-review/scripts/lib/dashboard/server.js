@@ -1,6 +1,8 @@
 // Local dashboard server: one page and a small JSON/SSE API over node:http, bound to
 // 127.0.0.1 and guarded by a per-run token, a Host check and an Origin check on writes.
-// It only reads session files; the one thing it writes is ~/.cross-review/dashboard.json.
+// It only reads session files; it writes ~/.cross-review/dashboard.json, the review
+// settings (~/.cross-review/config.json, <workspace>/.cross-review/config.json) and the
+// avatars in ~/.cross-review/avatars/.
 //
 //   startDashboard({root, port, open, idleExitSeconds}) → {url, port, token, root, close(), closed}
 //   runDashboardCli(argv) → exit code (the `dashboard` command)
@@ -16,6 +18,9 @@ import { fileURLToPath } from "node:url";
 import { classify, readSession, roundActivity } from "./model.js";
 import { findWorkspaces, isWorkspace, listSessions, sessionsDir, SCAN_DEPTH, SESSION_ID_RE } from "./scan.js";
 import { discoveryFile, removeDiscoveryIfOwn, writeDiscovery } from "./discovery.js";
+import { AvatarError, avatarFile, listAvatars, removeAvatar, saveAvatar, AVATAR_MAX_BYTES } from "./avatars.js";
+import { ensureCrossReviewDir, globalConfigPath, readConfig, validateConfig, workspaceConfigPath, writeConfig } from "../config.js";
+import { getReviewer } from "../reviewers/index.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const UI_DIR = path.join(HERE, "ui");
@@ -27,6 +32,7 @@ export const PORT_TRIES = 50;
 const PING_MS = 15000;
 const REQUEST_SCAN_AGE_MS = 5000;
 const ACTIVITY_PAGE = 20;
+const SETTINGS_BODY_MAX = 64 * 1024;
 const COOKIE = "cr_token";
 
 // The only files the server hands out; a request path is a key here or a 404
@@ -36,6 +42,7 @@ const STATIC = {
   "/app.css": ["app.css", "text/css; charset=utf-8"],
   "/icons.js": ["icons.js", "text/javascript; charset=utf-8"],
   "/feed.js": ["feed.js", "text/javascript; charset=utf-8"],
+  "/settings.js": ["settings.js", "text/javascript; charset=utf-8"],
   "/markdown.js": ["markdown.js", "text/javascript; charset=utf-8"],
   "/LICENSE-lucide.txt": ["LICENSE-lucide.txt", "text/plain; charset=utf-8"],
 };
@@ -244,6 +251,12 @@ export function createListWatcher({ root, now = () => Math.floor(Date.now() / 10
       const dir = path.join(sessionsDir(abs), id);
       return listSessions(abs).includes(dir) && fs.existsSync(path.join(dir, "state.json")) ? dir : null;
     },
+    /** Absolute path of a workspace key, or null. */
+    workspacePath(ws) {
+      return (typeof ws === "string" && workspaces().get(ws)) || null;
+    },
+    /** Every followed workspace: key → absolute path. */
+    workspaceMap: () => workspaces(),
     /** Display name of a workspace key: its folder name, or the key when two share it. */
     wsName(ws) {
       const all = workspaces();
@@ -344,12 +357,13 @@ function deniedHtml() {
 
 /**
  * Start the dashboard. Options besides the documented four are for tests: pickPort,
- * discoveryFile (null: none), now, tickMs, rescanMs, isAlive, reveal.
+ * discoveryFile (null: none), now, tickMs, rescanMs, isAlive, reveal, catalog
+ * ({listModels, defaultModel, cliInfo}; default: the Codex adapter's).
  */
 export async function startDashboard({
   root = process.cwd(), port = null, open = false, idleExitSeconds = null,
   pickPort = randomPort, discoveryFile: discFile = discoveryFile(), host = "127.0.0.1",
-  now, tickMs = 1000, rescanMs, isAlive, reveal = revealFolder,
+  now, tickMs = 1000, rescanMs, isAlive, reveal = revealFolder, catalog = getReviewer("codex"),
 } = {}) {
   const watcher = createListWatcher({ root, now, tickMs, rescanMs, isAlive });
   const token = crypto.randomBytes(32).toString("hex");
@@ -388,14 +402,135 @@ export async function startDashboard({
     }
   };
 
-  function readBody(req) {
+  /** The request body; rejects with status 413 past `limit` bytes. */
+  function readBody(req, limit) {
     return new Promise((resolve, reject) => {
       const chunks = [];
-      req.on("data", c => chunks.push(c));
+      let size = 0;
+      req.on("data", c => {
+        size += c.length;
+        if (size > limit) {
+          req.pause();
+          reject(Object.assign(new Error("body too large"), { status: 413 }));
+          return;
+        }
+        chunks.push(c);
+      });
       req.on("end", () => resolve(Buffer.concat(chunks)));
       req.on("error", reject);
     });
   }
+
+  // ----- settings -----
+
+  // The model catalog stays in memory; "refresh list" asks Codex again
+  let catalogPromise = null;
+  const models = refresh => {
+    if (!catalogPromise || refresh) {
+      catalogPromise = Promise.all([catalog.listModels(), catalog.cliInfo ? catalog.cliInfo() : null])
+        .then(([list, info]) => ({ models: list, fetchedAt: Math.floor(Date.now() / 1000), reviewer: info }))
+        .catch(() => ({ models: null, fetchedAt: Math.floor(Date.now() / 1000), reviewer: null }));
+    }
+    return catalogPromise;
+  };
+
+  async function settingsPayload() {
+    const errors = {};
+    const load = (key, file) => {
+      try {
+        return readConfig(file);
+      } catch (e) {
+        errors[key] = e.message;
+        return {};
+      }
+    };
+    const workspacesCfg = {};
+    const paths = {};
+    for (const [ws, abs] of watcher.workspaceMap()) {
+      workspacesCfg[ws] = load(ws, workspaceConfigPath(abs));
+      paths[ws] = tildePath(workspaceConfigPath(abs));
+    }
+    const m = await models(false);
+    let codexDefault = null;
+    try {
+      codexDefault = catalog.defaultModel();
+    } catch {}
+    return {
+      global: load("global", globalConfigPath()),
+      globalPath: tildePath(globalConfigPath()),
+      workspaces: workspacesCfg,
+      paths,
+      names: Object.fromEntries([...watcher.workspaceMap().keys()].map(ws => [ws, watcher.wsName(ws)])),
+      models: m.models,
+      modelsFetchedAt: m.fetchedAt,
+      codexDefault,
+      reviewer: m.reviewer,
+      errors,
+    };
+  }
+
+  function saveSettings(res, body) {
+    if (!body || typeof body !== "object") return fail(res, 400, "body must be a JSON object");
+    let file;
+    if (body.scope === "global") {
+      file = globalConfigPath();
+    } else if (body.scope === "workspace") {
+      const abs = watcher.workspacePath(body.ws);
+      if (!abs) return fail(res, 400, "unknown workspace");
+      file = workspaceConfigPath(abs);
+    } else {
+      return fail(res, 400, "scope must be global or workspace");
+    }
+    const errors = validateConfig(body.config);
+    if (errors.length) return fail(res, 400, errors.join("; "));
+    if (body.scope === "workspace") ensureCrossReviewDir(watcher.workspacePath(body.ws));
+    return json(res, 200, { ok: true, config: writeConfig(file, body.config) });
+  }
+
+  // ----- avatars -----
+
+  function avatarParties() {
+    const p = watcher.snapshot();
+    const callers = new Map();
+    let without = 0;
+    for (const s of [...p.active, ...p.history]) {
+      if (!s.caller) {
+        without++;
+        continue;
+      }
+      const c = callers.get(s.caller.name) || { title: s.caller.title || s.caller.name, n: 0 };
+      c.n++;
+      callers.set(s.caller.name, c);
+    }
+    const seen = n => `${n} ${n === 1 ? "session" : "sessions"}`;
+    const parties = [
+      { key: "you", who: "us", label: "You", seenIn: "every session" },
+      { key: "reviewer:codex", who: "rv", label: "Reviewer · Codex", seenIn: "every session" },
+    ];
+    for (const [name, c] of [...callers].sort((a, b) => b[1].n - a[1].n)) {
+      const key = `agent:${name.toLowerCase().replace(/[^a-z0-9._-]/g, "-")}`;
+      parties.push({ key, who: "ag", label: `Agent · ${c.title}`, seenIn: seen(c.n), name });
+    }
+    if (without) parties.push({ key: "agent:unknown", who: "ag", label: "Agent", seenIn: seen(without) });
+    return { keys: listAvatars(), parties };
+  }
+
+  function serveAvatar(res, key) {
+    const hit = avatarFile(key);
+    if (!hit) return fail(res, 404, "no such avatar");
+    fs.readFile(hit.file, (err, data) => {
+      if (err) return fail(res, 404, "no such avatar");
+      send(res, 200, data, hit.type, { "Cache-Control": "no-cache" });
+    });
+  }
+
+  const avatarKey = route => {
+    try {
+      return decodeURIComponent(route.slice("/api/avatars/".length));
+    } catch {
+      return null;
+    }
+  };
 
   function serveStatic(res, file, type) {
     fs.readFile(path.join(UI_DIR, file), (err, data) => {
@@ -521,13 +656,35 @@ export async function startDashboard({
     if (!viaBearer && !cookieOk(req)) return denied(req, res);
 
     const route = url.pathname;
-    if (req.method === "POST") {
+    if (req.method === "POST" || req.method === "DELETE") {
       if (!viaBearer && !allowedOrigins.has(String(req.headers.origin || ""))) return fail(res, 403, "cross-origin request");
+      if (route.startsWith("/api/avatars/")) {
+        try {
+          if (req.method === "DELETE") {
+            removeAvatar(avatarKey(route));
+            return json(res, 200, { ok: true });
+          }
+          const saved = saveAvatar(avatarKey(route), await readBody(req, AVATAR_MAX_BYTES));
+          return json(res, 200, saved);
+        } catch (e) {
+          if (e instanceof AvatarError || e.status) return fail(res, e.status || 400, e.status === 413 ? "That image is over 1 MB. Pick a smaller one." : e.message);
+          throw e;
+        }
+      }
+      if (req.method === "DELETE") return fail(res, 405, "method not allowed");
       let body;
       try {
-        body = JSON.parse((await readBody(req)).toString("utf8"));
-      } catch {
+        body = JSON.parse((await readBody(req, SETTINGS_BODY_MAX)).toString("utf8"));
+      } catch (e) {
+        if (e.status === 413) return fail(res, 413, "the request is over 64 KB");
         return fail(res, 400, "body must be JSON");
+      }
+      if (route === "/api/settings") {
+        try {
+          return saveSettings(res, body);
+        } catch (e) {
+          return fail(res, 400, e.message);
+        }
       }
       if (route === "/api/reveal") {
         const dir = body && watcher.resolve(body.ws, body.id);
@@ -547,7 +704,28 @@ export async function startDashboard({
     if (req.method !== "GET") return fail(res, 405, "method not allowed");
 
     if (STATIC[route]) return serveStatic(res, ...STATIC[route]);
+    if (route.startsWith("/avatars/")) {
+      let key;
+      try {
+        key = decodeURIComponent(route.slice("/avatars/".length));
+      } catch {
+        return fail(res, 404, "not found");
+      }
+      return serveAvatar(res, key);
+    }
     switch (route) {
+      case "/api/settings":
+        return json(res, 200, await settingsPayload());
+      case "/api/models": {
+        const m = await models(url.searchParams.get("refresh") === "1");
+        let codexDefault = null;
+        try {
+          codexDefault = catalog.defaultModel();
+        } catch {}
+        return json(res, 200, { models: m.models, fetchedAt: m.fetchedAt, codexDefault, reviewer: m.reviewer });
+      }
+      case "/api/avatars":
+        return json(res, 200, avatarParties());
       case "/api/health":
         return json(res, 200, { ok: true, root: watcher.root, pid: process.pid });
       case "/api/overview": {

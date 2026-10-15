@@ -24,8 +24,17 @@ const mk = name => fs.mkdtempSync(path.join(tmp, `${name}-`));
 const nowS = () => Math.floor(Date.now() / 1000);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-before(() => { tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "dashboard-server-"))); });
-after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+const savedHome = process.env.HOME;
+before(() => {
+  tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "dashboard-server-")));
+  // Settings and avatars live under HOME: never the real one
+  process.env.HOME = path.join(tmp, "home");
+  fs.mkdirSync(process.env.HOME);
+});
+after(() => {
+  process.env.HOME = savedHome;
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
 
 /** A fixture root and a running dashboard on it (port 0, no discovery file, no browser). */
 async function serve(opts = {}) {
@@ -670,6 +679,118 @@ test("session stream: unknown session is 404; POST /api/reveal needs a matching 
     assert.equal(ok.status, 200, ok.text);
     assert.deepEqual(opened, [fx.sessions.waiting]);
   } finally {
+    await d.close();
+  }
+});
+
+// ---------- Phase 5: settings and avatars ----------
+
+const CATALOG = {
+  listModels: async () => [{ slug: "model-a", name: "Model A", description: "Invented.", efforts: ["low", "high"] }],
+  defaultModel: () => "model-a",
+  cliInfo: async () => ({ version: "codex-cli 9.9.9-invented", loggedIn: true }),
+};
+const originOf = d => ({ Origin: `http://127.0.0.1:${d.port}`, Cookie: `cr_token=${d.token}` });
+
+test("settings: GET lists both levels and the catalog; POST writes the workspace file with a .gitignore; bad input changes nothing", async () => {
+  const { d, fx } = await serve({ catalog: CATALOG });
+  const wsFile = path.join(fx.workspaces.harbor, ".cross-review", "config.json");
+  const post = (body, headers = originOf(d)) => request(d.port, "/api/settings", { method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body });
+  try {
+    fs.rmSync(path.join(fx.workspaces.harbor, ".cross-review", ".gitignore"), { force: true });
+    let s = await getJson(d, "/api/settings");
+    assert.deepEqual(s.global, {});
+    assert.deepEqual(Object.keys(s.workspaces).sort(), ["harbor-app", "inkwell", "services/orchard-api"]);
+    assert.equal(s.models[0].slug, "model-a");
+    assert.equal(s.codexDefault, "model-a");
+    assert.deepEqual(s.reviewer, { version: "codex-cli 9.9.9-invented", loggedIn: true });
+
+    const ok = await post({ scope: "workspace", ws: "harbor-app", config: { effort: "low", skills: { "review-impl": { model: "model-a" } } } });
+    assert.equal(ok.status, 200, ok.text);
+    assert.deepEqual(JSON.parse(fs.readFileSync(wsFile, "utf8")), { effort: "low", skills: { "review-impl": { model: "model-a" } } });
+    assert.equal(fs.readFileSync(path.join(fx.workspaces.harbor, ".cross-review", ".gitignore"), "utf8"), "*\n");
+    const before = fs.readFileSync(wsFile, "utf8");
+    assert.equal((await post({ scope: "workspace", ws: "harbor-app", config: { effort: "Not An Effort" } })).status, 400);
+    assert.equal((await post({ scope: "workspace", ws: "harbor-app", config: { surprise: 1 } })).status, 400);
+    assert.equal((await post({ scope: "workspace", ws: "no-such-ws", config: {} })).status, 400);
+    assert.equal((await post({ scope: "elsewhere", config: {} })).status, 400);
+    assert.equal((await post({ scope: "workspace", ws: "harbor-app", config: { model: "x" }, pad: "y".repeat(70 * 1024) })).status, 413);
+    assert.equal((await post({ scope: "workspace", ws: "harbor-app", config: {} }, { Cookie: `cr_token=${d.token}` })).status, 403);
+    assert.equal(fs.readFileSync(wsFile, "utf8"), before);
+
+    assert.equal((await post({ scope: "global", config: { open_dashboard: true } })).status, 200);
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(process.env.HOME, ".cross-review", "config.json"), "utf8")), { open_dashboard: true });
+    s = await getJson(d, "/api/settings");
+    assert.deepEqual(s.workspaces["harbor-app"], { effort: "low", skills: { "review-impl": { model: "model-a" } } });
+    // An empty config removes the file
+    assert.equal((await post({ scope: "workspace", ws: "harbor-app", config: {} })).status, 200);
+    assert.equal(fs.existsSync(wsFile), false);
+    // A broken file is reported, not hidden
+    fs.writeFileSync(wsFile, "{ broken");
+    s = await getJson(d, "/api/settings");
+    assert.match(s.errors["harbor-app"], /not valid JSON/);
+    const models = await getJson(d, "/api/models?refresh=1");
+    assert.equal(models.models.length, 1);
+    assert.equal(typeof models.fetchedAt, "number");
+  } finally {
+    fs.rmSync(wsFile, { force: true });
+    fs.rmSync(path.join(process.env.HOME, ".cross-review", "config.json"), { force: true });
+    await d.close();
+  }
+});
+
+test("avatars: a real PNG is stored and served byte for byte; renamed text, over 1 MB and bad keys are refused", async () => {
+  const { d } = await serve({ catalog: CATALOG });
+  const png = fs.readFileSync(path.join(REPO, "skill-packs/cross-review/scripts/lib/dashboard/ui/avatars/you.png"));
+  const upload = (key, body, headers = originOf(d)) => new Promise((resolve, reject) => {
+    const r = http.request({ host: "127.0.0.1", port: d.port, path: `/api/avatars/${key}`, method: "POST", headers: { ...headers, "Content-Type": "image/png", "Content-Length": body.length } }, res => {
+      let text = "";
+      res.on("data", c => { text += c; });
+      res.on("end", () => resolve({ status: res.statusCode, text }));
+    });
+    r.on("error", reject);
+    r.end(body);
+  });
+  const getRaw = p => new Promise((resolve, reject) => {
+    http.get({ host: "127.0.0.1", port: d.port, path: p, headers: bearer(d) }, res => {
+      const chunks = [];
+      res.on("data", c => chunks.push(c));
+      res.on("end", () => resolve({ status: res.statusCode, type: res.headers["content-type"], body: Buffer.concat(chunks) }));
+    }).on("error", reject);
+  });
+  try {
+    assert.equal((await upload("you", png)).status, 200);
+    const got = await getRaw("/avatars/you");
+    assert.equal(got.status, 200);
+    assert.equal(got.type, "image/png");
+    assert.ok(got.body.equals(png));
+    assert.ok(fs.existsSync(path.join(process.env.HOME, ".cross-review", "avatars", "you.png")));
+    assert.equal((await upload("agent%3Aclaude-code", png)).status, 200);
+    assert.ok(fs.existsSync(path.join(process.env.HOME, ".cross-review", "avatars", "agent-claude-code.png")));
+
+    assert.equal((await upload("you", Buffer.from("just text, renamed to .png"))).status, 400);
+    assert.equal((await upload("you", Buffer.concat([png.subarray(0, 8), Buffer.alloc(1024 * 1024 + 10)]))).status, 413);
+    assert.equal((await upload("..%2Fx", png)).status, 400);
+    assert.equal((await upload("reviewer%3AUPPER", png)).status, 400);
+    assert.equal((await upload("you", png, { Cookie: `cr_token=${d.token}` })).status, 403);
+    assert.ok((await getRaw("/avatars/you")).body.equals(png), "a refused upload leaves the image");
+
+    const list = await getJson(d, "/api/avatars");
+    assert.deepEqual(list.keys, ["agent:claude-code", "you"]);
+    const byKey = Object.fromEntries(list.parties.map(p => [p.key, p]));
+    assert.equal(byKey.you.label, "You");
+    assert.equal(byKey["reviewer:codex"].label, "Reviewer · Codex");
+    assert.equal(byKey["agent:claude-code"].label, "Agent · Claude Code");
+    assert.equal(byKey["agent:claude-code"].seenIn, "2 sessions");
+    assert.equal(byKey["agent:codex-mcp-client"].seenIn, "1 session");
+    assert.equal(byKey["agent:unknown"].label, "Agent");
+
+    const del = await request(d.port, "/api/avatars/you", { method: "DELETE", headers: originOf(d) });
+    assert.equal(del.status, 200);
+    assert.equal((await getRaw("/avatars/you")).status, 404);
+    assert.equal((await request(d.port, "/api/avatars/agent%3Aclaude-code", { method: "DELETE", headers: { Cookie: `cr_token=${d.token}` } })).status, 403);
+  } finally {
+    fs.rmSync(path.join(process.env.HOME, ".cross-review", "avatars"), { recursive: true, force: true });
     await d.close();
   }
 });

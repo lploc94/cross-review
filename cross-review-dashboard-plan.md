@@ -960,3 +960,22 @@ Checkpoint: `/review-impl` (checkpoint cuối, diff cộng dồn từ trước P
   - **Một stream mỗi lúc:** trang Sessions mở stream danh sách, trang chi tiết mở stream của phiên, Settings không mở stream nào. Rời view thì stream được đóng.
 
   Không có công cụ GitNexus trong phiên này.
+- 2026-10-15, Phase 5 xong. Red: `node --test tests/config.test.js tests/follow.test.js tests/dashboard-settings.test.js` fail (chưa có `config.js`, `follow.js`, `ui/settings.js`, `listModels`); `skill-templates.test.js` fail với câu luật mới trước khi sửa `core.md`.
+  - AC-5.1: `config.test.js` 7/7; `review-core.test.js` thêm 4 test (effort global và requested, model per-skill của workspace, config hỏng → `CONFIG_INVALID` và không có thư mục sessions, `open_dashboard` gọi follow).
+  - AC-5.2: `dashboard-server.test.js` thêm test settings (ghi global/workspace, `.gitignore`, object rỗng xoá file, từ chối khoá lạ, ws lạ, Origin lạ, body > 64 KB) và avatars (PNG lưu và trả đúng từng byte; text đổi đuôi, > 1 MB, khoá xấu bị từ chối).
+  - AC-5.3: `dashboard-settings.test.js` 6/6 (catalog, `--bundled`, `null`, `defaultModel`, option ngoài danh sách, `mergeForm`, Save qua server giữ `effort: "ultra"` và `model: "x-unknown"`).
+  - AC-5.4: `node tests/dashboard-ui.mjs` ok: Settings global (Follow reviews, 4 dòng per-skill, Avatars, "Save global", "Codex default (Model A)", help `codex-cli …, signed in`), Save ghi đúng `{open_dashboard: true, skills: {review-impl: {model: "model-b"}}}`, workspace "Save for harbor-app" với "Inherit — on", không có Avatars, Save ghi `{effort: "low"}`; tải ảnh You qua ô file thì thread dùng `avatars/you?v=…`. Ảnh 1400px global và workspace đặt cạnh mock: bố cục, nhãn, select, bảng, nút khớp (đã xoá ảnh).
+  - AC-5.5: `skill-templates.test.js` 9/9; README có mục Dashboard, CLAUDE.md có lệnh `dashboard`, `lib/config.js`, `lib/dashboard`, dữ liệu phiên mới, thứ tự ưu tiên, Breaking Changes "v15 / pack 10.1.0"; `manifest.json` 10.1.0.
+  - AC-5.6: `follow.test.js` 3/3 (dùng lại dashboard đang chạy, khởi động bản mới, lỗi không làm hỏng `begin`).
+  - Focused: `--test-name-pattern "settings|avatar|CONFIG_INVALID|global effort|requested"` 17/17. Phase gates 96/96. Cả suite 176/176, ba test legacy pass. Cài vào HOME tạm rồi `install-check` ok (thêm kiểm `config.js`, `ui/settings.js`; runtime có pack 10.1.0).
+
+  Lệch plan:
+  - **`hooks.follow`** trong `review-core.js` là chỗ test thay `followInDashboard`; mặc định nạp `dashboard/follow.js` khi cần.
+  - **`startDashboard` nhận `catalog`** (mặc định adapter codex) để test không gọi `codex` thật.
+  - **Khoá `agent:unknown`** cho avatar của các phiên không có caller ("Agent").
+  - **`listModels`, `cliInfo` là async** (chạy `codex` bằng `execFile`) để server không bị chặn 15 s.
+  - **id trong form Settings có hậu tố `-set`** (`f-reviewer-set`, `f-model-set`, `f-effort-set`) vì `f-reviewer`, `f-model`, `f-effort` đã là id của khung Session ở trang chi tiết.
+  - **Facts của phiên** hiện tên model từ catalog ("Model A · Codex default") khi trang đã tải catalog.
+  - Mọi test chạy review hoặc dashboard (review-core, mcp-server, dashboard-server, dashboard-settings, follow, dashboard-ui) đặt `HOME` tạm.
+
+  Không có công cụ GitNexus trong phiên này.

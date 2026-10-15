@@ -122,13 +122,13 @@ for (const name of [LEGACY_RUNTIME, ...LEGACY_SKILLS]) {
 }
 
 // Runtime: runner, modules, MCP server, SDK
-for (const p of [runner, mcpServer, path.join(runtime, "scripts", "lib", "review-core.js"), path.join(runtime, "node_modules", "@modelcontextprotocol", "sdk", "package.json")]) {
+for (const p of [runner, mcpServer, path.join(runtime, "scripts", "lib", "review-core.js"), path.join(runtime, "scripts", "lib", "config.js"), path.join(runtime, "node_modules", "@modelcontextprotocol", "sdk", "package.json")]) {
   check(fs.existsSync(p), `runtime: missing ${p}`);
 }
 
 // Dashboard: server, UI, the Lucide licence and the pack version it shows
 const ui = path.join(runtime, "scripts", "lib", "dashboard", "ui");
-for (const p of [path.join(runtime, "scripts", "lib", "dashboard", "server.js"), path.join(ui, "index.html"), path.join(ui, "app.js"), path.join(ui, "LICENSE-lucide.txt"), path.join(ui, "avatars", "reviewer.png"), path.join(runtime, "manifest.json")]) {
+for (const p of [path.join(runtime, "scripts", "lib", "dashboard", "server.js"), path.join(ui, "index.html"), path.join(ui, "app.js"), path.join(ui, "settings.js"), path.join(ui, "LICENSE-lucide.txt"), path.join(ui, "avatars", "reviewer.png"), path.join(runtime, "manifest.json")]) {
   check(fs.existsSync(p), `dashboard: missing ${p}`);
 }
 if (fs.existsSync(path.join(ui, "LICENSE-lucide.txt"))) {

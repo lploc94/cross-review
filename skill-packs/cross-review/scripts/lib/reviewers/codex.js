@@ -1,8 +1,9 @@
 // Codex CLI as the reviewer: how to find it, launch or resume a turn, read its event log,
 // and recognise its process. The runner owns spawning, watchdogs, polling and state.
 
-import { spawnSync } from "node:child_process";
+import { execFile, spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 const IS_WIN = process.platform === "win32";
@@ -233,4 +234,69 @@ export function activityItems(lines) {
 export function matchesCmdline(cmdline) {
   return cmdline.includes("codex exec") || cmdline.includes("codex.exe exec") ||
     (cmdline.includes("codex.js") && cmdline.includes("exec"));
+}
+
+// ---------- settings: model catalog, default model, CLI status ----------
+
+const CATALOG_TIMEOUT_MS = 15000;
+
+function runCodex(args, timeout = CATALOG_TIMEOUT_MS) {
+  const { cmd, prependArgs } = resolveCommand();
+  return new Promise(resolve => {
+    execFile(cmd, [...prependArgs, ...args], { encoding: "utf8", timeout, maxBuffer: 32 * 1024 * 1024 }, (err, stdout) => {
+      resolve({ ok: !err, stdout: stdout || "" });
+    });
+  });
+}
+
+/**
+ * Models offered by `codex debug models` (a debug command that may change, so: the bundled
+ * list when it fails, null when that fails too). Listed models only, by priority:
+ * [{slug, name, description, efforts}].
+ */
+export async function listModels() {
+  for (const args of [["debug", "models"], ["debug", "models", "--bundled"]]) {
+    const r = await runCodex(args);
+    if (!r.ok) continue;
+    try {
+      const data = JSON.parse(r.stdout);
+      const models = Array.isArray(data) ? data : data.models;
+      if (!Array.isArray(models)) continue;
+      return models
+        .filter(m => m && m.visibility === "list" && typeof m.slug === "string")
+        .sort((a, b) => (a.priority ?? Infinity) - (b.priority ?? Infinity))
+        .map(m => ({
+          slug: m.slug,
+          name: m.display_name || m.slug,
+          description: m.description || "",
+          efforts: (m.supported_reasoning_levels || []).map(l => (typeof l === "string" ? l : l && l.effort)).filter(Boolean),
+        }));
+    } catch {}
+  }
+  return null;
+}
+
+/** The top-level `model` of $CODEX_HOME/config.toml (default ~/.codex), or null. */
+export function defaultModel() {
+  const home = process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
+  let text;
+  try {
+    text = fs.readFileSync(path.join(home, "config.toml"), "utf8");
+  } catch {
+    return null;
+  }
+  for (const line of text.split(/\r?\n/)) {
+    if (/^\s*\[/.test(line)) break; // the first table ends the top level
+    const m = line.match(/^\s*model\s*=\s*(?:"([^"]*)"|'([^']*)')/);
+    if (m) return m[1] ?? m[2] ?? null;
+  }
+  return null;
+}
+
+/** `codex --version` and whether `codex login status` succeeds. */
+export async function cliInfo() {
+  const version = await runCodex(["--version"], 5000);
+  if (!version.ok) return { version: null, loggedIn: false };
+  const login = await runCodex(["login", "status"], 5000);
+  return { version: version.stdout.trim() || null, loggedIn: login.ok };
 }

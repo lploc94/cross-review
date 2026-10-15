@@ -24,7 +24,19 @@ const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "dashboard-ui-
 const shots = fs.mkdtempSync(path.join(os.tmpdir(), "dashboard-shots-"));
 const root = path.join(tmp, "root");
 const fx = buildFixture(root, { now: Math.floor(Date.now() / 1000), livePid: process.pid });
-const d = await startDashboard({ root, port: 0, open: false, discoveryFile: null });
+// Settings and avatars live under HOME: never the real one
+process.env.HOME = path.join(tmp, "home");
+fs.mkdirSync(process.env.HOME);
+// An invented model catalog instead of asking the codex CLI
+const catalog = {
+  listModels: async () => [
+    { slug: "model-a", name: "Model A", description: "An invented model.", efforts: ["low", "medium", "high", "xhigh"] },
+    { slug: "model-b", name: "Model B", description: "Another invented model.", efforts: ["low", "high"] },
+  ],
+  defaultModel: () => "model-a",
+  cliInfo: async () => ({ version: "codex-cli 9.9.9-invented", loggedIn: true }),
+};
+const d = await startDashboard({ root, port: 0, open: false, discoveryFile: null, catalog });
 const browser = await launchChrome(bin, path.join(tmp, "profile"));
 try {
   const sessions = await (await fetch(`http://127.0.0.1:${d.port}/api/sessions`, { headers: { Authorization: `Bearer ${d.token}` } })).json();
@@ -175,6 +187,77 @@ try {
   assert.equal(think.h3, "Position");
   assert.ok(think.analysis);
   assert.equal(think.ledger, false);
+
+  // ---------- settings ----------
+  await page.evaluate(`location.hash = "#/settings"`);
+  await page.waitFor(`document.querySelectorAll("#per-skill tr").length === 4 && document.querySelectorAll("#avatars tr").length >= 2`);
+  const set = await page.evaluate(`({
+    follow: !!document.querySelector(".form #f-follow"),
+    save: document.getElementById("save").textContent,
+    avatars: document.getElementById("avatars-block").classList.contains("on"),
+    model: document.querySelector("#f-model-set option").textContent,
+    models: document.querySelectorAll("#f-model-set option").length,
+    help: document.getElementById("reviewer-help").textContent,
+    explain: document.getElementById("explain").textContent,
+    inlineStyle: document.querySelectorAll("[style]").length,
+  })`);
+  assert.ok(set.follow);
+  assert.equal(set.save, "Save global");
+  assert.equal(set.avatars, true);
+  assert.equal(set.model, "Codex default (Model A)");
+  assert.equal(set.models, 3);
+  assert.equal(set.help, "codex-cli 9.9.9-invented, signed in");
+  assert.match(set.explain, /\.cross-review\/config\.json/);
+  assert.equal(set.inlineStyle, 0);
+  await page.screenshot(path.join(shots, "settings-1400.png"));
+
+  // Save global: Follow reviews on, review-impl on Model B; the file holds only those
+  await page.evaluate(`(() => {
+    const f = document.getElementById("f-follow"); f.value = "on"; f.dispatchEvent(new Event("change", { bubbles: true }));
+    const m = document.querySelector('#per-skill select[data-path="skills.review-impl.model"]'); m.value = "model-b"; m.dispatchEvent(new Event("change", { bubbles: true }));
+  })()`);
+  assert.match(await page.evaluate(`document.querySelectorAll("#per-skill tr")[1].textContent`), /set here[\s\S]*Model B · high/);
+  await page.evaluate(`document.getElementById("save").click()`);
+  const globalFile = path.join(process.env.HOME, ".cross-review", "config.json");
+  for (let i = 0; i < 50 && !fs.existsSync(globalFile); i++) await new Promise(r => setTimeout(r, 100));
+  assert.deepEqual(JSON.parse(fs.readFileSync(globalFile, "utf8")), { open_dashboard: true, skills: { "review-impl": { model: "model-b" } } });
+
+  // A workspace: inherits the global values, no avatars, saves to its own file
+  await page.evaluate(`location.hash = "#/settings/harbor-app"`);
+  await page.waitFor(`document.getElementById("save").textContent === "Save for harbor-app"`);
+  const ws = await page.evaluate(`({
+    avatars: document.getElementById("avatars-block").classList.contains("on"),
+    follow: document.querySelector("#f-follow option").textContent,
+    impl: document.querySelectorAll("#per-skill tr")[1].querySelector("td:last-child").textContent,
+    scope: document.querySelector("#settings input[value=workspace]").checked,
+  })`);
+  assert.equal(ws.avatars, false);
+  assert.equal(ws.follow, "Inherit — on");
+  assert.match(ws.impl, /^Model B · high/);
+  assert.equal(ws.scope, true);
+  await page.evaluate(`(() => { const e = document.getElementById("f-effort-set"); e.value = "low"; e.dispatchEvent(new Event("change", { bubbles: true })); document.getElementById("save").click(); })()`);
+  const wsFile = path.join(fx.workspaces.harbor, ".cross-review", "config.json");
+  for (let i = 0; i < 50 && !fs.existsSync(wsFile); i++) await new Promise(r => setTimeout(r, 100));
+  assert.deepEqual(JSON.parse(fs.readFileSync(wsFile, "utf8")), { effort: "low" });
+  await page.screenshot(path.join(shots, "settings-workspace-1400.png"));
+
+  // An uploaded avatar replaces the default picture in the session thread
+  await page.evaluate(`location.hash = "#/settings"`);
+  await page.waitFor(`document.getElementById("avatars-block").classList.contains("on") && document.querySelector('#avatars input[data-av="you"]')`);
+  await page.evaluate(`(async () => {
+    const blob = await (await fetch("avatars/agent.png")).blob();
+    const dt = new DataTransfer();
+    dt.items.add(new File([blob], "me.png", { type: "image/png" }));
+    const input = document.querySelector('#avatars input[data-av="you"]');
+    input.files = dt.files;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  })()`);
+  await page.waitFor(`[...document.querySelectorAll("#avatars a[data-av-clear]")].some(a => a.dataset.avClear === "you")`);
+  assert.ok(fs.existsSync(path.join(process.env.HOME, ".cross-review", "avatars", "you.png")));
+  await open("running");
+  await page.waitFor(`document.querySelector("#thread .m.us .mark img")`);
+  assert.match(await page.evaluate(`document.querySelector("#thread .m.us .mark img").getAttribute("src")`), /^avatars\/you\?v=\d+$/);
+  assert.match(await page.evaluate(`document.querySelector("#thread .mark.rv img").getAttribute("src")`), /^avatars\/reviewer\.png$/);
 
   // Nothing in progress: the empty state with the full-body avatars
   const empty = await browser.newPage(1400, 900);

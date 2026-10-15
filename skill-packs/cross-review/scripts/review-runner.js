@@ -18,6 +18,7 @@ import { beginSession, waitSession, replySession, endSession, DEFAULT_MAX_WAIT_S
 import { getReviewer } from "./lib/reviewers/index.js";
 import { flushLineTimes } from "./lib/line-times.js";
 import { convergence, issueIds } from "./lib/convergence.js";
+import { ensureCrossReviewDir } from "./lib/config.js";
 
 const __filename = fileURLToPath(import.meta.url);
 
@@ -882,12 +883,9 @@ function cmdInit(argv) {
   const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
   const prefix = `${skillName}-${today}-`;
   const sessionsBase = path.join(resolvedWorkingDir, ".cross-review", "sessions");
-  fs.mkdirSync(sessionsBase, { recursive: true });
   // Keep review artifacts out of the user's git history
-  const gitignorePath = path.join(resolvedWorkingDir, ".cross-review", ".gitignore");
-  if (!fs.existsSync(gitignorePath)) {
-    try { fs.writeFileSync(gitignorePath, "*\n", { encoding: "utf8", flag: "wx" }); } catch {}
-  }
+  ensureCrossReviewDir(resolvedWorkingDir);
+  fs.mkdirSync(sessionsBase, { recursive: true });
 
   let maxN = 0;
   try {

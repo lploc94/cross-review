@@ -562,6 +562,7 @@ export function classify(parsed, { now = Math.floor(Date.now() / 1000), isAlive 
     issues: issuesColumn(ledger, peer),
     model: state.model || null,
     reviewer: state.reviewer || "codex",
+    caller: state.caller && state.caller.name ? { name: String(state.caller.name), title: state.caller.title ? String(state.caller.title) : null } : null,
     reviewerSeconds,
     running: cls.state === "running",
     createdAt: state.created_at || null,

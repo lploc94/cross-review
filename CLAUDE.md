@@ -33,9 +33,11 @@ npm ci --prefix skill-packs/cross-review                          # MCP SDK for 
 node test-default-timeout.js && node test-stall-recovery.js && node test-timeout-resume.js && node --test tests/
 H=$(mktemp -d) && HOME="$H" CODEX_HOME="$H/.codex" node bin/cross-review.js && node tests/install-check.mjs "$H"
 node skill-packs/cross-review/scripts/review-runner.js version     # runner version
+node tests/dashboard-ui.mjs                                         # dashboard in headless Chrome (CHROME=<path>)
+node skill-packs/cross-review/scripts/review-runner.js dashboard --root <temp fixture dir>   # dashboard by hand
 ```
 
-Never test the installer against the real HOME; use a temporary `HOME` and `CODEX_HOME`.
+Never test the installer against the real HOME; use a temporary `HOME` and `CODEX_HOME`. Tests that start a review or the dashboard also set a temporary `HOME`, so they never read or write the real `~/.cross-review/` (settings, avatars, `dashboard.json`). Run the dashboard in tests and screenshots with `--root` on a temp fixture dir; fixtures and screenshots use invented data only.
 
 ## Architecture
 
@@ -59,7 +61,8 @@ skill-packs/cross-review/
 ├── scripts/
 │   ├── review-runner.js               ← runner CLI (stdlib only)
 │   ├── mcp-server.js                 ← MCP stdio server: review_begin/wait/reply/end
-│   └── lib/                          ← parse.js, review-core.js (the four verbs), reviewers/ (one adapter per reviewer CLI)
+│   └── lib/                          ← parse.js, review-core.js (the four verbs), config.js (review settings), reviewers/ (one adapter per reviewer CLI)
+│       └── dashboard/                ← server.js (node:http, SSE), scan.js, model.js, follow.js, avatars.js, discovery.js, ui/ (static page, no build)
 └── skills/
     ├── review-plan/, review-impl/, review-think/, review-pr/
     │   ├── SKILL.md                  ← template
@@ -83,11 +86,21 @@ skill-packs/cross-review/
 
 ### Core Execution Flow
 
-1. A review skill calls `review_begin` (MCP) or `review-runner.js begin` (CLI fallback) with the skill, mode, optional reviewer (default `codex`) and a markdown input of placeholder values
+1. A review skill calls `review_begin` (MCP) or `review-runner.js begin` (CLI fallback) with the skill, mode, optional reviewer, model and effort, and a markdown input of placeholder values. Values not given come from the review settings (see Review settings)
 2. `begin` renders round 1 from `references/prompts.md`, starts the reviewer detached (Codex: `codex exec --json --sandbox danger-full-access`), and returns `session_dir` (peer skills also get `analysis_prompt`)
 3. `wait` polls until the round ends and returns `next`: `running`, `respond`, `cross_check`, `done`, `ask_user`, or `stopped`
 4. The orchestrator fixes/rebuts (`respond`, plan/impl) or compares its own analysis (`cross_check`, peer skills), then calls `reply`; the runner renders the right reply template and resumes the same reviewer thread with the stored reviewer, model, effort and sandbox
-5. `end` finalizes (`meta.json`) and stops. Session state lives in `.cross-review/sessions/<skill>-<yyyymmdd>-<NNN>/`; the runner writes `.cross-review/.gitignore` (`*`)
+5. `end` finalizes (`meta.json`), stops, and records `ended_at` and `end_outcome` (`finalized` | `stopped`) in `state.json`; a later `reply` clears them. Session state lives in `.cross-review/sessions/<skill>-<yyyymmdd>-<NNN>/`; the runner writes `.cross-review/.gitignore` (`*`)
+
+Besides the prompts and outputs, a session keeps what the dashboard needs to retell it: `inputs/round-NNN.md` (each round's input as received), `outputs/times-round-NNN.jsonl` (`[complete lines, epoch s]` rows stamping the reviewer's event log), `state.caller` (`{name, title?, version?}` from the MCP client's `clientInfo`; the CLI records none), and `state.settings_sources` (where reviewer, model, effort and `open_dashboard` came from).
+
+### Review settings
+
+`lib/config.js` reads `~/.cross-review/config.json` (global) and `<working_dir>/.cross-review/config.json` (workspace): `{reviewer?, model?, effort?, open_dashboard?, skills?: {<skill>: {model?, effort?}}}`; unknown keys are errors. Each key resolves on its own, first match wins: requested (`review_begin`/`--model`/`--effort`) · `workspace:<skill>` · `workspace` · `global:<skill>` · `global` · default (reviewer `codex`, the reviewer's own model, effort `high`). `open_dashboard` reads workspace then global, default `false`. A broken file fails `begin` with `CONFIG_INVALID` before any session is created. With `open_dashboard: true`, `begin` opens the session in the dashboard (`lib/dashboard/follow.js`: reuse the running one from `~/.cross-review/dashboard.json`, else start one with `--idle-exit 1800`) and returns `dashboard_url` or `dashboard_error`; it never fails because of it.
+
+### Dashboard
+
+`review-runner.js dashboard` (or `npx github:lploc94/cross-review dashboard`) serves a local page on `127.0.0.1` (random port 20000–30000, per-run token in cookie or Bearer, Host check, Origin check on writes). It scans `--root` (default cwd) and 3 levels below for `.cross-review/sessions/` and only reads sessions; it writes `~/.cross-review/dashboard.json` (port, token, pid), the settings files, and avatars in `~/.cross-review/avatars/`. Routes are hash routes (`#/`, `#/s/<ws>/<session>[/ISSUE-N]`, `#/settings[/<ws>]`); updates arrive over SSE (`/api/stream?view=list|session`). The model list comes from the reviewer adapter (`codex debug models`, then `--bundled`, else none). The UI follows `mockups/dashboard.html`: system fonts only, Lucide icons (ISC, `ui/LICENSE-lucide.txt`), no brand logos.
 
 ### Key Design Decisions
 
@@ -111,6 +124,7 @@ skill-packs/cross-review/
 | `reply <session_dir> --input <file\|-> [--model] [--effort]` | Markdown placeholder values | JSON: `{ status, session_dir, round, thread_id }` |
 | `end <session_dir> [--outcome consensus\|stalemate]` | (none) | JSON: `{ status: "ended", finalized, verdict }` |
 | `version` | (none) | Plain text: `15` |
+| `dashboard [--root D] [--port N] [--no-open] [--idle-exit S]` | (none) | Serves the dashboard; prints its link |
 | `init --skill-name X --working-dir Y [--reviewer R]` | (none) | Plain text: `SESSION:/path` |
 | `start <session_dir> [--model] [--effort] [--timeout] [--sandbox]` | Prompt on stdin | JSON: `{ status, session_dir, round }` |
 | `resume <session_dir> [--model] [--effort] [--timeout]` | Prompt on stdin | JSON: `{ status, session_dir, round, thread_id }` |
@@ -140,6 +154,11 @@ skill-packs/cross-review/
 - `skill-packs/` is the single source of truth for templates, runtime and prompts.
 
 ## Breaking Changes
+
+### v15 / pack 10.1.0: dashboard and review settings
+- **Settings**: `begin` reads `~/.cross-review/config.json` and `<working_dir>/.cross-review/config.json` for reviewer, model and effort when they are not passed; a broken file fails with `CONFIG_INVALID`. The protocol rule is now "Pass `model` or `effort` only when the user names one or the plan's review checkpoint does; otherwise omit them".
+- **Session data**: `inputs/round-NNN.md`, `outputs/times-round-NNN.jsonl`, `state.caller`, `state.ended_at`/`end_outcome`, `state.settings_sources`; `review_begin` may return `dashboard_url` or `dashboard_error`.
+- **New command** `dashboard`; `manifest.json` 10.1.0.
 
 ### v15: cross-review
 - **Renamed**: project, runtime dir and MCP server `codex-review` → `cross-review`; skills `codex-plan-review`, `codex-impl-review`, `codex-commit-review`, `codex-pr-review`, `codex-think-about` → `review-plan`, `review-impl`, `review-commit`, `review-pr`, `review-think`; runner `codex-runner.js` → `review-runner.js`; session dir `.codex-review/` → `.cross-review/`; installer `bin/codex-skill.js` → `bin/cross-review.js`; `--auto` markers `codex-auto-review-*` → `cross-review-*` (old blocks are replaced).

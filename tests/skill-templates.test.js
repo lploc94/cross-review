@@ -133,9 +133,11 @@ test("review-impl covers commit ranges and own PRs; review-pr reviews other peop
   assert.ok(!fs.existsSync(path.join(PACK, "skills", "review-commit")), "review-commit removed");
 });
 
-test("effort is high unless the user asks; no skill sizes it from the diff", () => {
+test("model and effort come from the user, the checkpoint or the dashboard settings; no skill sizes them from the diff", () => {
   const core = fs.readFileSync(path.join(PACK, "shared", "protocol", "core.md"), "utf8");
-  assert.ok(core.includes("Omit `effort` (the runner uses `high`) unless the user asks for another"), "core rule");
+  assert.ok(core.includes("Pass `model` or `effort` only when the user names one or the plan's review checkpoint does; otherwise omit them and the runner applies the dashboard settings (workspace, then global), else the reviewer's default model and effort `high`."), "core rule");
+  assert.ok(core.includes("Do not pick a model or effort from the size of the diff or the question."), "no sizing");
+  assert.ok(!core.includes("Omit `effort` (the runner uses `high`)"), "old rule gone");
   for (const skill of RUNNER_SKILLS) {
     const text = fs.readFileSync(path.join(PACK, "skills", skill, "SKILL.md"), "utf8");
     assert.ok(!/effort|xhigh|`medium`/i.test(text), `${skill}: no per-skill effort rule`);
