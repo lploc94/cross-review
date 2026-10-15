@@ -1,6 +1,6 @@
 // Reviewer registry. A reviewer module exports: name, label, installHint, sandboxes,
 // defaultSandbox, fullAccessSandbox, isAvailable(), buildCommand(), parseEvents(),
-// matchesCmdline(). See codex.js.
+// activityItems() (the dashboard's activity feed), matchesCmdline(). See codex.js.
 
 import * as codex from "./codex.js";
 

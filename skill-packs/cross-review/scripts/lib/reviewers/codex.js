@@ -174,6 +174,61 @@ export function parseEvents(allLines, newLines, elapsed) {
   return { turnCompleted, turnFailed, failMessage, threadId, reviewText, progressObserved, activities };
 }
 
+const ITEM_KINDS = {
+  command_execution: "command",
+  agent_message: "message",
+  reasoning: "reasoning",
+  mcp_tool_call: "tool",
+  web_search: "tool",
+  file_change: "file_change",
+};
+
+/**
+ * The turn's items for the dashboard, one per item id, in order of first appearance.
+ * `line` is the first event line of the item (item.started, else item.completed: Codex
+ * only completes intermediate messages and reasoning); `lastLine` the latest. Content
+ * comes from the latest event. The turn's final agent_message (the review) is left out.
+ * lines: the event log split on "\n" (only complete lines).
+ */
+export function activityItems(lines) {
+  const byId = new Map();
+  let turnCompleted = false;
+  let lastMessageId = null;
+  lines.forEach((rawLine, index) => {
+    const d = parseLine(rawLine);
+    if (!d) return;
+    if (d.type === "turn.completed") turnCompleted = true;
+    if (d.type !== "item.started" && d.type !== "item.updated" && d.type !== "item.completed") return;
+    const item = d.item || {};
+    const kind = ITEM_KINDS[item.type];
+    if (!kind) return;
+    const id = typeof item.id === "string" && item.id ? item.id : `line-${index}`;
+    let entry = byId.get(id);
+    if (!entry) {
+      entry = { id, line: index, lastLine: index, kind };
+      byId.set(id, entry);
+    }
+    entry.lastLine = index;
+    if (kind === "command") {
+      entry.command = item.command || "";
+      entry.exitCode = typeof item.exit_code === "number" ? item.exit_code : null;
+      entry.status = item.status || (d.type === "item.completed" ? "completed" : "in_progress");
+    } else if (kind === "message" || kind === "reasoning") {
+      entry.text = item.text || "";
+      if (kind === "message") lastMessageId = id;
+    } else if (kind === "tool") {
+      entry.tool = item.type === "web_search" ? "web search" : [item.server, item.tool].filter(Boolean).join(".");
+      if (item.query) entry.text = item.query;
+      entry.status = item.status || null;
+    } else {
+      entry.path = (item.changes || []).map(c => c.path).filter(Boolean).join(", ");
+      entry.status = item.status || null;
+    }
+  });
+  if (turnCompleted && lastMessageId !== null) byId.delete(lastMessageId);
+  return [...byId.values()].sort((a, b) => a.line - b.line);
+}
+
 /** True when a process command line is a Codex turn this runner may kill. */
 export function matchesCmdline(cmdline) {
   return cmdline.includes("codex exec") || cmdline.includes("codex.exe exec") ||
