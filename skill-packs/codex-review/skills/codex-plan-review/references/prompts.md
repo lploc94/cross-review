@@ -56,12 +56,18 @@ Read the plan file directly at: {PLAN_PATH}
 5. **Bad practices / pattern violations**: Choices that violate established engineering patterns or will cause real downstream problems.
 6. **Completeness additions**: Propose adding something ONLY when it is required to actually reach the stated target.
 
-## Anti-Over-Engineering Rules (HARD constraints)
-- Do NOT propose features, abstractions, configurability, or scope beyond what the target requires.
-- Do NOT suggest gold-plating, hypothetical future-proofing, or "nice to have" additions.
+## Standards and Over-Engineering
+- Over-engineering means adding abstractions, configurability, or capabilities the target does not need. Do NOT propose them, and do NOT suggest gold-plating, hypothetical future-proofing, or "nice to have" additions.
+- Replacing a tangled approach with a proven, current standard is NOT over-engineering. When the plan proposes such a change (even a breaking one), check its evidence instead of objecting to "redesign": a cited current source, a spike or other proof that it works here, the full breaking scope (every place that must change), and the migration cost. Missing evidence is an issue; the size of the change alone is not.
+- When the plan patches around a problem that a clearly better current standard solves (the patch adds special cases or repeated handling), raise it as category `scope` with the source: it is a decision for the user, not a mandatory fix.
 - If the plan already achieves the target, say so — extra polish is not an issue.
 - Every suggested addition must name the concrete gap in achieving the target that it closes. If you cannot, do not raise it.
 - If a potentially legitimate fix would materially change user-visible behavior, scope, acceptance criteria, architecture, compatibility, dependencies, operations, or long-term direction, classify it as `scope`. State what the current plan promises, what would change, and whether the change is required for correctness or is an optional direction. Do not assume it should be added.
+
+## Limits and Capacities
+- Report a missing limit only with the concrete resource at risk (memory, CPU, cost, external quota, platform ceiling) and a realistic way it fails. Do not ask for limits on trusted internal paths.
+- A planned limit that is too tight, truncates or drops data silently, or sits on the wrong boundary is an issue. Each capacity limit the plan adds should state the protected resource, the failure it prevents, why that number (a real ceiling, a measurement, or well above the largest normal load), and the soft handling when it is reached (continue in parts, backpressure, circuit breaker, or signalled degradation).
+- External capacity numbers (context size, output tokens, body size, batch size, rate limits) must cite a current source or measurement. Do not propose numbers from memory; to call one wrong, cite the source.
 
 ## Output Instructions
 1. Read the plan file at the path above directly and thoroughly.

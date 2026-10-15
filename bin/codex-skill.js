@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { renderSkillTemplate } from './lib/render-skill.js';
 
 // ---------------------------------------------------------------------------
 // Paths
@@ -26,7 +27,7 @@ const skillsRoot = path.join(os.homedir(), '.claude', 'skills');
 const runnerDir = path.join(skillsRoot, 'codex-review');
 const runnerPath = path.join(runnerDir, 'scripts', 'codex-runner.js');
 
-// RUNNER_SKILLS drive Codex through codex-runner.js; their SKILL.md templates need {{RUNNER_PATH}} and references/.
+// RUNNER_SKILLS drive Codex through codex-runner.js; their SKILL.md templates are rendered with the shared protocol and need references/.
 // PLAIN_SKILLS are self-contained SKILL.md files copied as-is.
 const RUNNER_SKILLS = ['codex-plan-review', 'codex-impl-review', 'codex-think-about', 'codex-commit-review', 'codex-pr-review'];
 const PLAIN_SKILLS = ['loop-plan', 'loop-implement'];
@@ -94,7 +95,7 @@ try {
     fs.chmodSync(runnerDest, 0o755);
   }
 
-  // 2. Process each skill: inject RUNNER_PATH and SKILLS_DIR into SKILL.md, copy references/
+  // 2. Process each skill: render SKILL.md, copy references/
   const escapedRunnerPath = escapeForDoubleQuotedShell(runnerPath);
   const escapedSkillsRoot = escapeForDoubleQuotedShell(skillsRoot);
 
@@ -103,41 +104,23 @@ try {
     const skillDestDir = path.join(stagingDir, skill);
     fs.mkdirSync(skillDestDir, { recursive: true });
 
-    // Read template SKILL.md, inject runner path and skills dir
-    const templatePath = path.join(skillSrcDir, 'SKILL.md');
-    const template = fs.readFileSync(templatePath, 'utf8');
     if (PLAIN_SKILLS.includes(skill)) {
-      fs.writeFileSync(path.join(skillDestDir, 'SKILL.md'), template, 'utf8');
+      fs.copyFileSync(path.join(skillSrcDir, 'SKILL.md'), path.join(skillDestDir, 'SKILL.md'));
       continue;
     }
-    if (!template.includes('{{RUNNER_PATH}}')) {
-      throw new Error(`Template ${skill}/SKILL.md missing {{RUNNER_PATH}} placeholder`);
-    }
-    let injected = template.replaceAll('{{RUNNER_PATH}}', escapedRunnerPath);
-    injected = injected.replaceAll('{{SKILLS_DIR}}', escapedSkillsRoot);
-    if (injected.includes('{{RUNNER_PATH}}')) {
-      throw new Error(`Template ${skill}/SKILL.md still contains {{RUNNER_PATH}} after injection`);
-    }
-    fs.writeFileSync(path.join(skillDestDir, 'SKILL.md'), injected, 'utf8');
+    // Inline the shared protocol and inject runner path and skills dir
+    const rendered = renderSkillTemplate(skillPackDir, skill, {
+      runnerPath: escapedRunnerPath,
+      skillsDir: escapedSkillsRoot,
+    });
+    fs.writeFileSync(path.join(skillDestDir, 'SKILL.md'), rendered, 'utf8');
 
-    // Copy references/ directory (required by all skills)
+    // Copy references/ (prompt templates and output formats the runner renders)
     const refsSrc = path.join(skillSrcDir, 'references');
     if (!fs.existsSync(refsSrc)) {
       throw new Error(`Missing references/ directory for ${skill}`);
     }
     copyDirSync(refsSrc, path.join(skillDestDir, 'references'));
-
-    // Copy shared files into skill's references/ (flavor-text.md, etc.)
-    const sharedDir = path.join(skillPackDir, 'shared');
-    if (fs.existsSync(sharedDir)) {
-      const skillRefsDir = path.join(skillDestDir, 'references');
-      for (const entry of fs.readdirSync(sharedDir)) {
-        const sharedFile = path.join(sharedDir, entry);
-        if (fs.statSync(sharedFile).isFile()) {
-          fs.copyFileSync(sharedFile, path.join(skillRefsDir, entry));
-        }
-      }
-    }
   }
 
   // 3. Verify runner works

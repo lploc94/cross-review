@@ -37,6 +37,8 @@ export const SKILL_TEMPLATES = {
   },
   "codex-think-about": {
     peer: true,
+    // Web research needs network access; the skill guards against file changes
+    sandbox: "danger-full-access",
     modes: { default: { round1: "round1", reply: "round2+", analysis: "claude-analysis" } },
   },
   "codex-commit-review": {
@@ -69,7 +71,7 @@ function resolveTemplates(skill, mode) {
   if (!key || !entry.modes[key]) {
     throw new ReviewError(`Skill ${skill} needs --mode, one of: ${modeNames.join(", ")}`, "INVALID_INPUT");
   }
-  return { peer: entry.peer, mode: key, templates: entry.modes[key] };
+  return { peer: entry.peer, mode: key, templates: entry.modes[key], sandbox: entry.sandbox || null };
 }
 
 export function isPeerSkill(skill) {
@@ -224,6 +226,7 @@ export async function beginSession({ skill, mode, inputText, inputFile, workingD
   const startArgs = ["start", sessionDir, "--effort", effort || "high"];
   if (model) startArgs.push("--model", model);
   if (timeout) startArgs.push("--timeout", String(timeout));
+  if (resolved.sandbox) startArgs.push("--sandbox", resolved.sandbox);
   await runnerJson(startArgs, prompt, "START_FAILED");
 
   const out = { session_dir: sessionDir, round: 1, status: "running" };

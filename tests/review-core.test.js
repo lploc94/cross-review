@@ -221,6 +221,20 @@ for (const combo of COMBOS) {
   });
 }
 
+test("think-about starts Codex with network sandbox; review skills stay read-only", async () => {
+  setCodexOutput("### Key Insights\n- a\n\n### Suggested Status\nCONTINUE\n");
+  resetLog();
+  const t = await beginSession({ skill: "codex-think-about", inputText: inputFor("codex-think-about", "sb"), workingDir: workDir });
+  await waitSession(t.session_dir, { maxWaitSeconds: 30 });
+  const p = await beginSession({ skill: "codex-plan-review", inputText: inputFor("codex-plan-review", "sb"), workingDir: workDir });
+  await waitSession(p.session_dir, { maxWaitSeconds: 30 });
+  const [thinkCall, planCall] = codexCalls();
+  assert.equal(thinkCall.args[thinkCall.args.indexOf("--sandbox") + 1], "danger-full-access");
+  assert.equal(planCall.args[planCall.args.indexOf("--sandbox") + 1], "read-only");
+  await endSession(t.session_dir);
+  await endSession(p.session_dir);
+});
+
 test("reply with a new model updates the stored model", async () => {
   resetLog();
   setCodexOutput("### VERDICT\n- Status: REVISE\n");

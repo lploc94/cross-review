@@ -835,3 +835,18 @@ Checkpoint cuối: `/codex-impl-review` trên diff cộng dồn từ `51d4351`.
   - Spike Claude làm reviewer: khả thi. `claude -p` trả `session_id`; `--resume <id>` giữ được ngữ cảnh giữa các vòng. Read-only chỉ đảm bảo khi mọi lần gọi, kể cả resume, đều truyền giới hạn tool (`--allowedTools Read,Grep,Glob,...` và `--disallowedTools Edit,Write,NotebookEdit`). Lần resume không có giới hạn đã tạo được file. Thiết kế tối thiểu nếu làm: runner thêm backend `claude` ở `launchCodex`, luôn kèm hai cờ đó, và lấy `session_id` thay cho `thread_id`. Đây là phạm vi mới, chờ user quyết; chưa làm.
 - 2026-10-15 Checkpoint sau Phase 3: `/codex-impl-review` (branch, base `e0078ae`, effort high), session `codex-impl-review-20261015-002`. APPROVE sau 2 vòng.
   - Vòng 1: 1 issue, ACCEPT: `review_end` báo finalize lỗi mà không có `isError`. Đã sửa ở `72d3e87`, CLI `end` cũng exit khác 0 trong trường hợp này. Có 2 test hồi quy, cả hai đỏ trên code cũ.
+- 2026-10-15 Phase 4 xong. Full gate: ba test cũ pass, `node --test tests/` 62/62. `tests/skill-templates.test.js` 4/4; 3 trong 4 test đỏ trên SKILL.md cũ.
+  - Tạo `shared/protocol/{core,apply-rebut,cross-analysis}.md` và `bin/lib/render-skill.js`. Installer render 5 review skill và báo lỗi khi thiếu placeholder hoặc còn `{{`; không chép `shared/*` nữa. SKILL.md sau khi cài dài 51–60 dòng.
+  - Đã xoá: `shared/protocol.md`, `shared/flavor-text.md`, 5 file `references/protocol.md`, và `codex-think-about/references/question-sharpening.md`. Phần làm rõ câu hỏi chuyển vào SKILL.md của think-about.
+  - Sửa thêm ngoài danh sách: bảng template của think-about trong `review-core.js` khai báo `sandbox: "danger-full-access"`, và `begin` truyền `--sandbox`. Lý do: think-about cũ chạy Codex có mạng để tìm trên web. Có test cho việc này.
+  - AC-4.1: `grep -rli flavor skill-packs bin --exclude-dir=node_modules` rỗng. Bản grep nguyên văn có trúng file test của zod trong `skill-packs/codex-review/node_modules`; thư mục này bị gitignore và không phải mã của repo.
+  - AC-4.1b: lệnh trong AC chạy trên HOME tạm cho kết quả sạch.
+  - AC-4.3, theo dòng:
+    - impl `prompts.md`:
+      - L78 và L140: `plan-gap`.
+      - L83 và L145: "Limits and capacities".
+      - L179 và L213: mục 6 của rebuttal (không đề xuất công nghệ hay kiến trúc khác; dùng `plan-gap`).
+    - `output-format.md`: thêm category `plan-gap`.
+    - plan `prompts.md`:
+      - L59–65: "Standards and Over-Engineering" (định nghĩa lại over-engineering, kiểm bằng chứng khi đổi sang chuẩn, chuyện vá thay cho chuẩn nêu thành `scope`).
+      - L67–70: "Limits and Capacities".

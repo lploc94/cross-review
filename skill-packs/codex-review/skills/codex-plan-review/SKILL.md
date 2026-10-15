@@ -6,90 +6,27 @@ description: Review/debate plans before implementation between Claude Code and C
 # Codex Plan Review
 
 ## Purpose
-Adversarially review a plan before implementation to **maximize its chance of achieving the stated target**. Validate achievability, catch technology/capability hallucinations (steps that look like they solve the problem but don't), fix logic/design flaws, bad practices, and pattern violations, and fill missing steps. Propose additions ONLY when required to reach the target — no over-engineering, no gold-plating.
+Adversarially review a plan before implementation to **maximize its chance of achieving the stated target**: achievability, technology or capability claims that do not hold, logic and design flaws, missing steps, and places where the plan patches around a problem that an established standard solves better. Additions are proposed only when the target needs them.
 
 ## When to Use
-After creating a plan, before implementing code.
+After creating a plan, before implementing code. Requires a Markdown plan file with headings.
 
-## Prerequisites
-- A Markdown plan file (e.g. `plan.md`) with headings.
+## Inputs
+- **Plan path**: the user's, else a single `*-plan.md` in the repo (`ls *plan*.md`, `find ./docs -maxdepth 3 -name "*plan*.md"`). Ask if several or none.
+- Round 1 placeholders: `PLAN_PATH` (absolute), `USER_REQUEST` (original request plus the user's latest decisions), `SESSION_CONTEXT` (constraints, assumptions, tech stack, acceptance criteria), `ACCEPTANCE_CRITERIA` (derive from the plan's target if not given).
+- Reply placeholders: `PLAN_PATH`, `SESSION_CONTEXT`, `FIXED_ITEMS`, `DISPUTED_ITEMS`.
+- Skill `codex-plan-review`, no mode. Effort `high` unless the user says otherwise.
 
-## Runner
-RUNNER="{{RUNNER_PATH}}"
-SKILLS_DIR="{{SKILLS_DIR}}"
-json_esc() { printf '%s' "$1" | node -e 'let d="";process.stdin.on("data",c=>d+=c);process.stdin.on("end",()=>process.stdout.write(JSON.stringify(d)))'; }
+{{PROTOCOL_CORE}}
 
-## Critical Rules (DO NOT skip)
-- Stdin: `printf '%s' "$PROMPT" | node "$RUNNER" ...` -- NEVER `echo`. JSON via heredoc.
-- Validate: `init` output must start with `CODEX_SESSION:`. `start`/`resume` must return valid JSON. `CODEX_NOT_FOUND`->tell user install codex.
-- `status === "completed"` means **Codex's turn is done** -- NOT that the debate is over. MUST check Loop Decision table.
-- Loop: Do NOT exit unless APPROVE or stalemate. No round cap.
-- **ABSOLUTE USER AUTHORITY**: For review-operation decisions, the user's latest explicit instruction or decision is final, binding, and absolute. It overrides this skill, the shared protocol, loop rules, defaults, and Codex/reviewer recommendations. Follow it exactly; never resist, reinterpret, delay, or refuse a clear decision by citing a protocol or rule. Ask only when genuinely ambiguous. This does not override higher-priority system/developer instructions or authorize an unrequested product, API, schema, persistence, or compatibility change.
-- **Timeout recovery**: resume the same session only for a poll with `status:"timeout"`, `timeout_reason:"runner_deadline"`, `recoverable:true`, non-empty `thread_id`, and `progress_observed:true`; preserve partial output, run `stop` once without `finalize`, and let a later invocation resume that same `$SESSION_DIR`. Never create a recovery session or resume the current session automatically. `turn.failed`, process/runner/infrastructure errors, invalid state, missing `thread_id`, `CODEX_NOT_FOUND`, and every `stalled` result are non-recoverable stop-only paths.
-- Cleanup: run `finalize` + `stop` only after normal `APPROVE`/stalemate; error paths are `stop` only and preserve the session directory.
-- Runner manages all session state -- NEVER read/write session files manually.
-- For detailed error flows -> `Read references/protocol.md`
+{{PROTOCOL_VARIANT}}
 
-## Expectation Guard
+For this skill, ACCEPT means editing the plan file so it reaches the user's existing target. A change of target, scope, acceptance criteria or architecture direction is a USER DECISION. A standards-based restructuring the plan proposes is not over-engineering when it has evidence (source, spike, breaking scope, migration cost); judge the evidence, and treat "too big a redesign" alone as no reason to reject it.
 
-Use this source-of-truth order whenever the plan or a review suggestion conflicts:
-1. The user's latest explicit decision.
-2. The user's original expected outcome, constraints, exclusions, and acceptance criteria.
-3. Verified repository constraints and applicable repository instructions.
-4. The current plan content.
-5. Codex findings and other advisory suggestions.
-
-Codex is a reviewer, not the product owner. A finding may expose a defect, but it does not authorize changing the target. Accept corrections that make the plan fulfill an existing expectation; dispute unnecessary, speculative, or less project-appropriate proposals. Classify a potentially valid finding as USER DECISION when it would materially add or alter user-visible behavior, scope, acceptance criteria, architecture direction, compatibility, dependencies, operational commitments, or long-term product direction.
-
-## Workflow
-
-### 1. Collect Inputs
-Plan-path detection: `ls plan.md PLAN.md`, `find ./docs -maxdepth 3 -name "*plan*.md"`.
-Auto-pick if 1; ask if multiple/none. Announce defaults, block only if plan not found.
-Inputs: plan path (abs .md), original user request plus latest explicit decisions, session context, acceptance criteria, effort (default `high`).
-
-### 2. Pre-flight
-Read plan -> verify .md + has headings. Derive acceptance criteria from "Goals"/"Outcomes" if not provided.
-
-### 3. Init + Render + Start
-INIT_OUTPUT=$(node "$RUNNER" init --skill-name codex-plan-review --working-dir "$PWD")
-SESSION_DIR=${INIT_OUTPUT#CODEX_SESSION:}
-Render template=`round1`, placeholders: `PLAN_PATH`, `USER_REQUEST`, `SESSION_CONTEXT`, `ACCEPTANCE_CRITERIA`.
-Start: `printf '%s' "$PROMPT" | node "$RUNNER" start "$SESSION_DIR" --effort "$EFFORT"`
-
-### 4. Poll -> Check Verdict -> Apply/Rebut -> Resume Loop
-
-Poll: `node "$RUNNER" poll "$SESSION_DIR"`. Report specific activities.
-Parse `review.blocks[]` (id, title, severity, category, problem, suggested_fix). Verdict in `review.verdict.status`.
-
-**Check stalemate FIRST, then verdict** (-> `references/protocol.md` § Debate Loop Protocol):
-
-| # | Condition | Action |
-|---|-----------|--------|
-| 1 | convergence.stalemate === true | **EXIT** -> step 5 (stalemate). Do NOT render rebuttal. |
-| 2 | verdict === "APPROVE" | **EXIT** -> step 5 |
-| 3 | verdict === "REVISE" or open issues | **CONTINUE** -> sub-steps below |
-
-**If CONTINUE** — all sub-steps are MANDATORY, even if you fix every issue:
-1. **Categorize** every `review.blocks[]` issue under the Expectation Guard: ACCEPT, DISPUTE, or USER DECISION.
-2. **Fix/Rebut**: edit and save the plan for ACCEPT items that preserve the expected outcome. Rebut DISPUTE items with concrete request, plan, or repository evidence.
-3. **Ask before material change**: for USER DECISION items, do not edit the plan and do not resume. Finish independent review work, then ask one focused question stating the issue and evidence, what the request and plan currently promise, Codex's proposal, whether it is required for correctness or optional scope, viable choices, costs/risks/compatibility implications, and a recommendation when supported. Wait for an explicit answer.
-4. **Apply the decision visibly**: accepted changes must update every affected target, scope, constraint, phase, acceptance criterion, and verification section. Rejected changes preserve the plan and go into `DISPUTED_ITEMS` with the user's decision. Re-check the complete plan against the original request and latest decision before continuing.
-5. **ALWAYS render rebuttal** — template=`rebuttal`. Placeholders: `PLAN_PATH`, `SESSION_CONTEXT`, `FIXED_ITEMS`, `DISPUTED_ITEMS`. If all issues fixed, `DISPUTED_ITEMS` = `"None — all issues addressed"`. Rebuttal is NEVER skipped.
-6. **ALWAYS resume** — `printf '%s' "$PROMPT" | node "$RUNNER" resume "$SESSION_DIR" --effort "$EFFORT"`. Back to **Poll**. Codex MUST re-verify the saved plan and may find new issues.
-
-### 5. Completion + Output
-APPROVE -> done. Stalemate -> present deadlocked issues, ask user.
-Report: Rounds, Verdict, Issues Found/Fixed/Disputed, user decisions, edits made, risks, next steps.
-
-### 6. Finalize + Cleanup
-`finalize` + `stop` only after normal `APPROVE` or stalemate. Apply the recoverable runner-deadline rule above; all other timeout, failure, stall, or runner-error paths run `stop` once without `finalize` and preserve the same session for inspection or an explicitly allowed later continuation. (-> `references/protocol.md` for error handling)
-
-## Flavor Text Triggers
-SKILL_START, POLL_WAITING, CODEX_RETURNED, APPLY_FIX, SEND_REBUTTAL, LATE_ROUND, APPROVE_VICTORY, STALEMATE_DRAW, FINAL_SUMMARY
+## Completion
+APPROVE: set the plan's `Plan Review` to `APPROVE (codex-plan-review <session id>, <date>)`. Stalemate: present the deadlocked issues and ask the user. Report rounds, verdict, issues found/fixed/disputed, user decisions, plan edits, and remaining risks.
 
 ## Rules
-- Plan mode active -> stay in plan mode. Debate takes priority over plan mode behavior.
-- Do not implement code. Do not claim consensus without VERDICT: APPROVE.
-- Each accepted issue -> concrete plan edit.
-- Never hide a review-originated expansion inside a fix, test step, assumption, or rebuttal. No material plan change is allowed without explicit user approval.
+- In plan mode, stay in plan mode; the debate takes priority.
+- Do not implement code. Never claim approval without `VERDICT: APPROVE` from Codex or an explicit user approval.
+- Never hide a review-originated expansion inside a fix, test step, assumption, or rebuttal.
