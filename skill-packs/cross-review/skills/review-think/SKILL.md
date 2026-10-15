@@ -6,35 +6,37 @@ description: Peer debate with an external reviewer model (Codex CLI by default) 
 # Think About
 
 ## Purpose
-Peer reasoning, not code review: you and the reviewer analyze a technical question independently, challenge each other, and converge to consensus or an explicit disagreement.
+Peer reasoning, not code review: you and the reviewer analyze a technical question independently, challenge each other, and converge to consensus or an explicit disagreement. Both sides may research, read code, run commands, and try things out to check a claim.
 
 ## When to Use
-Before implementing: architecture choices, technology comparisons, tradeoffs.
+- Decisions and tradeoffs: architecture, technology choice, design, approach.
+- Investigations: why something fails, how a system behaves, whether a design holds up, what a change would break.
+- Any reasoning you want challenged before acting on it.
+
+Not for reviewing a written plan (`review-plan`), uncommitted or branch changes (`review-impl`), commits (`review-commit`), or a PR (`review-pr`). When the request is one of those, say so and use that skill unless the user wants a debate.
 
 ## Sharpen the question first
-Check the question for **specificity** (a clear decision or options), **context** (stack, team, constraints stated or inferable) and **debatability** (two-sided, not a factual lookup).
-- All three met: use it as is if a rewrite would only be cosmetic; otherwise rewrite it.
-- Missing parts inferable: inspect once (top-level listing, `package.json`, `pyproject.toml`, `go.mod`, `Cargo.toml`, `pom.xml`, `docker-compose.yml`, `.env.example`), list ambiguous signals instead of picking one, and rewrite.
-- Too vague: ask at most two clarifying questions, one at a time, then rewrite.
-
-Show the rewrite in the user's language as `Sharpened question: "…"` plus `Inferred context: …`, and ask to proceed. On "no", ask what to change once, revise, and on a second "no" continue with the best rewrite. The confirmed text becomes `QUESTION`.
+Turn the request into a question with a clear decision or target, the context it depends on (stack, constraints, what was tried), and what a useful answer looks like. Infer missing context from the conversation and the repository (top-level listing, manifests such as `package.json`, `go.mod`, `pyproject.toml`; relevant code); list ambiguous signals instead of picking one. Do not ask the user to confirm the rewrite; ask only when the target cannot be inferred at all. Show `Sharpened question: "…"` in the user's language as you start. That text becomes `QUESTION`.
 
 ## Inputs
 - Round 1 placeholders: `QUESTION`, `PROJECT_CONTEXT`, `RELEVANT_FILES`, `CONSTRAINTS`.
 - Reply placeholders: `AGREED_POINTS`, `DISAGREED_POINTS`, `NEW_PERSPECTIVES`, `CONTINUE_OR_CONSENSUS_OR_STALEMATE`.
-- Skill `review-think`, no mode. Effort `high` by default. The reviewer runs with network access for web research; it must not change files.
+- Skill `review-think`, no mode. Effort `high` by default. The reviewer runs with full access (web, commands, scratch files outside the project); it must not change project files.
 
 {{PROTOCOL_CORE}}
 
 {{PROTOCOL_VARIANT}}
 
-For this skill: your analysis may use web search and documentation tools. Compare with the reviewer's `review.insights`, `considerations`, `recommendations` and `sources` (fallback `review.raw_markdown`), classifying genuine agreement, genuine disagreement, insights only you or only the reviewer raised, and same direction with different depth; cross-check sources. **Exit rule:** consensus once no significant disagreement remains; stalemate when the same disagreements repeat for two rounds.
+For this skill:
+- Write your independent analysis to `<session_dir>/analysis.md` before your first `review_wait`; the debate compares against that file.
+- Your analysis may use web search, documentation tools, code reading, and experiments. Compare your `Position` with the reviewer's `review.position`, then `insights`, `considerations`, `recommendations` and `sources` (fallback `review.raw_markdown`), classifying genuine agreement, genuine disagreement, insights only you or only the reviewer raised, and same direction with different depth; cross-check sources and evidence.
+- **Exit rule:** consensus once no significant disagreement remains; stalemate when the same disagreements repeat for two rounds. A point one side gave up without new evidence or argument is not consensus; restate it as a disagreement.
 
 **File modification guard.** Snapshot file contents before and after each round. In git: `GIT_INDEX_FILE="$(mktemp -u)" sh -c 'git add -A && git write-tree'` hashes tracked and untracked files without touching the real index, and skips ignored paths such as the runner's `.cross-review/`; compare two snapshots with `git diff --name-status <before> <after>`. Outside git: `find` + `shasum` of the files. If the reviewer added, deleted or modified anything, stop immediately: list every changed file, tell the user the reviewer broke the no-modification rule, do not revert, call `review_end` without an outcome, and wait for the user.
 
 ## Completion
-Report consensus points, remaining disagreements (point | you | reviewer), recommendations, consolidated sources, open questions, and confidence. On stalemate, recommend which side to favor and ask the user.
+Lead with the answer: your recommendation for the user's situation, confidence, and why. Then consensus points, remaining disagreements (point | you | reviewer), positions either side changed and the evidence that changed them, open questions, and consolidated sources. On stalemate, recommend which side to favor and ask the user. Write the same report to `<session_dir>/summary.md`.
 
 ## Rules
 - You and the reviewer are analytical peers; the user's operational decisions control the debate.
-- The reviewer must not modify project files and must cite sources for web claims. Separate researched facts (with sources) from opinions.
+- The reviewer must not modify project files. Claims carry their evidence: a URL, `file:line`, or a command and its result; separate facts from opinions.

@@ -219,6 +219,7 @@ function parseOverallAssessment(md) {
 function parseThinkAboutMarkdown(md) {
   const result = {
     format: "think-about",
+    position: null,
     insights: [],
     considerations: [],
     recommendations: [],
@@ -257,6 +258,7 @@ function parseThinkAboutMarkdown(md) {
     return items;
   }
 
+  if (sections["position"]) result.position = sections["position"].replace(/^- /gm, "").trim() || null;
   result.insights = extractBullets("key insights");
   result.considerations = extractBullets("considerations");
   result.recommendations = extractBullets("recommendations");

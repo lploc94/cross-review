@@ -129,6 +129,20 @@ CONSENSUS
   assert.deepEqual(r.insights, ["one"]);
   assert.equal(r.confidence, "high");
   assert.equal(r.suggested_status, "CONSENSUS");
+  assert.equal(r.position, null);
+});
+
+test("think-about output exposes the Position section", () => {
+  const md = `### Position
+- Use SQLite here; switch to Postgres once writers exceed one process.
+
+### Key Insights
+- one — Source: src/db.js:12
+`;
+  const r = parseOutputMarkdown(md);
+  assert.equal(r.format, "think-about");
+  assert.equal(r.position, "Use SQLite here; switch to Postgres once writers exceed one process.");
+  assert.deepEqual(r.insights, ["one — Source: src/db.js:12"]);
 });
 
 function makeSession(rounds) {

@@ -91,3 +91,17 @@ test("think-about file guard snapshots contents and ignores runner artifacts", (
   assert.ok(text.includes("git write-tree"), "content snapshot");
   assert.ok(!text.includes("git status --porcelain"), "status-based comparison removed");
 });
+
+test("review-think sharpens without confirmation, records both sides, and resists reflexive agreement", () => {
+  const dir = path.join(PACK, "skills", "review-think");
+  const skill = fs.readFileSync(path.join(dir, "SKILL.md"), "utf8");
+  const prompts = fs.readFileSync(path.join(dir, "references", "prompts.md"), "utf8");
+  const format = fs.readFileSync(path.join(dir, "references", "output-format.md"), "utf8");
+  assert.ok(skill.includes("Do not ask the user to confirm the rewrite"), "no sharpen confirmation");
+  assert.ok(skill.includes("<session_dir>/analysis.md") && skill.includes("<session_dir>/summary.md"), "analysis and report saved");
+  assert.ok(skill.includes("Lead with the answer"), "report leads with the recommendation");
+  assert.ok(prompts.includes("Do not agree automatically"), "round 2 anti-sycophancy");
+  assert.ok(prompts.includes("outside the project"), "experiments allowed outside the project");
+  assert.ok(!/curl|CRITICAL RULES|danger-full-access/.test(prompts), "no network micro-rules");
+  assert.ok(/```markdown\n### Position/.test(format), "Position comes first");
+});

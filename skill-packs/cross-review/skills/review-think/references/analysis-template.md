@@ -3,12 +3,15 @@
 Mirrors the reviewer's output-format.md for direct section-by-section comparison.
 
 ```markdown
+### Position
+- [my recommendation or conclusion for this project, in one or two sentences, and what would change it]
+
 ### Key Insights
-- [insight] — Source: [URL or "own knowledge" or "project analysis"]
+- [insight] — Source: [URL, file:line, command result, or "own knowledge"]
 - ...
 
 ### Considerations
-- [trade-off or risk] — Source: [URL or "own knowledge"]
+- [trade-off or risk] — Source: [URL, file:line, command result, or "own knowledge"]
 - ...
 
 ### Recommendations
@@ -16,13 +19,13 @@ Mirrors the reviewer's output-format.md for direct section-by-section comparison
 - ...
 
 ### Sources
-| # | URL | Description |
-|---|-----|-------------|
+| # | Source | Description |
+|---|--------|-------------|
 | 1 | https://... | Description |
 | 2 | (own knowledge) | Based on [reasoning] |
 
 ### Open Questions
-- [what I'm uncertain about or want the reviewer's research to clarify]
+- [what I'm uncertain about or want the reviewer to check]
 - ...
 
 ### Confidence Level
@@ -36,7 +39,6 @@ Mirrors the reviewer's output-format.md for direct section-by-section comparison
 ```
 
 **Notes:**
-- Format mirrors the reviewer's `output-format.md` for easy comparison — all original sections preserved in same order.
-- "Suggested Status" matches the reviewer's advisory field for symmetry.
-- "Strongest Positions" is unique to your analysis — marks which positions to defend vigorously.
-- Sources "(own knowledge)" = your training data; MCP-researched sources have URLs.
+- Same sections in the same order as the reviewer's `output-format.md`.
+- "Strongest Positions" is unique to your analysis — marks which positions to defend.
+- Sources "(own knowledge)" = your training data; researched sources have a URL, `file:line`, or command.
