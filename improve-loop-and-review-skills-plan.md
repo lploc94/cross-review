@@ -891,3 +891,9 @@ Checkpoint cuối: `/codex-impl-review` trên diff cộng dồn từ `51d4351`.
     | 21.3: đề xuất đổi plan theo mẫu 5 phần, user đồng ý thì ghi kèm ngày, không chạy lại plan-review | Plan changes |
     | 21.3: AC dở thì báo `not done` | Gate discipline, ý 3; Stop conditions and reporting |
     | 21.3: giữ tự audit tích hợp | Finalization bước 3 |
+- 2026-10-15 Checkpoint sau Phase 4–6: `/codex-impl-review` (branch, base `9f0a122`, effort high), session `codex-impl-review-20261015-003`. APPROVE sau 2 vòng.
+  - Vòng 1: 2 issue, đều ACCEPT và đã sửa ở `718ba5c`. Mỗi issue có test hồi quy, cả hai đỏ trên code cũ.
+    - medium: file guard của think-about dùng `git status` nên báo động giả do file phiên của runner, và bỏ sót khi Codex sửa một file vốn đã modified. Sửa: so snapshot nội dung bằng index tạm (`git add -A && git write-tree`). Đã spike trên repo nháp.
+    - low: renderer chỉ bắt placeholder dạng `{{A_Z}}`. Sửa: còn bất kỳ `{{` nào cũng báo lỗi.
+  - Ghi chú cho Phase 7: theo docs Codex hiện hành (`codex-rs/ext/skills/src/host_roots.rs`), `$CODEX_HOME/skills` là chỗ deprecated, giữ để tương thích ngược; chỗ chuẩn cho skill của người dùng là `~/.agents/skills`.
+- 2026-10-15: user nói rõ `~/projects/codex_skill` là nguồn dev; các chỗ khác (bản cài trong HOME) được sửa nếu đúng, không cần cứng nhắc.
