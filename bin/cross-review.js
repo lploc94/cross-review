@@ -50,9 +50,10 @@ const LEGACY_MCP_NAME = 'codex-review';
 
 const MCP_NAME = PACK;
 const MCP_TOOLS = ['review_begin', 'review_wait', 'review_reply', 'review_end'];
-// Seconds review_wait blocks by default. Codex allows 60 s per MCP tool call (tool_timeout_sec);
-// Claude Code allows far longer, so fewer calls are needed there.
-const WAIT_DEFAULT_S = { claude: 300, codex: 50 };
+// Seconds review_wait blocks by default: few calls per review, each under the 5-minute prompt
+// cache TTL. Codex allows 60 s per MCP tool call unless the server sets tool_timeout_sec.
+const WAIT_DEFAULT_S = 270;
+const CODEX_TOOL_TIMEOUT_S = 300;
 
 const autoMode = process.argv.includes('--auto');
 const SKILLS = [...RUNNER_SKILLS, ...PLAIN_SKILLS];
@@ -119,17 +120,25 @@ function stableNodePath() {
 }
 
 /**
- * Pre-approve this server's tools in Codex's config.toml. `codex exec` runs with approval
- * policy "never", which rejects MCP tool calls that need approval; `codex mcp add` drops
- * these tables on re-add, so they are rewritten after every registration.
+ * Pre-approve this server's tools in Codex's config.toml and raise its tool timeout above
+ * WAIT_DEFAULT_S. `codex exec` runs with approval policy "never", which rejects MCP tool calls
+ * that need approval; `codex mcp add` drops these settings on re-add, so they are rewritten
+ * after every registration.
  */
 function approveCodexTools(configPath) {
+  const header = `[mcp_servers.${MCP_NAME}]`;
   const prefix = `[mcp_servers.${MCP_NAME}.tools.`;
   const kept = [];
   let skipping = false;
+  let inServer = false;
   for (const line of fs.readFileSync(configPath, 'utf8').split('\n')) {
-    if (line.startsWith('[')) skipping = line.startsWith(prefix);
-    if (!skipping) kept.push(line);
+    if (line.startsWith('[')) {
+      skipping = line.startsWith(prefix);
+      inServer = line === header;
+    }
+    if (skipping || (inServer && /^tool_timeout_sec\s*=/.test(line))) continue;
+    kept.push(line);
+    if (line === header) kept.push(`tool_timeout_sec = ${CODEX_TOOL_TIMEOUT_S}.0`);
   }
   let text = kept.join('\n').replace(/\n*$/, '\n');
   for (const tool of MCP_TOOLS) text += `\n${prefix}${tool}]\napproval_mode = "approve"\n`;
@@ -337,13 +346,13 @@ try {
     const serverCmd = ['--', stableNodePath(), mcpServerPath];
     if (commandExists('claude')) {
       run('claude', ['mcp', 'remove', '-s', 'user', MCP_NAME]);
-      const r = run('claude', ['mcp', 'add', '-s', 'user', MCP_NAME, '-e', `REVIEW_WAIT_DEFAULT_S=${WAIT_DEFAULT_S.claude}`, ...serverCmd]);
+      const r = run('claude', ['mcp', 'add', '-s', 'user', MCP_NAME, '-e', `REVIEW_WAIT_DEFAULT_S=${WAIT_DEFAULT_S}`, ...serverCmd]);
       if (r.ok) registered.push('Claude Code');
       else console.warn(`Warning: could not register the MCP server with Claude Code: ${r.output}`);
     }
     if (commandExists('codex')) {
       fs.mkdirSync(codexHome, { recursive: true });
-      const r = run('codex', ['mcp', 'add', MCP_NAME, '--env', `REVIEW_WAIT_DEFAULT_S=${WAIT_DEFAULT_S.codex}`, ...serverCmd]);
+      const r = run('codex', ['mcp', 'add', MCP_NAME, '--env', `REVIEW_WAIT_DEFAULT_S=${WAIT_DEFAULT_S}`, ...serverCmd]);
       if (r.ok) {
         approveCodexTools(path.join(codexHome, 'config.toml'));
         registered.push('Codex');

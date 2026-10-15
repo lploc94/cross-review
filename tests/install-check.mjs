@@ -141,7 +141,7 @@ if (onPath("claude")) {
   const entry = servers["cross-review"];
   check(entry && entry.args?.includes(mcpServer), "claude: cross-review MCP server not registered at the installed path");
   check(!Object.values(servers).some(s => (s.args || []).some(a => slashed(a) === legacyServer)), "claude: the old codex-review MCP server is still registered");
-  check(entry?.env?.REVIEW_WAIT_DEFAULT_S === "300", "claude: REVIEW_WAIT_DEFAULT_S is not 300");
+  check(entry?.env?.REVIEW_WAIT_DEFAULT_S === "270", "claude: REVIEW_WAIT_DEFAULT_S is not 270");
   check(Object.values(servers).filter(s => s.args?.includes(mcpServer)).length === 1, "claude: MCP server registered more than once");
 }
 if (onPath("codex")) {
@@ -159,7 +159,10 @@ if (onPath("codex")) {
       failures.push(`codex: mcp list failed: ${e.message}`);
     }
   }
-  check(/REVIEW_WAIT_DEFAULT_S\s*=\s*"50"/.test(toml), "codex: REVIEW_WAIT_DEFAULT_S is not 50");
+  check(/REVIEW_WAIT_DEFAULT_S\s*=\s*"270"/.test(toml), "codex: REVIEW_WAIT_DEFAULT_S is not 270");
+  // review_wait blocks up to 270 s; Codex's default 60 s tool timeout would cut it off
+  const serverTable = (toml.match(/^\[mcp_servers\.cross-review\]\n(?:(?!\[).*\n?)*/m) || [""])[0];
+  check((serverTable.match(/^tool_timeout_sec = 300\.0$/gm) || []).length === 1, "codex: cross-review tool_timeout_sec is not 300 exactly once");
   for (const tool of TOOLS) {
     const tables = toml.match(new RegExp(`^\\[mcp_servers\\.cross-review\\.tools\\.${tool}\\]\\napproval_mode = "approve"$`, "gm")) || [];
     check(tables.length === 1, `codex: ${tool} is not pre-approved exactly once (codex exec rejects unapproved MCP calls)`);

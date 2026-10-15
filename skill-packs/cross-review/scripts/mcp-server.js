@@ -20,7 +20,7 @@ import {
 import { DEFAULT_REVIEWER, REVIEWER_NAMES } from "./lib/reviewers/index.js";
 
 // Codex allows 60 s per tool call by default (tool_timeout_sec); Claude Code allows far
-// longer. The installer sets REVIEW_WAIT_DEFAULT_S per client at registration.
+// longer. The installer sets REVIEW_WAIT_DEFAULT_S (and Codex's tool_timeout_sec) at registration.
 const FALLBACK_WAIT_S = 50;
 const envWait = parseInt(process.env.REVIEW_WAIT_DEFAULT_S || "", 10);
 const DEFAULT_WAIT_S = Number.isFinite(envWait) && envWait > 0 ? envWait : FALLBACK_WAIT_S;
