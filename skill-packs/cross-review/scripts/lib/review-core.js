@@ -137,7 +137,7 @@ function writeRoundInput(sessionDir, round, text) {
   fs.renameSync(tmp, file);
 }
 
-function placeholderNames(skillsDir, skill) {
+export function placeholderNames(skillsDir, skill) {
   const promptsPath = path.join(skillsDir, skill, "references", "prompts.md");
   let md;
   try {

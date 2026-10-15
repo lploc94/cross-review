@@ -17,6 +17,7 @@ import { parseOutputMarkdown } from "./lib/parse.js";
 import { beginSession, waitSession, replySession, endSession, DEFAULT_MAX_WAIT_S } from "./lib/review-core.js";
 import { getReviewer } from "./lib/reviewers/index.js";
 import { flushLineTimes } from "./lib/line-times.js";
+import { convergence, issueIds } from "./lib/convergence.js";
 
 const __filename = fileURLToPath(import.meta.url);
 
@@ -1542,10 +1543,7 @@ function cmdPoll(argv) {
           if (review.blocks) {
             currentRoundObj.issues_found = review.blocks.length;
             // Store issue IDs for convergence detection
-            currentRoundObj.issue_ids = review.blocks
-              .filter(b => b.prefix === "ISSUE")
-              .map(b => b.id)
-              .sort((a, b) => a - b);
+            currentRoundObj.issue_ids = issueIds(review);
           }
           if (review.suggested_status) {
             currentRoundObj.verdict = review.suggested_status;
@@ -1556,41 +1554,8 @@ function cmdPoll(argv) {
 
         // Convergence / stalemate detection
         if (result.json.status === "completed" && rounds.length >= 2) {
-          const prevRound = rounds[rounds.length - 2];
-          if (prevRound.issue_ids && currentRoundObj.issue_ids) {
-            const prevIds = prevRound.issue_ids;
-            const currIds = currentRoundObj.issue_ids;
-
-            // Guard: skip stalemate detection when no ISSUE blocks tracked
-            // (e.g. think-about format, RESPONSE-only rounds in round 2+)
-            if (currIds.length === 0 && prevIds.length === 0) {
-              result.json.convergence = {
-                stalemate: false,
-                reason: "no_issue_blocks_tracked",
-              };
-            } else {
-              const prevSet = new Set(prevIds);
-              const currSet = new Set(currIds);
-              const newIssues = currIds.filter(id => !prevSet.has(id));
-              const resolvedIssues = prevIds.filter(id => !currSet.has(id));
-              const sameSet = prevIds.length === currIds.length
-                && prevIds.every(id => currSet.has(id));
-
-              if (sameSet && newIssues.length === 0) {
-                result.json.convergence = {
-                  stalemate: true,
-                  reason: `Same ${currIds.length} open issue(s) for 2 consecutive rounds, no new issues`,
-                  unchanged_issue_ids: currIds,
-                };
-              } else {
-                result.json.convergence = {
-                  stalemate: false,
-                  new_issues: newIssues,
-                  resolved_issues: resolvedIssues,
-                };
-              }
-            }
-          }
+          const c = convergence(rounds[rounds.length - 2].issue_ids, currentRoundObj.issue_ids);
+          if (c) result.json.convergence = c;
         }
       }
     }

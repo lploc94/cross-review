@@ -229,8 +229,9 @@ export function createListWatcher({ root, now = () => Math.floor(Date.now() / 10
         abs = workspaces().get(ws);
       }
       if (!abs) return null;
+      // Only what the list shows: a real folder in the sessions dir, never a symlink
       const dir = path.join(sessionsDir(abs), id);
-      return fs.existsSync(path.join(dir, "state.json")) ? dir : null;
+      return listSessions(abs).includes(dir) && fs.existsSync(path.join(dir, "state.json")) ? dir : null;
     },
     parsedFor,
     now,

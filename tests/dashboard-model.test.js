@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { buildFixture, writeSession } from "./helpers/dashboard-fixture.js";
-import { classify, readSession, parseAgentReply, TEXT, LABELS } from "../skill-packs/cross-review/scripts/lib/dashboard/model.js";
+import { classify, readSession, parseAgentReply, inputValues, TEXT, LABELS } from "../skill-packs/cross-review/scripts/lib/dashboard/model.js";
 import { humanize, groupReads, attachTimes, unwrapShell } from "../skill-packs/cross-review/scripts/lib/dashboard/activity.js";
 import { activityItems } from "../skill-packs/cross-review/scripts/lib/reviewers/codex.js";
 
@@ -279,4 +279,54 @@ test("readSession keys activity by round and item id and stamps times", () => {
   assert.equal(live.items.length, 45);
   assert.ok(live.items.every(i => i.key === `3:${i.id}` && typeof i.t === "number"));
   assert.equal(new Set(live.items.map(i => i.key)).size, 45);
+});
+
+// ---------- checkpoint review (review-impl-20261015-012) regressions ----------
+
+test("a failed round nobody polled keeps the thread from its event log, so it stays resumable", () => {
+  const now = 1_800_000_000;
+  const dir = writeSession(path.join(tmp, "unpolled-failed", ".cross-review", "sessions"), "review-impl-20261015-090", {
+    skill: "review-impl", created: now - 50, threadId: null, inputs: ["## USER_REQUEST\nInvented task.\n"],
+    rounds: [{ status: "running", started: now - 50, elapsed: 0, acts: [] }],
+  });
+  // the log has the thread, then the turn fails; state.json never got the thread id
+  fs.writeFileSync(path.join(dir, "output.jsonl"), [
+    { type: "thread.started", thread_id: "thread-invented-failed" },
+    { type: "turn.started" },
+    { type: "turn.failed", error: { message: "Invented transient error." } },
+  ].map(l => JSON.stringify(l)).join("\n") + "\n");
+  const { summary } = classify(readSession(dir), { now, isAlive: () => false });
+  assert.equal(summary.state, "stopped");
+  assert.equal(summary.group, "active");
+  assert.equal(summary.label, LABELS.resumable);
+});
+
+test("a completed round nobody polled gets the runner's convergence: same open issues twice is a stalemate", () => {
+  const now = 1_800_000_000;
+  const review = "### ISSUE-1: Invented unresolved issue\n- Severity: medium\n- Problem: Invented problem.\n\n### VERDICT\n- Status: REVISE\n- Reason: Still open.\n";
+  const dir = writeSession(path.join(tmp, "unpolled-converged", ".cross-review", "sessions"), "review-impl-20261015-091", {
+    skill: "review-impl", created: now - 100, inputs: ["## USER_REQUEST\nInvented task.\n", "## DISPUTED_ITEMS\nISSUE-1: Disputed.\n"],
+    rounds: [
+      { status: "completed", started: now - 100, elapsed: 10, review },
+      { status: "running", started: now - 40, elapsed: 0, acts: [] },
+    ],
+  });
+  fs.appendFileSync(path.join(dir, "output.jsonl"), [
+    { type: "item.completed", item: { id: "final-review", type: "agent_message", text: review } },
+    { type: "turn.completed" },
+  ].map(l => JSON.stringify(l)).join("\n") + "\n");
+  const { summary } = classify(readSession(dir), { now, isAlive: () => false });
+  assert.equal(summary.group, "history");
+  assert.equal(summary.state, "stalemate");
+});
+
+test("inputValues splits only on the skill's placeholders; other uppercase headings stay in the value", () => {
+  const raw = "## USER_REQUEST\nReview this invented requirement.\n\n## API\nThe invented export must include all columns.\n\n## SESSION_CONTEXT\nInvented context.\n";
+  const v = inputValues(raw, "review-impl");
+  assert.equal(v.USER_REQUEST, "Review this invented requirement.\n\n## API\nThe invented export must include all columns.");
+  assert.equal(v.SESSION_CONTEXT, "Invented context.");
+  assert.equal(v.API, undefined);
+  const reply = inputValues("## FIXED_ITEMS\nISSUE-1: fixed.\n\n## NOTES\nkept\n\n## DISPUTED_ITEMS\nNone\n", "review-plan");
+  assert.match(reply.FIXED_ITEMS, /## NOTES\nkept/);
+  assert.equal(reply.DISPUTED_ITEMS, "None");
 });

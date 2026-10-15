@@ -9,7 +9,8 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { parseOutputMarkdown } from "../parse.js";
-import { computeNext, isPeerSkill, parseReviewInput } from "../review-core.js";
+import { computeNext, defaultSkillsDir, isPeerSkill, parseReviewInput, placeholderNames } from "../review-core.js";
+import { convergence, issueIds } from "../convergence.js";
 import { getReviewer } from "../reviewers/index.js";
 import { readLineTimes } from "../line-times.js";
 import { attachTimes, humanize } from "./activity.js";
@@ -63,12 +64,32 @@ function completeLines(text) {
   return lines;
 }
 
-/** Placeholder values of a stored round input; every `## NAME` and `NAME:` counts. */
-export function inputValues(text) {
+const namesBySkill = new Map();
+/** The skill's placeholder names, as the runner reads them; null when its prompts are missing. */
+function skillNames(skill) {
+  if (!namesBySkill.has(skill)) {
+    let names = null;
+    try {
+      names = placeholderNames(defaultSkillsDir(skill), skill);
+    } catch {}
+    namesBySkill.set(skill, names);
+  }
+  return namesBySkill.get(skill);
+}
+
+/**
+ * Placeholder values of a stored round input, split the way the runner split it: only the
+ * skill's own placeholders start a section, so other `## HEADINGS` stay inside the value.
+ * Without the skill's prompts, every `## NAME` and `NAME:` counts.
+ */
+export function inputValues(text, skill) {
   if (!text) return {};
-  const names = new Set();
-  for (const m of text.matchAll(/^##[ \t]+([A-Z][A-Z_0-9]+)[ \t]*$/gm)) names.add(m[1]);
-  for (const m of text.matchAll(/^([A-Z][A-Z_0-9]+)[ \t]*:/gm)) names.add(m[1]);
+  let names = skill ? skillNames(skill) : null;
+  if (!names) {
+    names = new Set();
+    for (const m of text.matchAll(/^##[ \t]+([A-Z][A-Z_0-9]+)[ \t]*$/gm)) names.add(m[1]);
+    for (const m of text.matchAll(/^([A-Z][A-Z_0-9]+)[ \t]*:/gm)) names.add(m[1]);
+  }
   return parseReviewInput(text, names);
 }
 
@@ -169,9 +190,14 @@ function effectiveRounds(parsed, { isAlive }) {
       if (isAlive(state.pid)) {
         running = true;
       } else if (r.outcome && r.outcome.turnCompleted) {
-        final = { status: "completed", round: r.round, review: parseOutputMarkdown(r.outcome.reviewText, skill), thread_id: r.outcome.threadId || null, synthesized: true };
+        const review = parseOutputMarkdown(r.outcome.reviewText, skill);
+        final = { status: "completed", round: r.round, review, thread_id: r.outcome.threadId || null, synthesized: true };
+        // What the runner's poll would add: stalemate when the same issues stay open twice
+        const prev = i > 0 ? parsed.rounds[i - 1].entry : null;
+        const c = prev ? convergence(prev.issue_ids, issueIds(review)) : null;
+        if (c) final.convergence = c;
       } else {
-        final = { status: "failed", round: r.round, error: (r.outcome && r.outcome.turnFailed && r.outcome.failMessage) || TEXT.noTurn, synthesized: true };
+        final = { status: "failed", round: r.round, error: (r.outcome && r.outcome.turnFailed && r.outcome.failMessage) || TEXT.noTurn, thread_id: (r.outcome && r.outcome.threadId) || null, synthesized: true };
       }
     }
     const status = running ? "running" : final ? final.status : (r.entry.status || "stopped");
@@ -231,7 +257,7 @@ function issueInfo(b) {
 function replyFor(parsed, round) {
   const next = parsed.rounds[round]; // round r's reply is input r+1
   if (!next || !next.input) return null;
-  const values = inputValues(next.input);
+  const values = inputValues(next.input, parsed.skill);
   if (parsed.peer) {
     const sections = [
       ["Agreed", values.AGREED_POINTS],
@@ -437,7 +463,7 @@ function statusSentences(cls, ctx) {
 function titleOf(parsed) {
   const first = parsed.rounds[0] && parsed.rounds[0].input;
   if (!first) return parsed.id;
-  const v = inputValues(first);
+  const v = inputValues(first, parsed.skill);
   let t = null;
   if (parsed.skill === "review-plan") t = v.PLAN_PATH ? path.basename(v.PLAN_PATH) : null;
   else if (parsed.skill === "review-think") t = v.QUESTION || null;
@@ -452,7 +478,7 @@ function titleOf(parsed) {
 }
 
 function metaLine(parsed) {
-  const v = inputValues(parsed.rounds[0] && parsed.rounds[0].input);
+  const v = inputValues(parsed.rounds[0] && parsed.rounds[0].input, parsed.skill);
   const mode = parsed.state.mode;
   if (parsed.skill === "review-impl") {
     if (mode === "branch") return { text: `${parsed.skill}, branch since`, code: v.BASE_BRANCH || null };
@@ -545,7 +571,7 @@ export function classify(parsed, { now = Math.floor(Date.now() / 1000), isAlive 
   else if (cls.state === "waiting" && cls.group === "active") steps.push({ strong: null, text: "agent's turn", who: "tail", tone: "waiting", jump: null });
 
   const thread = [];
-  const v1 = inputValues(parsed.rounds[0] && parsed.rounds[0].input);
+  const v1 = inputValues(parsed.rounds[0] && parsed.rounds[0].input, parsed.skill);
   const ask = parsed.skill === "review-think" ? v1.QUESTION : v1.USER_REQUEST;
   if (ask && ask.trim()) thread.push({ who: "us", kind: "ask", md: ask.trim() });
   story.forEach((x, i) => {

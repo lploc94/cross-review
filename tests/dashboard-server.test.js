@@ -200,6 +200,22 @@ test("Host, Origin, static paths and session keys are checked even with a valid 
   }
 });
 
+test("a session folder that is a symlink is neither listed nor served", async () => {
+  const root = mk("symlinked");
+  fs.mkdirSync(path.join(root, ".cross-review", "sessions"), { recursive: true });
+  const fx = buildFixture(mk("elsewhere"), { now: nowS(), livePid: 1 });
+  const id = idOf(fx.sessions.waiting);
+  fs.symlinkSync(fx.sessions.waiting, path.join(root, ".cross-review", "sessions", id));
+  const d = await startDashboard({ root, port: 0, open: false, discoveryFile: null });
+  try {
+    const p = await getJson(d, "/api/sessions");
+    assert.equal(p.active.length + p.history.length, 0);
+    assert.equal((await request(d.port, `/api/session?ws=.&id=${id}`, { headers: bearer(d) })).status, 404);
+  } finally {
+    await d.close();
+  }
+});
+
 // ---------- 4, 4d ----------
 
 test("list stream: a new event line changes Now; final.txt moves the session to waiting; reconnect gets the new state first", async () => {
