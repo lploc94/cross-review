@@ -100,6 +100,8 @@ test("loop-implement admits only a sourced approval and drops interim bookkeepin
   assert.ok(!/record[^.\n]*blocked/i.test(text), "no record-blocked-and-continue");
   assert.ok(/not done/.test(text), "unfinished ACs are reported as not done");
   assert.ok(/baseline/i.test(text), "pre-existing failures are compared with the baseline");
+  assert.ok(/reviewer unavailable: <reason>[^\n]*never as a review approval/.test(text), "self-review stands in for an unavailable reviewer but is never an approval");
+  assert.ok(/try the reviewer again on the whole diff since the last real review/.test(text), "missed reviews are retried at the next checkpoint");
 });
 
 test("loop-implement stays within 1.2x of the original 49 lines", () => {

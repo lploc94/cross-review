@@ -5,7 +5,7 @@ description: Execute an approved loop-plan/v1 plan end to end with docs-first TD
 
 # Loop Implement
 
-Execute the approved `loop-plan/v1` plan from the next incomplete phase through completion. The plan, the user's latest explicit decisions, repository instructions, and verified current state define scope. Do not redesign the target, silently add features, or stop between phases without a real blocker.
+Execute the approved `loop-plan/v1` plan from the next incomplete phase through completion. The plan, the user's latest explicit decisions, repository instructions, and verified current state define scope. Do not redesign the target, silently add features, or stop between phases without a real blocker. The user's latest explicit instruction overrides this skill's procedure (skip, accept, or resume a review, change the order, handle a step another way); follow it and record it in the progress line.
 
 ## Admission
 
@@ -24,6 +24,7 @@ For each phase, in order:
 5. Inspect the staged diff once: phase-owned files only, no secrets, no leftovers of renamed or removed names.
 6. Commit once with the planned message, together with the phase's progress line in the plan's `Progress Log`: result, AC evidence, and any deviation from the plan, plus a `Discovery:` line with evidence for each surprise that shaped the work. Never amend, force, skip hooks, or create an empty commit.
 7. If the plan lists this phase as a review checkpoint, run `{{CLIENT_SKILL}}review-impl` with the model the plan names, if any. The review skill governs how findings are handled. Then report the phase and move on.
+8. If the reviewer cannot run (not installed, auth, quota, repeated errors), self-review the checkpoint's diff against the review-impl criteria (plan/target, deviations, defects, project rules), fix what you find, record `self-review (reviewer unavailable: <reason>)` in the progress line, never as a review approval, and continue. At the next checkpoint, try the reviewer again on the whole diff since the last real review; while it still fails, keep self-reviewing the same way.
 
 Gate discipline:
 - A gate that cannot run is a problem to solve (install, build, start what the plan names), not something to note and skip.
@@ -40,7 +41,7 @@ Plan changes:
 1. Run every `Global Gates` command once, exactly as written, on final `HEAD`.
 2. Run the end-to-end scenario in `Completion Criteria` on final `HEAD` and compare with its expected output. Reuse each phase's AC evidence; check only what spans phases: invariants, ownership boundaries, exclusions.
 3. Self-audit integration over the cumulative diff and commit history: cross-phase interfaces and state boundaries.
-4. Run the plan's final review checkpoint with `{{CLIENT_SKILL}}review-impl` on the cumulative diff.
+4. Run the plan's final review checkpoint with `{{CLIENT_SKILL}}review-impl` on the cumulative diff; if the reviewer cannot run, self-review as in step 8 of the per-phase loop.
 5. Fix defects from steps 3–4 with a narrow regression test first, then the affected phase gates. Each fix still meets the plan's criteria and changes only what the defect needs; check what depends on the changed code and other places with the same pattern, since fixes are the main source of new bugs; rerun the full suite and the end-to-end scenario only once the fixes are in. Ask before any material scope the audit uncovers; do not hide it in a repair commit.
 6. Update `Completion Criteria` in the final commit. Verify the worktree is clean apart from recorded unrelated changes.
 
@@ -48,4 +49,4 @@ Plan changes:
 
 Stop only for a real user decision, missing required credentials or infrastructure, irreconcilable requirements, or an irreversible action the plan does not authorize. A review stalemate is a user decision. Preserve evidence and ask one question at a time, in the decision format above.
 
-Report phase commits, exact verification and gate results (with baseline failures), review outcomes, user-approved plan changes, ACs `not done`, and residual risks. Never claim approval or completion without recorded evidence.
+Report phase commits, exact verification and gate results (with baseline failures), review outcomes (name every checkpoint covered only by self-review, the reviewer error, and that `{{CLIENT_SKILL}}review-impl` can be rerun on that diff once the reviewer works), user-approved plan changes, ACs `not done`, and residual risks. Never claim approval or completion without recorded evidence.

@@ -227,6 +227,33 @@ for (const combo of COMBOS) {
   });
 }
 
+test("a round that failed mid-turn resumes the same reviewer thread after review_end", async () => {
+  resetLog();
+  process.env.FAKE_CODEX_FAIL = "You've hit your usage limit.";
+  let begun;
+  try {
+    begun = await beginSession({ skill: "review-impl", mode: "working-tree", inputText: inputFor("review-impl", "q1"), workingDir: workDir });
+    const failed = await waitSession(begun.session_dir, { maxWaitSeconds: 30 });
+    assert.equal(failed.next, "stopped");
+    assert.equal(failed.thread_id, "thread-fake-1");
+    await endSession(begun.session_dir);
+  } finally {
+    delete process.env.FAKE_CODEX_FAIL;
+  }
+
+  // After a new login the user asks to resume: the same thread continues, no new session
+  setCodexOutput("### VERDICT\n- Status: APPROVE\n- Reason: ok\n");
+  const replied = await replySession(begun.session_dir, { inputText: inputFor("review-impl", "q2") });
+  assert.equal(replied.round, 2);
+  assert.equal(replied.thread_id, "thread-fake-1");
+  const done = await waitSession(begun.session_dir, { maxWaitSeconds: 30 });
+  assert.equal(done.next, "done");
+  const calls = codexCalls();
+  assert.equal(calls.length, 2);
+  assert.ok(calls[1].args.includes("resume") && calls[1].args.includes("thread-fake-1"), `resume args: ${calls[1].args.join(" ")}`);
+  await endSession(begun.session_dir);
+});
+
 test("every review skill starts and resumes Codex with full access for verification commands", async () => {
   setCodexOutput("### Key Insights\n- a\n\n### Suggested Status\nCONTINUE\n");
   resetLog();

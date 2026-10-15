@@ -1,6 +1,7 @@
 // Fake `codex` executable for tests: logs its args and stdin prompt to FAKE_CODEX_LOG,
 // then prints a JSONL turn whose agent message is the content of FAKE_CODEX_OUTPUT.
 // FAKE_CODEX_SLOW_MS keeps it running (after some progress events) for that long.
+// FAKE_CODEX_FAIL fails the turn after the thread started, with that message (e.g. a usage limit).
 import fs from "node:fs";
 import path from "node:path";
 
@@ -12,6 +13,15 @@ let prompt = "";
 try { prompt = fs.readFileSync(0, "utf8"); } catch {}
 fs.appendFileSync(process.env.FAKE_CODEX_LOG, JSON.stringify({ args: process.argv.slice(2), prompt }) + "\\n");
 const text = fs.readFileSync(process.env.FAKE_CODEX_OUTPUT, "utf8");
+if (process.env.FAKE_CODEX_FAIL) {
+  const failed = [
+    { type: "thread.started", thread_id: "thread-fake-1" },
+    { type: "turn.started" },
+    { type: "turn.failed", error: { message: process.env.FAKE_CODEX_FAIL } },
+  ];
+  process.stdout.write(failed.map(e => JSON.stringify(e)).join("\\n") + "\\n");
+  process.exit(1);
+}
 const slowMs = parseInt(process.env.FAKE_CODEX_SLOW_MS || "0", 10);
 if (slowMs > 0) {
   fs.writeSync(1, JSON.stringify({ type: "thread.started", thread_id: "thread-fake-1" }) + "\\n");
