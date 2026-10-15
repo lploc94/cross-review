@@ -9,7 +9,7 @@ description: Review uncommitted code changes or branch diff against the plan/tar
 Verify the implementation matches the plan / original target before commit or merge. Check what is missing, what deviates (and whether the deviation is acceptable or breaks the target), and hunt for real bugs (logic, security, memory, runtime). Fix genuine defects required to make the promised behavior correct and safe, but do NOT silently turn a defect fix into a new product contract, feature, or broader design. No over-engineering.
 
 ## When to Use
-After writing code, before committing. For security-sensitive code, run `/codex-security-review` alongside.
+After writing code, before committing.
 
 ## Prerequisites
 - **Working-tree** (default): staged or unstaged changes exist.
@@ -22,6 +22,14 @@ json_esc() { printf '%s' "$1" | node -e 'let d="";process.stdin.on("data",c=>d+=
 
 ## Critical Rules (DO NOT skip)
 - Stdin: `printf '%s' "$PROMPT" | node "$RUNNER" ...` -- NEVER `echo`. JSON via heredoc.
+- Runner privilege invariant: run `start`, every `poll`, any `resume`, and
+  terminal cleanup from the same privilege/sandbox context. Starting outside a
+  sandbox and polling inside it can make a live Codex process look dead because
+  PID inspection is denied; starting inside this managed sandbox can fail before
+  the turn when Codex cannot write its installation PATH aliases.
+- Polling: omit `--min-interval` and let the runner's default 120-second
+  throttle apply. Do not use a short interval such as 5 seconds for ordinary
+  review progress; use one only for an explicitly bounded diagnostics test.
 - Validate: `init` output must start with `CODEX_SESSION:`. `start`/`resume` must return valid JSON. `CODEX_NOT_FOUND`->tell user install codex.
 - `status === "completed"` means **Codex's turn is done** -- NOT that the debate is over. MUST check Loop Decision table.
 - Loop: Do NOT exit unless APPROVE or stalemate. No round cap.

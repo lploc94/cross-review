@@ -12,6 +12,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
+import { parseOutputMarkdown } from "./lib/parse.js";
 
 const __filename = fileURLToPath(import.meta.url);
 
@@ -87,12 +88,14 @@ function resolveCodexCommand() {
   return { cmd: "codex", prependArgs: [] };
 }
 
-function launchCodex(stateDir, workingDir, timeoutS, threadId, effort, sandbox = "read-only") {
+function launchCodex(stateDir, workingDir, timeoutS, threadId, effort, model, sandbox = "read-only") {
   const promptFile = path.join(stateDir, "prompt.txt");
   const jsonlFile = path.join(stateDir, "output.jsonl");
   const errFile = path.join(stateDir, "error.log");
 
   const { cmd: resolvedCmd, prependArgs } = resolveCodexCommand();
+  // Omit the override when absent so Codex keeps its default model selection.
+  const modelArgs = model === undefined ? [] : ["--model", model];
   let cmd = resolvedCmd;
   let args;
   let cwd;
@@ -101,13 +104,14 @@ function launchCodex(stateDir, workingDir, timeoutS, threadId, effort, sandbox =
     args = [
       ...prependArgs, "exec", "--skip-git-repo-check", "--json",
       "--config", `model_reasoning_effort=${effort}`,
-      "resume", threadId, "-",
+      "resume", ...modelArgs, threadId, "-",
     ];
     cwd = workingDir;
   } else {
     args = [
       ...prependArgs,
       "exec", "--skip-git-repo-check", "--json",
+      ...modelArgs,
       "--sandbox", sandbox,
       "--config", `model_reasoning_effort=${effort}`,
       "-C", workingDir,
@@ -434,326 +438,6 @@ function jsonError(error, code = "UNKNOWN_ERROR") {
   jsonOut({ status: "error", error, code });
 }
 
-// ============================================================
-// Output parsers — v13
-// ============================================================
-
-/**
- * Parse a markdown field value: from "- FieldName:" to next "- " or "### ".
- * Handles multi-line values including fenced code blocks.
- */
-function extractFieldValue(content) {
-  if (!content) return "";
-  return content.replace(/^\s*/, "").replace(/\s+$/, "");
-}
-
-/**
- * Parse "- FieldName: value" lines from a block of text.
- * Returns a Map of lowercase field name → raw value string.
- * Handles multi-line values (evidence with code blocks, etc.).
- */
-function parseFields(blockContent) {
-  const fields = new Map();
-  const lines = blockContent.split("\n");
-  let currentField = null;
-  let currentValue = [];
-  let inCodeBlock = false;
-
-  for (const line of lines) {
-    // Track fenced code blocks
-    if (line.trim().startsWith("```")) {
-      inCodeBlock = !inCodeBlock;
-      if (currentField) {
-        currentValue.push(line);
-      }
-      continue;
-    }
-
-    if (inCodeBlock) {
-      if (currentField) {
-        currentValue.push(line);
-      }
-      continue;
-    }
-
-    // Check for new field: "- FieldName: value" or "- FieldName (detail): value"
-    const fieldMatch = line.match(/^- ([A-Za-z][A-Za-z_ ]*(?:\([^)]*\))?):\s*(.*)/);
-    if (fieldMatch) {
-      // Save previous field
-      if (currentField) {
-        fields.set(currentField, extractFieldValue(currentValue.join("\n")));
-      }
-      currentField = fieldMatch[1].trim().toLowerCase();
-      currentValue = [fieldMatch[2]];
-    } else if (currentField) {
-      // Continuation line for current field
-      currentValue.push(line);
-    }
-  }
-
-  // Save last field
-  if (currentField) {
-    fields.set(currentField, extractFieldValue(currentValue.join("\n")));
-  }
-
-  return fields;
-}
-
-/**
- * Extract verdict block from markdown.
- */
-function parseVerdict(md) {
-  // Match ### VERDICT heading
-  const verdictMatch = md.match(/^### VERDICT\s*$/m);
-  if (!verdictMatch) return null;
-
-  const startIdx = verdictMatch.index + verdictMatch[0].length;
-  // Find next ### heading or end
-  const nextHeading = md.slice(startIdx).search(/^### /m);
-  const verdictContent = nextHeading >= 0
-    ? md.slice(startIdx, startIdx + nextHeading)
-    : md.slice(startIdx);
-
-  const fields = parseFields(verdictContent);
-
-  const result = {
-    status: fields.get("status") || null,
-    reason: fields.get("reason") || null,
-    risk_summary: null,
-  };
-
-  // Parse Security Risk Summary if present
-  const riskMatch = verdictContent.match(/Security Risk Summary:\s*\n([\s\S]*?)(?:\n\n|\nRecommendations:|\nBlocking|$)/);
-  if (riskMatch) {
-    const riskLines = riskMatch[1].trim().split("\n");
-    const risk = {};
-    for (const line of riskLines) {
-      const m = line.match(/^-\s*(Critical|High|Medium|Low):\s*(\d+)/i);
-      if (m) {
-        risk[m[1].toLowerCase()] = parseInt(m[2], 10);
-      }
-    }
-    if (Object.keys(risk).length > 0) {
-      result.risk_summary = risk;
-    }
-  }
-
-  return result;
-}
-
-/**
- * Extract Overall Assessment block from markdown.
- */
-function parseOverallAssessment(md) {
-  const oaMatch = md.match(/^### Overall Assessment\s*$/m);
-  if (!oaMatch) return null;
-
-  const startIdx = oaMatch.index + oaMatch[0].length;
-  const nextHeading = md.slice(startIdx).search(/^### /m);
-  const oaContent = nextHeading >= 0
-    ? md.slice(startIdx, startIdx + nextHeading)
-    : md.slice(startIdx);
-
-  const fields = parseFields(oaContent);
-  const result = {};
-
-  for (const [key, value] of fields) {
-    // Normalize field names: "code quality" → "code_quality"
-    const normalized = key.replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "");
-    result[normalized] = value;
-  }
-
-  return Object.keys(result).length > 0 ? result : null;
-}
-
-/**
- * Parse think-about format output.
- */
-function parseThinkAboutMarkdown(md) {
-  const result = {
-    format: "think-about",
-    insights: [],
-    considerations: [],
-    recommendations: [],
-    sources: [],
-    open_questions: [],
-    confidence: null,
-    suggested_status: null,
-    raw_markdown: md,
-  };
-
-  // Split by ### headings
-  const sections = {};
-  const sectionRegex = /^### (.+)$/gm;
-  let match;
-  const headings = [];
-
-  while ((match = sectionRegex.exec(md)) !== null) {
-    headings.push({ title: match[1].trim(), index: match.index + match[0].length });
-  }
-
-  for (let i = 0; i < headings.length; i++) {
-    const start = headings[i].index;
-    const end = i + 1 < headings.length ? headings[i + 1].index - headings[i + 1].title.length - 5 : md.length;
-    sections[headings[i].title.toLowerCase()] = md.slice(start, end).trim();
-  }
-
-  // Extract bullet items from a section
-  function extractBullets(sectionName) {
-    const content = sections[sectionName];
-    if (!content) return [];
-    const items = [];
-    for (const line of content.split("\n")) {
-      const m = line.match(/^- (.+)/);
-      if (m) items.push(m[1].trim());
-    }
-    return items;
-  }
-
-  result.insights = extractBullets("key insights");
-  result.considerations = extractBullets("considerations");
-  result.recommendations = extractBullets("recommendations");
-  result.open_questions = extractBullets("open questions");
-
-  // Parse Sources table
-  const sourcesContent = sections["sources"];
-  if (sourcesContent) {
-    const tableRows = sourcesContent.split("\n").filter(line => line.includes("|") && !line.match(/^\|?\s*[-|]+\s*\|?$/));
-    for (const row of tableRows) {
-      const cells = row.split("|").map(c => c.trim()).filter(c => c);
-      if (cells.length >= 3 && cells[0] !== "#") {
-        result.sources.push({ url: cells[1], description: cells[2] });
-      }
-    }
-  }
-
-  // Confidence level
-  const confContent = sections["confidence level"];
-  if (confContent) {
-    const m = confContent.match(/\b(low|medium|high)\b/i);
-    if (m) result.confidence = m[1].toLowerCase();
-  }
-
-  // Suggested Status
-  const statusContent = sections["suggested status (advisory)"] || sections["suggested status"];
-  if (statusContent) {
-    const m = statusContent.match(/\b(CONTINUE|CONSENSUS|STALEMATE)\b/i);
-    if (m) result.suggested_status = m[1].toUpperCase();
-  }
-
-  return result;
-}
-
-/**
- * parseOutputMarkdown — unified entry point for parsing Codex output.
- *
- * Detects format variant and extracts structured data.
- */
-function parseOutputMarkdown(md, skillHint) {
-  if (!md || !md.trim()) {
-    return { format: "unknown", raw_markdown: md || "", parse_error: "Empty output" };
-  }
-
-  // Step 1: Detect format variant
-  const hasResponse = /^### RESPONSE-\d+:/m.test(md);
-  const hasCross = /^### CROSS-\d+:/m.test(md);
-  const hasIssue = /^### ISSUE-\d+:/m.test(md);
-  const hasCWE = /\bCWE:/m.test(md) || /\bCWE-\d+/m.test(md);
-  const hasOWASP = /\bOWASP:/m.test(md) || /\bA\d{2}:2021/m.test(md);
-  const hasAttackVector = /\bAttack Vector:/m.test(md);
-  const hasOverallAssessment = /^### Overall Assessment/m.test(md);
-  const hasKeyInsights = /^### Key Insight/m.test(md);
-  const hasConsiderations = /^### Considerations/m.test(md);
-
-  let format;
-  if (hasResponse && !hasIssue && !hasCross) {
-    format = "codebase-validation";
-  } else if (hasCross) {
-    format = "codebase-cross";
-  } else if (hasIssue && (hasCWE || hasOWASP || hasAttackVector)) {
-    format = "security-review";
-  } else if (hasIssue && hasOverallAssessment) {
-    format = "commit-pr-review";
-  } else if (hasIssue) {
-    format = "review";
-  } else if (hasKeyInsights || hasConsiderations) {
-    return parseThinkAboutMarkdown(md);
-  } else if (hasResponse) {
-    // Standalone RESPONSE blocks (round 2+ security review)
-    format = "codebase-validation";
-  } else {
-    return { format: "unknown", raw_markdown: md, parse_error: "No recognized format markers found" };
-  }
-
-  // Step 2: Extract blocks
-  const blockRegex = /^### (ISSUE|CROSS|RESPONSE)-(\d+):\s*(.+)$/gm;
-  const blockPositions = [];
-  let m;
-
-  while ((m = blockRegex.exec(md)) !== null) {
-    blockPositions.push({
-      prefix: m[1],
-      id: parseInt(m[2], 10),
-      title: m[3].trim(),
-      startContent: m.index + m[0].length,
-      headerEnd: m.index + m[0].length,
-    });
-  }
-
-  // Find end of each block (next ### heading that is ISSUE/CROSS/RESPONSE or VERDICT or Overall Assessment)
-  const blocks = [];
-  for (let i = 0; i < blockPositions.length; i++) {
-    const start = blockPositions[i].startContent;
-    // Find next ### heading
-    const remaining = md.slice(start);
-    const nextHeadingMatch = remaining.search(/^### /m);
-    const end = nextHeadingMatch >= 0 ? start + nextHeadingMatch : md.length;
-    const blockContent = md.slice(start, end);
-
-    const fields = parseFields(blockContent);
-    const block = {
-      id: blockPositions[i].id,
-      prefix: blockPositions[i].prefix,
-      title: blockPositions[i].title,
-    };
-
-    // Step 3: Extract fields per variant
-    // Common fields for all block-based formats
-    const fieldMapping = {
-      "review": ["category", "severity", "location", "problem", "evidence", "why it matters", "suggested fix", "plan section", "file"],
-      "security-review": ["category", "severity", "location", "problem", "evidence", "suggested fix", "cwe", "owasp", "attack vector", "confidence", "file"],
-      "commit-pr-review": ["category", "severity", "problem", "evidence", "suggested fix", "commit", "why it matters", "file"],
-      "codebase-cross": ["category", "severity", "problem", "evidence", "suggested fix", "modules affected"],
-      "codebase-validation": ["action", "reason", "revised finding", "counter-evidence", "maintained assessment"],
-    };
-
-    const expectedFields = fieldMapping[format] || [];
-    for (const [key, value] of fields) {
-      // Normalize field name: "why it matters" → "why_it_matters"
-      const normalized = key.replace(/\s+/g, "_").replace(/[^a-z0-9_()]/g, "");
-      if (expectedFields.some(f => f.replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "") === normalized || key === f)) {
-        block[normalized] = value;
-      } else {
-        // Unknown field → extra
-        if (!block.extra) block.extra = {};
-        block.extra[key] = value;
-      }
-    }
-
-    if (!block.extra) block.extra = {};
-    blocks.push(block);
-  }
-
-  const result = {
-    format,
-    blocks,
-    verdict: parseVerdict(md),
-    overall_assessment: hasOverallAssessment ? parseOverallAssessment(md) : null,
-    raw_markdown: md,
-  };
-
-  return result;
-}
 
 // ============================================================
 // JSONL parsing — v13 (structured JSON output)
@@ -1066,23 +750,6 @@ const TEMPLATE_MAP = {
     "round1": "PR Review Prompt (Round 1)",
     "claude-analysis": "Claude Independent Analysis Prompt",
     "round2+": "Response Prompt (Round 2+)",
-  },
-  "codex-parallel-review": {
-    "full-round1": "Full Codebase Review Prompt (Phase 1)",
-    "working-tree-round1": "Working Tree Review Prompt (Phase 1)",
-    "branch-round1": "Branch Review Prompt (Phase 1)",
-    "debate": "Debate Prompt (Phase 3)",
-  },
-  "codex-codebase-review": {
-    "chunk-review": "Chunk Review Prompt",
-    "validation": "Validation Prompt",
-  },
-  "codex-security-review": {
-    "round1": "Security Review Prompt (Round 1)",
-    "working-tree": "Security Review Prompt - Working Tree Mode",
-    "branch": "Security Review Prompt - Branch Mode",
-    "full": "Security Review Prompt - Full Codebase Mode",
-    "round2+": "Round 2+ Prompt (Resume)",
   },
 };
 
@@ -1425,6 +1092,7 @@ function cmdStart(argv) {
   const { values } = parseArgs({
     args: argv.slice(1),
     options: {
+      model: { type: "string" },
       effort: { type: "string", default: "high" },
       timeout: { type: "string", default: String(DEFAULT_TIMEOUT_S) },
       sandbox: { type: "string", default: "read-only" },
@@ -1519,7 +1187,7 @@ function cmdStart(argv) {
 
   try {
     const { pid: codexPid, pgid } = launchCodex(
-      resolvedSessionDir, resolvedWorkingDir, timeout, "", effort, sandbox,
+      resolvedSessionDir, resolvedWorkingDir, timeout, "", effort, values.model, sandbox,
     );
     codexPgid = pgid;
 
@@ -1587,6 +1255,7 @@ function cmdResume(argv) {
   const { values } = parseArgs({
     args: argv.slice(1),
     options: {
+      model: { type: "string" },
       effort: { type: "string", default: "high" },
       timeout: { type: "string", default: String(DEFAULT_TIMEOUT_S) },
       "stall-threshold": { type: "string", default: "" },
@@ -1741,7 +1410,7 @@ function cmdResume(argv) {
 
   try {
     const { pid: codexPid, pgid } = launchCodex(
-      resolvedSessionDir, resolvedWorkingDir, timeout, threadId, effort,
+      resolvedSessionDir, resolvedWorkingDir, timeout, threadId, effort, values.model,
     );
     codexPgid = pgid;
 
@@ -2165,17 +1834,13 @@ function cmdFinalize(argv) {
   // Determine verdict
   let verdict = overrides.verdict;
   if (!verdict) {
-    // Use last round's verdict
-    for (let i = rounds.length - 1; i >= 0; i--) {
-      if (rounds[i].verdict) {
-        verdict = rounds[i].verdict;
-        break;
-      }
-    }
+    // Only the last round counts; an older round's verdict is stale
+    const lastRound = rounds.length > 0 ? rounds[rounds.length - 1] : null;
+    verdict = lastRound ? lastRound.verdict : null;
   }
 
   if (!verdict) {
-    jsonError("No verdict available — provide via stdin or ensure at least one round has a verdict", "PRECONDITION_FAILED");
+    jsonError("Last round has no verdict — read its review.md and pass the verdict via stdin, e.g. {\"verdict\":\"APPROVE\"}", "PRECONDITION_FAILED");
     return EXIT_ERROR;
   }
 
@@ -2348,8 +2013,9 @@ function main() {
         "Usage:\n" +
         "  node codex-runner.js version\n" +
         "  node codex-runner.js init --skill-name <name> --working-dir <dir>\n" +
-        "  echo PROMPT | node codex-runner.js start <session_dir> [--effort <level>] [--timeout <s>] [--sandbox <mode>]\n" +
-        "  echo PROMPT | node codex-runner.js resume <session_dir> [--effort <level>] [--timeout <s>]\n" +
+        "  echo PROMPT | node codex-runner.js start <session_dir> [--model <name>] [--effort <level>] [--timeout <s>] [--sandbox <mode>]\n" +
+        "  echo PROMPT | node codex-runner.js resume <session_dir> [--model <name>] [--effort <level>] [--timeout <s>]\n" +
+        "  Model: uses the Codex CLI default unless --model is provided\n" +
         "  Default start/resume timeout: 18000s (5h)\n" +
         "  node codex-runner.js poll <session_dir> [--min-interval <s>]\n" +
         "  node codex-runner.js stop <session_dir>\n" +

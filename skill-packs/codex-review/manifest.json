@@ -8,8 +8,7 @@
     "codex-think-about",
     "codex-commit-review",
     "codex-pr-review",
-    "codex-parallel-review",
-    "codex-codebase-review",
-    "codex-security-review"
+    "loop-plan",
+    "loop-implement"
   ]
 }

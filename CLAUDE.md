@@ -4,16 +4,16 @@ This repository provides a single-command installer (`npx github:lploc94/codex_s
 
 ## Project Overview
 
-`codex-review` provides eight skills powered by OpenAI Codex CLI:
+`codex-review` provides seven skills: five powered by OpenAI Codex CLI and two plain planning/execution skills:
+- `/loop-plan` — write a phased, code-grounded implementation plan (`loop-plan/v1`)
+- `/loop-implement` — execute an approved loop plan phase by phase with TDD, reviews, and commits
 - `/codex-plan-review` — debate plans before implementation
 - `/codex-impl-review` — review uncommitted or branch changes before commit/merge
 - `/codex-think-about` — peer reasoning/debate on technical topics
 - `/codex-commit-review` — review committed code quality before push (report + suggest)
 - `/codex-pr-review` — review PRs (branch diff, commit hygiene, description)
-- `/codex-parallel-review` — parallel independent review by both Claude and Codex, then debate
-- `/codex-codebase-review` — chunked full-codebase review for large projects (50-500+ files)
-- `/codex-security-review` — security-focused review using OWASP Top 10 and CWE patterns
 
+`/codex-parallel-review`, `/codex-codebase-review`, and `/codex-security-review` were removed; the installer deletes previously installed copies.
 
 
 ## Distribution Model
@@ -44,15 +44,14 @@ There is no build system, test suite, or linter. The project is JavaScript + Mar
 ### Installer
 
 `bin/codex-skill.js` — single file, Node.js stdlib only, no dependencies:
-1. Parse CLI arguments (`-full`, `--auto`)
+1. Parse CLI arguments (`--auto`; `-full` is accepted but only prints a notice)
 2. Runtime guard: Node.js >= 22
 3. Build staging directory alongside install target
 4. Copy `codex-runner.js` from `skill-packs/`
-5. Read SKILL.md templates (contain `{{RUNNER_PATH}}`), inject absolute path, write to staging
-6. Copy `references/` directories as-is
-7. Verify runner by spawning `node codex-runner.js version`
-8. Atomic swap: backup old install → rename staging → cleanup
-9. If `--auto`: inject review guidance into `~/.claude/CLAUDE.md` (idempotent, append-only)
+5. Runner skills (`codex-*`): read SKILL.md templates (contain `{{RUNNER_PATH}}`), inject absolute path, write to staging, copy `references/` and `shared/` files. Plain skills (`loop-plan`, `loop-implement`): copy SKILL.md as-is
+6. Verify runner by spawning `node codex-runner.js version`
+7. Atomic swap: backup old install → rename staging → cleanup; delete installed copies of removed skills
+8. If `--auto`: inject review guidance into `~/.claude/CLAUDE.md` (idempotent, append-only)
 
 ### Skill Pack Layout (templates + runner)
 
@@ -77,15 +76,10 @@ skill-packs/codex-review/
     ├── codex-pr-review/
     │   ├── SKILL.md
     │   └── references/
-    ├── codex-parallel-review/
-    │   ├── SKILL.md
-    │   └── references/
-    ├── codex-codebase-review/
-    │   ├── SKILL.md
-    │   └── references/
-    └── codex-security-review/
-        ├── SKILL.md
-        └── references/
+    ├── loop-plan/
+    │   └── SKILL.md             ← plain skill, no runner, copied as-is
+    └── loop-implement/
+        └── SKILL.md
 ```
 
 ### Installed Output (on user machine)
@@ -110,30 +104,22 @@ skill-packs/codex-review/
 ├── codex-pr-review/
 │   ├── SKILL.md
 │   └── references/
-├── codex-parallel-review/
-│   ├── SKILL.md
-│   └── references/
-├── codex-codebase-review/
-│   ├── SKILL.md
-│   └── references/
-└── codex-security-review/
-    ├── SKILL.md
-    └── references/
+├── loop-plan/
+│   └── SKILL.md
+└── loop-implement/
+    └── SKILL.md
 ```
 
 ### Core Execution Flow
 
-1. **Skill invocation** (`/codex-plan-review`, `/codex-impl-review`, `/codex-think-about`, `/codex-commit-review`, `/codex-pr-review`, `/codex-parallel-review`, `/codex-codebase-review`, or `/codex-security-review`) follows SKILL.md step-by-step
+1. **Skill invocation** (`/codex-plan-review`, `/codex-impl-review`, `/codex-think-about`, `/codex-commit-review`, or `/codex-pr-review`) follows SKILL.md step-by-step. `/loop-plan` and `/loop-implement` do not use the runner
 2. **Runner path**: SKILL.md contains hardcoded absolute path to `codex-runner.js`
 3. **Prompt rendering**: SKILL.md calls `render --skill X --template Y --skills-dir $SKILLS_DIR` with JSON vars on stdin → receives rendered prompt on stdout
 4. **Session lifecycle**: `init` → `start` (stdin prompt) → `poll` (JSON response) → `resume` (stdin prompt) → `poll` → ... → `finalize` → `stop` for a normal terminal outcome; a qualifying runner-deadline timeout preserves the same session for later `stop` → `resume`, while all other timeout/error paths use `stop` only and preserve the unfinalized session
 5. **codex-runner.js** spawns `codex exec --json --sandbox read-only` as a detached process, polls JSONL output, parses markdown into structured JSON
 6. **Review debate loop** (plan-review, impl-review, commit-review, pr-review): Claude reads `poll` JSON → `review.blocks[].id` ISSUE-{N} → fixes/rebuts → `render` rebuttal → `resume` → repeats until `APPROVE` or stalemate
 7. **Peer debate loop** (think-about): Claude and Codex think independently → compare JSON responses → exchange perspectives → repeat until consensus or stalemate → present to user
-8. **Parallel review loop** (parallel-review): Claude agents and Codex review independently in parallel → merge findings → debate disagreements → produce consensus report
-9. **Chunked codebase review** (codebase-review): split codebase into module chunks → review each chunk in independent Codex session → Claude synthesizes cross-cutting findings
-10. **Security review** (security-review): OWASP Top 10 + CWE pattern detection → Codex analyzes security-sensitive code → Claude validates findings and produces security report
-11. **All state managed by runner**: Claude NEVER writes directly to session dir. `rounds.json`, `meta.json`, `prompt.txt`, JSONL archival all handled by runner commands.
+8. **All state managed by runner**: Claude NEVER writes directly to session dir. `rounds.json`, `meta.json`, `prompt.txt`, JSONL archival all handled by runner commands.
 
 ### Key Design Decisions
 
@@ -158,13 +144,15 @@ skill-packs/codex-review/
 |---------|-------|--------|
 | `version` | (none) | Plain text: `13` |
 | `init --skill-name X --working-dir Y` | (none) | Plain text: `CODEX_SESSION:/path` |
-| `start <session_dir> [--effort] [--timeout] [--sandbox]` | Prompt on stdin | JSON: `{ status, session_dir, round }` |
-| `resume <session_dir> [--effort] [--timeout]` | Prompt on stdin | JSON: `{ status, session_dir, round, thread_id }` |
+| `start <session_dir> [--model <name>] [--effort] [--timeout] [--sandbox]` | Prompt on stdin | JSON: `{ status, session_dir, round }` |
+| `resume <session_dir> [--model <name>] [--effort] [--timeout]` | Prompt on stdin | JSON: `{ status, session_dir, round, thread_id }` |
 | `poll <session_dir>` | (none) | JSON: `{ status, round, elapsed_seconds, review, activities, recovery metadata when terminal }` |
 | `stop <session_dir>` | (none) | JSON: `{ status: "stopped", session_dir }` |
 | `finalize <session_dir>` | Override JSON on stdin | JSON: `{ status: "finalized", meta }` |
 | `status <session_dir>` | (none) | JSON: `{ status, session_id, rounds, ... }` |
 | `render --skill X --template Y --skills-dir Z` | Placeholder JSON on stdin | Plain text: rendered prompt |
+
+`--model <name>` forwards the exact model name to Codex CLI. Omit it to keep CLI default selection. The runner does not persist this override; pass it on every `resume`, including recovery, to explicitly keep the selected model.
 
 ### codex-runner.js Exit Codes
 
@@ -235,7 +223,7 @@ skill-packs/codex-review/
 2. `node skill-packs/codex-review/scripts/codex-runner.js version` — in version `13`
 3. `ls ~/.claude/skills/codex-review/` — chứa `scripts/`
 4. SKILL.md chứa absolute path, không search loop
-5. Invoke `/codex-plan-review`, `/codex-impl-review`, `/codex-think-about`, `/codex-commit-review`, `/codex-pr-review`, `/codex-parallel-review`, `/codex-codebase-review`, `/codex-security-review` trong Claude Code
+5. Invoke `/loop-plan`, `/loop-implement`, `/codex-plan-review`, `/codex-impl-review`, `/codex-think-about`, `/codex-commit-review`, `/codex-pr-review` trong Claude Code
 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence

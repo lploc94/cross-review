@@ -6,17 +6,16 @@
 
 Single-command installer for the **codex-review** skill pack for [Claude Code](https://docs.anthropic.com/en/docs/claude-code).
 
-Five core skills (installed by default):
+Seven skills:
+- `/loop-plan` — write a phased, code-grounded implementation plan before coding
+- `/loop-implement` — execute an approved loop plan phase by phase with TDD, reviews, and commits
 - `/codex-plan-review` — debate implementation plans before coding
 - `/codex-impl-review` — review uncommitted or branch changes before commit/merge
 - `/codex-think-about` — peer reasoning/debate on technical topics
 - `/codex-commit-review` — review committed code quality before push
 - `/codex-pr-review` — review PRs (branch diff, commit hygiene, description)
 
-Three additional skills (installed with `-full`):
-- `/codex-parallel-review` — parallel independent review by both Claude and Codex, then debate
-- `/codex-codebase-review` — chunked full-codebase review for large projects (50-500+ files)
-- `/codex-security-review` — security-focused review using OWASP Top 10 and CWE patterns
+`/codex-parallel-review`, `/codex-codebase-review`, and `/codex-security-review` were removed. Reinstalling deletes previously installed copies.
 
 ## Requirements
 
@@ -28,8 +27,7 @@ Three additional skills (installed with `-full`):
 ## Install
 
 ```bash
-npx github:lploc94/codex_skill        # 5 core skills
-npx github:lploc94/codex_skill -full   # all 8 skills
+npx github:lploc94/codex_skill
 ```
 
 ### What it does
@@ -46,30 +44,38 @@ node ~/.claude/skills/codex-review/scripts/codex-runner.js version
 
 ### Reinstall / Update
 ```bash
-npx github:lploc94/codex_skill        # or with -full
+npx github:lploc94/codex_skill
 ```
 
 ### Auto-review guidance (optional)
 ```bash
 npx github:lploc94/codex_skill --auto
 ```
-Injects review guidance into `~/.claude/CLAUDE.md` so Claude Code proactively suggests the right review skill based on context (e.g., `/codex-impl-review` before commits, `/codex-security-review` for auth code). Idempotent — safe to re-run. Can combine with `-full`.
+Injects review guidance into `~/.claude/CLAUDE.md` so Claude Code proactively suggests the right review skill based on context (e.g., `/loop-plan` before a multi-step change, `/codex-impl-review` before commits). Idempotent — safe to re-run.
 
 ## Usage
 
 After install, start Claude Code and run:
 
-**Core skills** (always installed):
+- `/loop-plan` — write a `loop-plan/v1` plan; review it with `/codex-plan-review`
+- `/loop-implement` — execute the approved plan; each phase is reviewed (for example with `/codex-impl-review`)
 - `/codex-plan-review` — debate implementation plans before coding
 - `/codex-impl-review` — review uncommitted or branch changes before commit/merge
 - `/codex-think-about` — peer reasoning/debate on technical topics
 - `/codex-commit-review` — review committed code quality before push
 - `/codex-pr-review` — review PRs (branch diff, commit hygiene, description)
 
-**Full skills** (requires `-full` flag):
-- `/codex-parallel-review` — parallel dual-reviewer analysis + debate
-- `/codex-codebase-review` — chunked full-codebase review (50-500+ files)
-- `/codex-security-review` — security-focused review (OWASP Top 10 + CWE patterns)
+### Choose a model (optional)
+
+You can specify a model when requesting a review. The runner accepts `--model <name>` on both `start` and `resume` and forwards the name unchanged to Codex CLI. Omit the flag to keep Codex CLI's default model selection.
+
+```bash
+printf '%s' "$PROMPT" | node "$RUNNER" start "$SESSION_DIR" --model "model-name"
+# For a subsequent round, with its new prompt:
+printf '%s' "$PROMPT" | node "$RUNNER" resume "$SESSION_DIR" --model "model-name"
+```
+
+Replace `model-name` with your chosen model. Pass it on each `resume`, including recovery, to explicitly keep that model; the runner does not store the model override in session state. See the [runner protocol](skill-packs/codex-review/shared/protocol.md#optional-model-selection) for details.
 
 ## License
 

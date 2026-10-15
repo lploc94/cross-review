@@ -26,17 +26,24 @@ const skillsRoot = path.join(os.homedir(), '.claude', 'skills');
 const runnerDir = path.join(skillsRoot, 'codex-review');
 const runnerPath = path.join(runnerDir, 'scripts', 'codex-runner.js');
 
-const CORE_SKILLS = ['codex-plan-review', 'codex-impl-review', 'codex-think-about', 'codex-commit-review', 'codex-pr-review'];
-const FULL_SKILLS = ['codex-parallel-review', 'codex-codebase-review', 'codex-security-review'];
+// RUNNER_SKILLS drive Codex through codex-runner.js; their SKILL.md templates need {{RUNNER_PATH}} and references/.
+// PLAIN_SKILLS are self-contained SKILL.md files copied as-is.
+const RUNNER_SKILLS = ['codex-plan-review', 'codex-impl-review', 'codex-think-about', 'codex-commit-review', 'codex-pr-review'];
+const PLAIN_SKILLS = ['loop-plan', 'loop-implement'];
+// Skills removed from the pack; previously installed copies are deleted on install.
+const REMOVED_SKILLS = ['codex-parallel-review', 'codex-codebase-review', 'codex-security-review'];
 
-const fullMode = process.argv.includes('-full');
 const autoMode = process.argv.includes('--auto');
-const SKILLS = fullMode ? [...CORE_SKILLS, ...FULL_SKILLS] : CORE_SKILLS;
+const SKILLS = [...RUNNER_SKILLS, ...PLAIN_SKILLS];
+
+if (process.argv.includes('-full')) {
+  console.warn('Note: -full is no longer needed; parallel, codebase and security reviews were removed from the pack.');
+}
 
 // All directories managed by this installer (runner + skills)
-// INSTALL_DIRS: dirs in staging to swap in. CLEANUP_DIRS: old full-only dirs to remove in default mode.
+// INSTALL_DIRS: dirs in staging to swap in. CLEANUP_DIRS: removed skills to delete from earlier installs.
 const INSTALL_DIRS = ['codex-review', ...SKILLS];
-const CLEANUP_DIRS = fullMode ? [] : FULL_SKILLS;
+const CLEANUP_DIRS = REMOVED_SKILLS;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -76,6 +83,8 @@ try {
   const runnerDest = path.join(stagingDir, 'codex-review', 'scripts', 'codex-runner.js');
   fs.mkdirSync(path.dirname(runnerDest), { recursive: true });
   fs.copyFileSync(runnerSrc, runnerDest);
+  // Runner modules imported by codex-runner.js
+  copyDirSync(path.join(skillPackDir, 'scripts', 'lib'), path.join(path.dirname(runnerDest), 'lib'));
 
   // Ensure ESM works on Node 22 even if --experimental-detect-module is disabled
   fs.writeFileSync(path.join(stagingDir, 'codex-review', 'package.json'), '{"type":"module"}\n', 'utf8');
@@ -97,6 +106,10 @@ try {
     // Read template SKILL.md, inject runner path and skills dir
     const templatePath = path.join(skillSrcDir, 'SKILL.md');
     const template = fs.readFileSync(templatePath, 'utf8');
+    if (PLAIN_SKILLS.includes(skill)) {
+      fs.writeFileSync(path.join(skillDestDir, 'SKILL.md'), template, 'utf8');
+      continue;
+    }
     if (!template.includes('{{RUNNER_PATH}}')) {
       throw new Error(`Template ${skill}/SKILL.md missing {{RUNNER_PATH}} placeholder`);
     }
@@ -191,14 +204,14 @@ try {
       console.warn(`Warning: could not remove backup at ${backup}`);
     }
   }
-  // In default mode, remove previously-installed full-only skills
+  // Remove skills that are no longer part of the pack
   for (const dir of CLEANUP_DIRS) {
     const target = path.join(skillsRoot, dir);
     if (fs.existsSync(target)) {
       try {
         fs.rmSync(target, { recursive: true, force: true });
       } catch {
-        console.warn(`Warning: could not remove old full-only skill at ${target}`);
+        console.warn(`Warning: could not remove old skill at ${target}`);
       }
     }
   }
@@ -210,29 +223,18 @@ try {
 
   // 5. Success message
   console.log('');
-  console.log(`codex-review skills installed successfully!${fullMode ? ' (full mode)' : ''}`);
+  console.log('codex-review skills installed successfully!');
   console.log(`  Runner:  ${runnerDir}`);
   console.log(`  Skills:  ${SKILLS.map(s => s.replace('codex-', '')).join(', ')}`);
   console.log('');
   console.log('Skills available in Claude Code:');
+  console.log('  /loop-plan             — write a phased, code-grounded implementation plan');
+  console.log('  /loop-implement        — execute an approved loop plan phase by phase');
   console.log('  /codex-plan-review     — debate plans before implementation');
   console.log('  /codex-impl-review     — review uncommitted or branch changes');
   console.log('  /codex-think-about     — peer reasoning/debate');
   console.log('  /codex-commit-review   — review committed code before push');
   console.log('  /codex-pr-review       — review PRs (branch diff + description)');
-  if (fullMode) {
-    console.log('  /codex-parallel-review — parallel dual-reviewer analysis + debate');
-    console.log('  /codex-codebase-review — chunked full-codebase review (50-500+ files)');
-    console.log('  /codex-security-review — security-focused review (OWASP Top 10 + CWE)');
-  } else {
-    console.log('');
-    console.log('Additional skills available with -full flag:');
-    console.log('  /codex-parallel-review — parallel dual-reviewer analysis + debate');
-    console.log('  /codex-codebase-review — chunked full-codebase review (50-500+ files)');
-    console.log('  /codex-security-review — security-focused review (OWASP Top 10 + CWE)');
-    console.log('');
-    console.log('Run: npx github:lploc94/codex_skill -full');
-  }
 
   // --auto: inject review guidance into global ~/.claude/CLAUDE.md
   if (autoMode) {
@@ -251,11 +253,11 @@ try {
         '',
         '| Context | Suggested Skill | Trigger | Note |',
         '|---------|----------------|---------|------|',
+        '| Multi-step feature or change that needs a plan | `/loop-plan` | Before coding | |',
+        '| Approved loop plan with incomplete phases | `/loop-implement` | After the plan is approved | |',
         '| Uncommitted changes (staged/unstaged) | `/codex-impl-review` | Before committing | |',
         '| Feature branch with commits | `/codex-pr-review` | Before creating/merging PR | |',
         '| Plan/design document created or modified | `/codex-plan-review` | After writing plan | |',
-        '| Auth, SQL, crypto, secrets, user input code | `/codex-security-review` | When security-sensitive code detected | Requires `-full` |',
-        '| Large codebase (50+ files) needing review | `/codex-codebase-review` | On request for full review | Requires `-full` |',
         '| Recent commits before push | `/codex-commit-review` | After committing, before push | |',
         '| Technical question or architecture debate | `/codex-think-about` | On design discussions | |',
         '',

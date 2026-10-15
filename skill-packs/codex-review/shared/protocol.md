@@ -35,11 +35,32 @@ printf '%s' "$PROMPT" | node "$RUNNER" resume "$SESSION_DIR" --effort "$EFFORT"
 ```
 Validate JSON. Sandbox mode persists via thread -- do NOT pass `--sandbox` on resume.
 
+## Optional Model Selection
+
+Both `start` and `resume` accept `--model <name>`. When the user specifies a model, pass that exact name to the runner. If no model is specified, omit `--model` so Codex CLI keeps its default model selection.
+
+```bash
+MODEL="model-name" # Replace with the model requested by the user.
+printf '%s' "$PROMPT" | node "$RUNNER" start "$SESSION_DIR" --effort "$EFFORT" --model "$MODEL"
+# For a subsequent round, after rendering its new prompt:
+printf '%s' "$PROMPT" | node "$RUNNER" resume "$SESSION_DIR" --effort "$EFFORT" --model "$MODEL"
+```
+
+The runner forwards the model name unchanged and does not store it in session state. Pass `--model` on every `resume` (including recovery) to explicitly keep the user's selected model, or pass a different name if the user changes their selection. Omitting the flag leaves model selection to Codex CLI.
+
 ## Poll Protocol
 ```bash
 POLL_JSON=$(node "$RUNNER" poll "$SESSION_DIR")
 ```
 The runner handles throttling internally (default 120s min-interval between polls). Just call poll — if called too soon, it blocks until the interval elapses or Codex finishes (whichever comes first). No sleep needed between calls.
+
+Run `start`, every `poll`, any `resume`, and cleanup from the same privilege
+and sandbox context. A process started outside a sandbox may be invisible to a
+poll executed inside it (PID inspection can be denied), while a process started
+inside a managed sandbox may fail during Codex app-server initialization when
+the installation PATH-alias directory is not writable. Omit `--min-interval` for
+normal reviews; a short interval such as 5 seconds is reserved for explicitly
+bounded diagnostics.
 
 Report **specific activities** from `activities` array (e.g. "Codex [45s]: reading src/auth.js"). NEVER report generic "Codex is running".
 
