@@ -33,6 +33,12 @@ let prompt = "";
 try { prompt = fs.readFileSync(0, "utf8"); } catch {}
 fs.appendFileSync(process.env.FAKE_CODEX_LOG, JSON.stringify({ args: process.argv.slice(2), prompt }) + "\\n");
 const text = fs.readFileSync(process.env.FAKE_CODEX_OUTPUT, "utf8");
+const slowMs = parseInt(process.env.FAKE_CODEX_SLOW_MS || "0", 10);
+if (slowMs > 0) {
+  fs.writeSync(1, JSON.stringify({ type: "thread.started", thread_id: "thread-fake-1" }) + "\\n");
+  fs.writeSync(1, JSON.stringify({ type: "item.completed", item: { type: "reasoning", text: "reading source.js" } }) + "\\n");
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, slowMs);
+}
 const out = [
   { type: "thread.started", thread_id: "thread-fake-1" },
   { type: "turn.started" },
@@ -169,6 +175,12 @@ test("parseReviewInput: front-matter scalars and multi-line sections", () => {
   assert.equal(v.DIFF_CONTEXT, "+## NOT_A_KEY\n## Not upper\nend");
 });
 
+test("parseReviewInput: CRLF input parses like LF", () => {
+  const names = new Set(["USER_REQUEST", "PLAN_PATH"]);
+  const v = parseReviewInput("---\r\nPLAN_PATH: /tmp/plan.md\r\n---\r\n## USER_REQUEST\r\nReview this plan\r\nline 2\r\n", names);
+  assert.deepEqual(v, { PLAN_PATH: "/tmp/plan.md", USER_REQUEST: "Review this plan\nline 2" });
+});
+
 // ---------- .gitignore ----------
 
 test("init writes .codex-review/.gitignore once and never overwrites it", () => {
@@ -247,6 +259,47 @@ test("reply with a new model updates the stored model", async () => {
   const calls = codexCalls();
   assert.equal(calls[2].args[calls[2].args.indexOf("--model") + 1], "model-b");
   await endSession(begun.session_dir);
+});
+
+test("a relative skillsDir is stored absolute, so reply works from another cwd", async () => {
+  setCodexOutput("### VERDICT\n- Status: REVISE\n");
+  const input = inputFor("codex-plan-review", "rel");
+  const cwd = process.cwd();
+  process.chdir(ROOT);
+  let begun;
+  try {
+    begun = await beginSession({ skill: "codex-plan-review", inputText: input, workingDir: workDir, skillsDir: "skill-packs/codex-review/skills" });
+  } finally {
+    process.chdir(cwd);
+  }
+  await waitSession(begun.session_dir, { maxWaitSeconds: 30 });
+  process.chdir(tmp);
+  try {
+    const replied = await replySession(begun.session_dir, { inputText: input });
+    assert.equal(replied.round, 2);
+  } finally {
+    process.chdir(cwd);
+  }
+  await waitSession(begun.session_dir, { maxWaitSeconds: 30 });
+  await endSession(begun.session_dir);
+});
+
+test("wait returns activities from polls made before its deadline", async () => {
+  setCodexOutput("### VERDICT\n- Status: APPROVE\n");
+  process.env.FAKE_CODEX_SLOW_MS = "4000";
+  try {
+    const begun = await beginSession({ skill: "codex-plan-review", inputText: inputFor("codex-plan-review", "act"), workingDir: workDir });
+    await new Promise(r => setTimeout(r, 500));
+    const w1 = await waitSession(begun.session_dir, { maxWaitSeconds: 1 });
+    assert.equal(w1.status, "running");
+    assert.ok(w1.activities.length > 0, "activities from the in-call poll are returned");
+    const w2 = await waitSession(begun.session_dir, { maxWaitSeconds: 30 });
+    assert.equal(w2.status, "completed");
+    assert.equal(w2.next, "done");
+    await endSession(begun.session_dir);
+  } finally {
+    delete process.env.FAKE_CODEX_SLOW_MS;
+  }
 });
 
 // ---------- end ----------

@@ -150,7 +150,7 @@ function placeholderNames(skillsDir, skill) {
  */
 export function parseReviewInput(text, knownNames) {
   const values = {};
-  let body = text || "";
+  let body = (text || "").replace(/\r\n?/g, "\n");
   const fm = body.match(/^---[ \t]*\n([\s\S]*?)\n---[ \t]*(?:\n|$)/);
   if (fm) {
     for (const line of fm[1].split("\n")) {
@@ -205,7 +205,8 @@ function readInput({ inputText, inputFile }) {
  */
 export async function beginSession({ skill, mode, inputText, inputFile, workingDir, model, effort, timeout, skillsDir }) {
   const resolved = resolveTemplates(skill, mode);
-  const dir = skillsDir || defaultSkillsDir(skill);
+  // Absolute, so later replies from another working directory find the same prompts
+  const dir = path.resolve(skillsDir || defaultSkillsDir(skill));
   const values = parseReviewInput(readInput({ inputText, inputFile }), placeholderNames(dir, skill));
 
   const prompt = await render(skill, resolved.templates.round1, dir, values);
@@ -291,19 +292,22 @@ export async function waitSession(sessionDir, { maxWaitSeconds = DEFAULT_MAX_WAI
     throw new ReviewError(`Cannot read session state: ${e.message}`, "INVALID_SESSION");
   }
 
+  // Each poll returns only activities new since the previous poll; keep all of them
+  const activities = [];
   for (;;) {
     state = readState(sessionDir);
     const now = Math.floor(Date.now() / 1000);
     const due = !state.last_poll_at || now - state.last_poll_at >= POLL_INTERVAL_S;
     if (fs.existsSync(finalFile) || !isAlive(state.pid) || due) {
       const pollJson = await runnerJson(["poll", sessionDir, "--min-interval", "0"], "", "POLL_FAILED");
+      if (Array.isArray(pollJson.activities)) activities.push(...pollJson.activities);
       if (pollJson.status !== "running" || Date.now() >= deadline) {
-        return { ...pollJson, ...computeNext(pollJson, readState(sessionDir)) };
+        return { ...pollJson, activities, ...computeNext(pollJson, readState(sessionDir)) };
       }
     }
     if (Date.now() + CHECK_INTERVAL_MS > deadline) {
       const elapsed = state.started_at ? now - state.started_at : null;
-      return { status: "running", round: state.round, elapsed_seconds: elapsed, activities: [], ...computeNext({ status: "running" }, state) };
+      return { status: "running", round: state.round, elapsed_seconds: elapsed, activities, ...computeNext({ status: "running" }, state) };
     }
     await sleep(CHECK_INTERVAL_MS);
   }

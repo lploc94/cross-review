@@ -42,6 +42,21 @@ test("REVISE with ISSUE blocks keeps the block parser", () => {
   assert.equal(r.verdict.status, "REVISE");
 });
 
+test("an ISSUE block ends at a ## VERDICT heading", () => {
+  const md = "### ISSUE-1: x\n- Severity: high\n- Suggested fix: Add guard.\n\n## VERDICT\n- Status: REVISE\n";
+  const r = parseOutputMarkdown(md);
+  assert.equal(r.blocks[0].suggested_fix, "Add guard.");
+  assert.equal(r.blocks[0].extra.status, undefined);
+  assert.equal(r.verdict.status, "REVISE");
+});
+
+test("markdown headings inside fenced evidence stay in the ISSUE block", () => {
+  const md = "### ISSUE-1: x\n- Severity: low\n- Evidence:\n```md\n## Not a boundary\n```\n- Suggested fix: f\n\n### VERDICT\n- Status: REVISE\n";
+  const r = parseOutputMarkdown(md);
+  assert.match(r.blocks[0].evidence, /## Not a boundary/);
+  assert.equal(r.blocks[0].suggested_fix, "f");
+});
+
 test("## VERDICT heading is accepted, case-insensitive", () => {
   assert.equal(parseOutputMarkdown("## Verdict\n- Status: REVISE\n").verdict.status, "REVISE");
 });

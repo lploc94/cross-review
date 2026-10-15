@@ -236,6 +236,24 @@ function parseThinkAboutMarkdown(md) {
 }
 
 /**
+ * End of an ISSUE/CROSS/RESPONSE block: the next heading of level 1-3 or a verdict
+ * marker line, ignoring lines inside fenced code blocks (evidence may quote markdown).
+ */
+function findBlockEnd(md, start) {
+  let offset = start;
+  let inFence = false;
+  for (const line of md.slice(start).split("\n")) {
+    if (line.trim().startsWith("```")) {
+      inFence = !inFence;
+    } else if (!inFence && offset > start && /^(?:#{1,3} |\*\*VERDICT\*\*|VERDICT[ \t]*:)/i.test(line)) {
+      return offset;
+    }
+    offset += line.length + 1;
+  }
+  return md.length;
+}
+
+/**
  * parseOutputMarkdown — unified entry point for parsing Codex output.
  *
  * Detects format variant and extracts structured data.
@@ -301,9 +319,7 @@ export function parseOutputMarkdown(md, skillHint) {
   for (let i = 0; i < blockPositions.length; i++) {
     const start = blockPositions[i].startContent;
     // Find next ### heading
-    const remaining = md.slice(start);
-    const nextHeadingMatch = remaining.search(/^### /m);
-    const end = nextHeadingMatch >= 0 ? start + nextHeadingMatch : md.length;
+    const end = findBlockEnd(md, start);
     const blockContent = md.slice(start, end);
 
     const fields = parseFields(blockContent);
