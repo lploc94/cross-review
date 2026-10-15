@@ -136,38 +136,49 @@ function approveCodexTools(configPath) {
   fs.writeFileSync(configPath, text, 'utf8');
 }
 
-/** True when a directory in a skills root was installed by this pack or its predecessor (safe to delete). */
-function isPackInstall(dir, name) {
-  if (name === PACK) return fs.existsSync(path.join(dir, 'scripts', 'review-runner.js'));
+// The earlier pack's runtime lived only here; its skills had this runner path rendered into them
+const legacyRuntimeDir = path.join(claudeSkillsRoot, LEGACY_RUNTIME);
+const legacyRunnerRef = escapeForDoubleQuotedShell(path.join(legacyRuntimeDir, 'scripts', 'codex-runner.js'));
+
+/**
+ * True when a directory in a skills root was installed by the earlier pack (safe to delete): the runtime holds
+ * its runner; a skill has the old name and the old runner path, as the earlier installer rendered it.
+ */
+function isLegacyInstall(dir, name) {
   if (name === LEGACY_RUNTIME) return fs.existsSync(path.join(dir, 'scripts', 'codex-runner.js'));
   try {
     const skillMd = fs.readFileSync(path.join(dir, 'SKILL.md'), 'utf8');
-    return new RegExp(`^name:\\s*${name}\\s*$`, 'm').test(skillMd);
+    return new RegExp(`^name:\\s*${name}\\s*$`, 'm').test(skillMd) && skillMd.includes(legacyRunnerRef);
   } catch {
     return false;
   }
 }
 
-// Compared with '/' separators: config files may store Windows paths with escaped backslashes
-const LEGACY_SERVER_SCRIPT = `${LEGACY_RUNTIME}/scripts/mcp-server.js`;
+// The only server path the earlier pack registered. Compared with '/' separators: config files
+// may store Windows paths with escaped backslashes.
 const slashed = s => String(s).replace(/\\+/g, '/');
+const legacyServerPath = slashed(path.join(legacyRuntimeDir, 'scripts', 'mcp-server.js'));
 
 /** The earlier pack's MCP server is registered with Claude Code (user scope). */
 function claudeHasLegacyServer() {
   try {
     const servers = JSON.parse(fs.readFileSync(path.join(home, '.claude.json'), 'utf8')).mcpServers || {};
-    return (servers[LEGACY_MCP_NAME]?.args || []).some(a => slashed(a).endsWith(LEGACY_SERVER_SCRIPT));
+    return (servers[LEGACY_MCP_NAME]?.args || []).some(a => slashed(a) === legacyServerPath);
   } catch {
     return false;
   }
 }
 
-/** The earlier pack's MCP server is registered in Codex's config.toml. */
+/**
+ * The earlier pack's MCP server is registered with Codex (args as Codex itself parses config.toml).
+ * Run from the filesystem root, outside any project: a trusted project's config would otherwise
+ * shadow the global registration, which is the one `codex mcp remove` deletes.
+ */
 function codexHasLegacyServer() {
+  const r = run('codex', ['mcp', 'get', LEGACY_MCP_NAME, '--json'], { cwd: path.parse(home).root });
+  if (!r.ok) return false;
   try {
-    const toml = fs.readFileSync(path.join(codexHome, 'config.toml'), 'utf8');
-    const block = toml.split(/^(?=\[)/m).find(b => b.startsWith(`[mcp_servers.${LEGACY_MCP_NAME}]`));
-    return Boolean(block && slashed(block).includes(LEGACY_SERVER_SCRIPT));
+    return (JSON.parse(r.output).transport?.args || []).some(a => slashed(a) === legacyServerPath);
   } catch {
     return false;
   }
@@ -294,18 +305,16 @@ try {
       console.warn(`Warning: could not remove backup at ${backup}`);
     }
   }
-  // Remove the earlier pack's runtime and skills, and this pack's copies in Codex's deprecated skills root
-  const stale = [
-    ...[claudeSkillsRoot, agentsSkillsRoot].flatMap(root => [LEGACY_RUNTIME, ...LEGACY_SKILLS].map(name => ({ root, name }))),
-    ...[PACK, LEGACY_RUNTIME, ...SKILLS, ...LEGACY_SKILLS].map(name => ({ root: legacyCodexSkillsRoot, name })),
-  ];
+  // Remove the earlier pack's runtime and skills, including copies in Codex's deprecated skills root
+  const stale = [claudeSkillsRoot, agentsSkillsRoot, legacyCodexSkillsRoot]
+    .flatMap(root => [LEGACY_RUNTIME, ...LEGACY_SKILLS].map(name => ({ root, name })));
   // A stale root may alias an install root (e.g. ~/.codex/skills → ~/.agents/skills); never delete what was just installed
   const installedReal = new Set(targets.flatMap(t => t.dirs.map(dir => fs.realpathSync(path.join(t.root, dir)))));
   for (const { root, name } of stale) {
     const dir = path.join(root, name);
     if (!fs.existsSync(dir) || installedReal.has(fs.realpathSync(dir))) continue;
-    if (!isPackInstall(dir, name)) {
-      console.warn(`Warning: left ${dir} in place; it does not look like a ${PACK} or ${LEGACY_RUNTIME} install`);
+    if (!isLegacyInstall(dir, name)) {
+      console.warn(`Warning: left ${dir} in place; it does not look like a ${LEGACY_RUNTIME} install`);
       continue;
     }
     try {
@@ -319,12 +328,14 @@ try {
   }
 
   // 5. Register the MCP server with both clients (idempotent: remove then add for Claude; Codex overwrites).
-  // The earlier pack's server registration is removed when it points at that pack's runtime.
+  // The earlier pack's registration goes with its runtime, even when the new server cannot be registered.
+  // `codex mcp remove` also drops the server's tool approval tables.
+  if (commandExists('claude') && claudeHasLegacyServer()) run('claude', ['mcp', 'remove', '-s', 'user', LEGACY_MCP_NAME]);
+  if (commandExists('codex') && codexHasLegacyServer()) run('codex', ['mcp', 'remove', LEGACY_MCP_NAME]);
   const registered = [];
   if (mcpReady) {
     const serverCmd = ['--', stableNodePath(), mcpServerPath];
     if (commandExists('claude')) {
-      if (claudeHasLegacyServer()) run('claude', ['mcp', 'remove', '-s', 'user', LEGACY_MCP_NAME]);
       run('claude', ['mcp', 'remove', '-s', 'user', MCP_NAME]);
       const r = run('claude', ['mcp', 'add', '-s', 'user', MCP_NAME, '-e', `REVIEW_WAIT_DEFAULT_S=${WAIT_DEFAULT_S.claude}`, ...serverCmd]);
       if (r.ok) registered.push('Claude Code');
@@ -332,8 +343,6 @@ try {
     }
     if (commandExists('codex')) {
       fs.mkdirSync(codexHome, { recursive: true });
-      // `codex mcp remove` also drops the server's tool approval tables
-      if (codexHasLegacyServer()) run('codex', ['mcp', 'remove', LEGACY_MCP_NAME]);
       const r = run('codex', ['mcp', 'add', MCP_NAME, '--env', `REVIEW_WAIT_DEFAULT_S=${WAIT_DEFAULT_S.codex}`, ...serverCmd]);
       if (r.ok) {
         approveCodexTools(path.join(codexHome, 'config.toml'));
@@ -361,83 +370,85 @@ try {
   console.log('  review-commit         — review committed code before push');
   console.log('  review-pr             — review PRs (branch diff + description)');
 
-  // --auto: inject review guidance into global ~/.claude/CLAUDE.md
-  if (autoMode) {
+  // Review guidance in ~/.claude/CLAUDE.md. --auto adds it; a block already there is refreshed on every
+  // install, so one written by the earlier pack stops recommending its removed skills.
+  try {
+    const claudeDir = path.join(home, '.claude');
+    const claudeMdPath = path.join(claudeDir, 'CLAUDE.md');
+    const START_MARKER = `<!-- ${PACK}-start -->`;
+    const END_MARKER = `<!-- ${PACK}-end -->`;
+    // Blocks written by the earlier pack are replaced in place
+    const MARKERS = [[START_MARKER, END_MARKER], ['<!-- codex-auto-review-start -->', '<!-- codex-auto-review-end -->']];
+
+    const guidanceBlock = [
+      START_MARKER,
+      '',
+      '## Cross Review — Auto-review Guidance',
+      '',
+      'When the user is working on code changes, **proactively suggest** the appropriate review skill based on context:',
+      '',
+      '| Context | Suggested Skill | Trigger | Note |',
+      '|---------|----------------|---------|------|',
+      '| Multi-step feature or change that needs a plan | `/loop-plan` | Before coding | |',
+      '| Approved loop plan with incomplete phases | `/loop-implement` | After the plan is approved | |',
+      '| Uncommitted changes (staged/unstaged) | `/review-impl` | Before committing | |',
+      '| Feature branch with commits | `/review-pr` | Before creating/merging PR | |',
+      '| Plan/design document created or modified | `/review-plan` | After writing plan | |',
+      '| Recent commits before push | `/review-commit` | After committing, before push | |',
+      '| Technical question or architecture debate | `/review-think` | On design discussions | |',
+      '',
+      '**Rules:**',
+      '- Always ask the user before running a review skill — never auto-run without confirmation',
+      '- Phrase as a suggestion: "Would you like me to run `/review-impl` before committing?"',
+      '- Only suggest when context clearly matches — do not over-suggest',
+      '',
+      END_MARKER,
+    ].join('\n');
+
+    let existing = '';
     try {
-      const claudeDir = path.join(home, '.claude');
-      const claudeMdPath = path.join(claudeDir, 'CLAUDE.md');
-      const START_MARKER = `<!-- ${PACK}-start -->`;
-      const END_MARKER = `<!-- ${PACK}-end -->`;
-      // Blocks written by the earlier pack are replaced in place
-      const MARKERS = [[START_MARKER, END_MARKER], ['<!-- codex-auto-review-start -->', '<!-- codex-auto-review-end -->']];
-
-      const guidanceBlock = [
-        START_MARKER,
-        '',
-        '## Cross Review — Auto-review Guidance',
-        '',
-        'When the user is working on code changes, **proactively suggest** the appropriate review skill based on context:',
-        '',
-        '| Context | Suggested Skill | Trigger | Note |',
-        '|---------|----------------|---------|------|',
-        '| Multi-step feature or change that needs a plan | `/loop-plan` | Before coding | |',
-        '| Approved loop plan with incomplete phases | `/loop-implement` | After the plan is approved | |',
-        '| Uncommitted changes (staged/unstaged) | `/review-impl` | Before committing | |',
-        '| Feature branch with commits | `/review-pr` | Before creating/merging PR | |',
-        '| Plan/design document created or modified | `/review-plan` | After writing plan | |',
-        '| Recent commits before push | `/review-commit` | After committing, before push | |',
-        '| Technical question or architecture debate | `/review-think` | On design discussions | |',
-        '',
-        '**Rules:**',
-        '- Always ask the user before running a review skill — never auto-run without confirmation',
-        '- Phrase as a suggestion: "Would you like me to run `/review-impl` before committing?"',
-        '- Only suggest when context clearly matches — do not over-suggest',
-        '',
-        END_MARKER,
-      ].join('\n');
-
-      fs.mkdirSync(claudeDir, { recursive: true });
-
-      let existing = '';
-      try {
-        existing = fs.readFileSync(claudeMdPath, 'utf8');
-      } catch (readErr) {
-        if (readErr?.code === 'ENOENT') {
-          existing = '';
-        } else {
-          throw readErr; // Permission error, etc. — let outer catch handle
-        }
-      }
-
-      const found = MARKERS.map(([start, end]) => ({ start, end, startIdx: existing.indexOf(start), endIdx: existing.indexOf(end) }));
-      const block = found.find(m => m.startIdx !== -1 && m.endIdx !== -1 && m.startIdx < m.endIdx);
-
-      let updated;
-      if (block) {
-        // Replace existing block (idempotent)
-        updated = existing.slice(0, block.startIdx) + guidanceBlock + existing.slice(block.endIdx + block.end.length);
-      } else if (found.some(m => m.startIdx !== -1 || m.endIdx !== -1)) {
-        // Partial/corrupt markers — warn and skip to avoid data corruption
-        throw new Error('Found partial review-guidance markers in ~/.claude/CLAUDE.md — remove them manually and re-run');
+      existing = fs.readFileSync(claudeMdPath, 'utf8');
+    } catch (readErr) {
+      if (readErr?.code === 'ENOENT') {
+        existing = '';
       } else {
-        // Append to end
-        const separator = existing.length > 0 && !existing.endsWith('\n') ? '\n\n' : existing.length > 0 ? '\n' : '';
-        updated = existing + separator + guidanceBlock + '\n';
+        throw readErr; // Permission error, etc. — let outer catch handle
       }
+    }
 
+    const found = MARKERS.map(([start, end]) => ({ start, end, startIdx: existing.indexOf(start), endIdx: existing.indexOf(end) }));
+    const block = found.find(m => m.startIdx !== -1 && m.endIdx !== -1 && m.startIdx < m.endIdx);
+
+    let updated;
+    if (block) {
+      // Replace existing block (idempotent)
+      updated = existing.slice(0, block.startIdx) + guidanceBlock + existing.slice(block.endIdx + block.end.length);
+    } else if (!autoMode) {
+      updated = null;
+    } else if (found.some(m => m.startIdx !== -1 || m.endIdx !== -1)) {
+      // Partial/corrupt markers — warn and skip to avoid data corruption
+      throw new Error('Found partial review-guidance markers in ~/.claude/CLAUDE.md — remove them manually and re-run');
+    } else {
+      // Append to end
+      const separator = existing.length > 0 && !existing.endsWith('\n') ? '\n\n' : existing.length > 0 ? '\n' : '';
+      updated = existing + separator + guidanceBlock + '\n';
+    }
+
+    if (updated === null) {
+      console.log('');
+      console.log('Optional: npx github:lploc94/cross-review --auto');
+      console.log('  Injects review guidance into ~/.claude/CLAUDE.md');
+    } else {
+      fs.mkdirSync(claudeDir, { recursive: true });
       fs.writeFileSync(claudeMdPath, updated, 'utf8');
       console.log('');
-      console.log('Auto-review guidance injected into ~/.claude/CLAUDE.md');
-    } catch (err) {
-      console.warn('');
-      console.warn(`Warning: could not inject auto-review guidance into ~/.claude/CLAUDE.md`);
-      console.warn(`  Reason: ${err.message}`);
-      console.warn('  Skills were installed successfully — only guidance injection failed.');
+      console.log(`Auto-review guidance ${block ? 'updated' : 'injected'} in ~/.claude/CLAUDE.md`);
     }
-  } else {
-    console.log('');
-    console.log('Optional: npx github:lploc94/cross-review --auto');
-    console.log('  Injects review guidance into ~/.claude/CLAUDE.md');
+  } catch (err) {
+    console.warn('');
+    console.warn(`Warning: could not inject auto-review guidance into ~/.claude/CLAUDE.md`);
+    console.warn(`  Reason: ${err.message}`);
+    console.warn('  Skills were installed successfully — only guidance injection failed.');
   }
 } catch (err) {
   // Cleanup staging on any error

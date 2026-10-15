@@ -24,7 +24,6 @@ const LEGACY_SKILLS = [
   "codex-plan-review", "codex-impl-review", "codex-think-about", "codex-commit-review", "codex-pr-review",
   "codex-parallel-review", "codex-codebase-review", "codex-security-review",
 ];
-const LEGACY_SERVER_SCRIPT = `${LEGACY_RUNTIME}/scripts/mcp-server.js`;
 const TOOLS = ["review_begin", "review_end", "review_reply", "review_wait"];
 
 const claudeRoot = path.join(home, ".claude", "skills");
@@ -33,6 +32,12 @@ const legacyRoot = path.join(codexHome, "skills");
 const runtime = path.join(claudeRoot, "cross-review");
 const runner = path.join(runtime, "scripts", "review-runner.js");
 const mcpServer = path.join(runtime, "scripts", "mcp-server.js");
+// The earlier pack's runtime lived only here: its skills had the runner path rendered (escaped for a
+// double-quoted shell string) and its MCP server was registered at this path ('/' separators)
+const legacyRuntime = path.join(claudeRoot, LEGACY_RUNTIME);
+const legacyRunnerRef = path.join(legacyRuntime, "scripts", "codex-runner.js").replace(/[\\"$`]/g, "\\$&");
+const slashed = s => String(s).replace(/\\+/g, "/");
+const legacyServer = slashed(path.join(legacyRuntime, "scripts", "mcp-server.js"));
 
 const failures = [];
 const check = (ok, message) => { if (!ok) failures.push(message); };
@@ -47,12 +52,13 @@ function walk(dir, out = []) {
   return out;
 }
 
-/** The directory was installed by this pack or the earlier codex-review pack (not a foreign skill). */
-function isPackCopy(dir, name) {
-  if (name === "cross-review") return fs.existsSync(path.join(dir, "scripts", "review-runner.js"));
+/** The directory was installed by the earlier codex-review pack (not a foreign skill that shares the name). */
+function isLegacyCopy(dir, name) {
   if (name === LEGACY_RUNTIME) return fs.existsSync(path.join(dir, "scripts", "codex-runner.js"));
   const skillMd = path.join(dir, "SKILL.md");
-  return fs.existsSync(skillMd) && new RegExp(`^name:\\s*${name}\\s*$`, "m").test(fs.readFileSync(skillMd, "utf8"));
+  if (!fs.existsSync(skillMd)) return false;
+  const text = fs.readFileSync(skillMd, "utf8");
+  return new RegExp(`^name:\\s*${name}\\s*$`, "m").test(text) && text.includes(legacyRunnerRef);
 }
 
 function onPath(cmd) {
@@ -77,7 +83,7 @@ for (const [root, client] of [[claudeRoot, "claude"], [agentsRoot, "codex"]]) {
       if (f.endsWith(".md")) check(!/flavor/i.test(fs.readFileSync(f, "utf8")), `${client}: flavor text in ${f}`);
     }
   }
-  for (const name of [LEGACY_RUNTIME, ...LEGACY_SKILLS]) check(!isPackCopy(path.join(root, name), name), `${client}: old ${name} still installed`);
+  for (const name of [LEGACY_RUNTIME, ...LEGACY_SKILLS]) check(!isLegacyCopy(path.join(root, name), name), `${client}: old ${name} still installed`);
   for (const name of fs.existsSync(root) ? fs.readdirSync(root) : []) {
     check(!/^\.cross-review-staging-|^\..+-backup-/.test(name), `${client}: leftover ${path.join(root, name)}`);
   }
@@ -94,13 +100,13 @@ for (const skill of PLAIN_SKILLS) {
   check(fs.existsSync(path.join(agentsRoot, skill, "agents", "openai.yaml")), `codex: ${skill} lacks agents/openai.yaml`);
 }
 
-// This pack's copies are gone from Codex's deprecated skills root
+// The earlier pack's copies are gone from Codex's deprecated skills root
 const installedReal = new Set([...SKILLS.flatMap(s => [path.join(claudeRoot, s), path.join(agentsRoot, s)]), runtime]
   .filter(p => fs.existsSync(p)).map(p => fs.realpathSync(p)));
-for (const name of ["cross-review", LEGACY_RUNTIME, ...SKILLS, ...LEGACY_SKILLS]) {
+for (const name of [LEGACY_RUNTIME, ...LEGACY_SKILLS]) {
   const dir = path.join(legacyRoot, name);
   if (!fs.existsSync(dir) || installedReal.has(fs.realpathSync(dir))) continue;
-  check(!isPackCopy(dir, name), `legacy: pack copy still in ${dir}`);
+  check(!isLegacyCopy(dir, name), `legacy: old ${name} still in ${dir}`);
 }
 
 // Runtime: runner, modules, MCP server, SDK
@@ -134,7 +140,7 @@ if (onPath("claude")) {
   const servers = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")).mcpServers || {} : {};
   const entry = servers["cross-review"];
   check(entry && entry.args?.includes(mcpServer), "claude: cross-review MCP server not registered at the installed path");
-  check(!Object.values(servers).some(s => (s.args || []).some(a => String(a).replace(/\\+/g, "/").endsWith(LEGACY_SERVER_SCRIPT))), "claude: the old codex-review MCP server is still registered");
+  check(!Object.values(servers).some(s => (s.args || []).some(a => slashed(a) === legacyServer)), "claude: the old codex-review MCP server is still registered");
   check(entry?.env?.REVIEW_WAIT_DEFAULT_S === "300", "claude: REVIEW_WAIT_DEFAULT_S is not 300");
   check(Object.values(servers).filter(s => s.args?.includes(mcpServer)).length === 1, "claude: MCP server registered more than once");
 }
@@ -143,7 +149,16 @@ if (onPath("codex")) {
   const toml = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
   check((toml.match(/^\[mcp_servers\.cross-review\]$/gm) || []).length === 1, "codex: [mcp_servers.cross-review] is not present exactly once");
   check(toml.includes(mcpServer), "codex: MCP server path not in config.toml");
-  check(!toml.replace(/\\+/g, "/").includes(LEGACY_SERVER_SCRIPT), "codex: the old codex-review MCP server is still in config.toml");
+  // Global server args as Codex itself parses config.toml, read from the filesystem root:
+  // a project's config could shadow them
+  if (toml) {
+    try {
+      const listed = JSON.parse(execFileSync("codex", ["mcp", "list", "--json"], { encoding: "utf8", cwd: path.parse(home).root, env: { ...process.env, CODEX_HOME: codexHome } }));
+      check(!listed.some(s => (s.transport?.args || []).some(a => slashed(a) === legacyServer)), "codex: the old codex-review MCP server is still registered");
+    } catch (e) {
+      failures.push(`codex: mcp list failed: ${e.message}`);
+    }
+  }
   check(/REVIEW_WAIT_DEFAULT_S\s*=\s*"50"/.test(toml), "codex: REVIEW_WAIT_DEFAULT_S is not 50");
   for (const tool of TOOLS) {
     const tables = toml.match(new RegExp(`^\\[mcp_servers\\.cross-review\\.tools\\.${tool}\\]\\napproval_mode = "approve"$`, "gm")) || [];

@@ -12,7 +12,7 @@ export const REVIEWER_NAMES = Object.keys(REVIEWERS);
 /** The reviewer module for name (default codex); throws UNKNOWN_REVIEWER otherwise. */
 export function getReviewer(name) {
   const key = name || DEFAULT_REVIEWER;
-  const reviewer = REVIEWERS[key];
+  const reviewer = Object.hasOwn(REVIEWERS, key) ? REVIEWERS[key] : undefined;
   if (!reviewer) {
     const err = new Error(`Unknown reviewer "${key}". Available: ${REVIEWER_NAMES.join(", ")}`);
     err.code = "UNKNOWN_REVIEWER";

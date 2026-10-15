@@ -49,7 +49,7 @@ Re-running is safe: the MCP registration is replaced, not duplicated.
 ```bash
 npx github:lploc94/cross-review --auto
 ```
-Injects review guidance into `~/.claude/CLAUDE.md` so Claude Code proactively suggests the right review skill based on context (e.g., `/loop-plan` before a large multi-step change, `/review-impl` before commits). Idempotent — safe to re-run; a block written by the old codex-review pack is replaced.
+Injects review guidance into `~/.claude/CLAUDE.md` so Claude Code proactively suggests the right review skill based on context (e.g., `/loop-plan` before a large multi-step change, `/review-impl` before commits). Idempotent — safe to re-run. Every install, with or without `--auto`, refreshes a guidance block that is already there, including one written by the old codex-review pack.
 
 ## Usage
 

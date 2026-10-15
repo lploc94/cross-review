@@ -264,10 +264,14 @@ test("the session remembers its reviewer; codex is the default", async () => {
 test("an unknown reviewer is rejected before any session is created", async () => {
   const sessions = path.join(workDir, ".cross-review", "sessions");
   const before = fs.existsSync(sessions) ? fs.readdirSync(sessions).length : 0;
-  await assert.rejects(
-    beginSession({ skill: "review-plan", inputText: inputFor("review-plan", "x"), workingDir: workDir, reviewer: "nope" }),
-    e => e.code === "UNKNOWN_REVIEWER" && /Available: codex/.test(e.message),
-  );
+  // Names an object inherits are not reviewers either
+  for (const reviewer of ["nope", "toString", "constructor", "__proto__"]) {
+    await assert.rejects(
+      beginSession({ skill: "review-plan", inputText: inputFor("review-plan", "x"), workingDir: workDir, reviewer }),
+      e => e.code === "UNKNOWN_REVIEWER" && /Available: codex/.test(e.message),
+      reviewer,
+    );
+  }
   assert.equal(fs.existsSync(sessions) ? fs.readdirSync(sessions).length : 0, before);
 });
 
