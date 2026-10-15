@@ -928,3 +928,11 @@ Checkpoint cuối: `/codex-impl-review` trên diff cộng dồn từ `51d4351`.
     Repo demo sau các vòng không có file lạ.
   - AC-7.4: `grep -c 'Node.js stdlib only\|40–70' CLAUDE.md` = 0.
   - Kiểm "skill tải được": install-check kiểm frontmatter `name`/`description` của 14 SKILL.md, thay cho một vòng loop-plan thật.
+- 2026-10-15 Checkpoint cuối: `/codex-impl-review` (branch, base `51d4351`, effort xhigh), session `codex-impl-review-20261015-004`. APPROVE sau 3 vòng. Codex xác nhận các thích ứng đã ghi trong log là chấp nhận được (lõi gọi runner qua tiến trình con, dạng verdict thêm, đổi đích Codex và chỗ đặt runtime, giữ parse RESPONSE, sandbox, dọn bản cũ).
+  - Vòng 1, 2 issue, đều ACCEPT, sửa ở `7b3a5e7`:
+    - high: ví dụ verdict nằm trong khối code bị lấy làm verdict thật, nên một REVISE bị finalize thành APPROVE. Sửa: che fence trước khi tìm verdict và block.
+    - medium: nếu `$CODEX_HOME/skills` là symlink tới `~/.agents/skills` thì bước dọn xoá luôn bản vừa cài. Sửa: so realpath với các thư mục vừa cài.
+  - Phát sinh khi đối chiếu 929 output thật: 2 câu trả lời bọc toàn bộ trong một fence thành `unknown`. Sửa: bóc vỏ trước khi parse.
+  - Vòng 2, 1 issue, ACCEPT, sửa ở `4fcd2f4`: vỏ 4 backtick làm mất cả review. Sửa: một bộ theo dõi fence theo CommonMark, dùng chung cho che fence, tìm cuối block và bóc vỏ.
+  - Mỗi issue có test hồi quy, đều đỏ trên code cũ. Parser trên 929 output thật: 0 output đổi kết quả so với `55d2ede`.
+  - Gate trên `4fcd2f4`: ba test cũ pass, `node --test tests/` 80/80, install-check ok.
