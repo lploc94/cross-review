@@ -456,6 +456,17 @@ try {
     await blank.waitFor(`document.getElementById("save").textContent === "Save for __proto__"`);
     assert.equal(await blank.evaluate(`document.getElementById("settings-error").textContent`), "");
     assert.match(await blank.evaluate(`document.getElementById("preview").textContent`), /"effort": "low"/);
+    // A broken file shows its error until a save replaces it
+    const quillFile = path.join(blankRoot, "quill", ".cross-review", "config.json");
+    fs.writeFileSync(quillFile, "{ broken");
+    await blank.evaluate(`location.hash = "#/settings/quill"`);
+    await blank.waitFor(`document.getElementById("save").textContent === "Save for quill"`);
+    assert.match(await blank.evaluate(`document.getElementById("settings-error").textContent`), /not valid JSON/);
+    await blank.evaluate(`(() => { const e = document.getElementById("f-effort-set"); e.value = "low"; e.dispatchEvent(new Event("change", { bubbles: true })); document.getElementById("save").click(); })()`);
+    for (let i = 0; i < 50 && fs.readFileSync(quillFile, "utf8").includes("broken"); i++) await new Promise(r => setTimeout(r, 100));
+    await blank.waitFor(`!document.getElementById("save").disabled`);
+    assert.deepEqual(JSON.parse(fs.readFileSync(quillFile, "utf8")), { effort: "low" });
+    assert.equal(await blank.evaluate(`document.getElementById("settings-error").textContent`), "");
   } finally {
     await d4.close();
   }

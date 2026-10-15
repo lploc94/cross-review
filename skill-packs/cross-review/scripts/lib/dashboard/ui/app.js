@@ -901,7 +901,14 @@ async function onSettingsClick(e) {
         return;
       }
       const saved = (await res.json()).config;
-      if (scope === "global") settings.global = saved; else settings.workspaces[ws] = saved;
+      // the saved file replaced the one that failed to load
+      if (scope === "global") {
+        settings.global = saved;
+        settings.errors.global = undefined;
+      } else {
+        settings.workspaces[ws] = saved;
+        delete settings.errors.workspaces[ws];
+      }
       if (same && JSON.stringify(sv.draft) === sent) resetDraft();
       renderSettings();
     } finally {
