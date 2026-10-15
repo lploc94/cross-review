@@ -100,5 +100,6 @@ try {
 } finally {
   await browser.close();
   await d.close();
-  fs.rmSync(tmp, { recursive: true, force: true });
+  // Chrome helpers can still be writing into the profile for a moment after the kill
+  fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 }
