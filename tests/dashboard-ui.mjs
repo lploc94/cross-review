@@ -427,6 +427,31 @@ try {
     await d3.close();
   }
 
+  // A caller whose name and title are blank: its letters fall back to "AG"; the thread and
+  // the avatar table still render
+  const blankRoot = path.join(tmp, "blank");
+  writeSession(path.join(blankRoot, "quill", ".cross-review", "sessions"), "review-impl-20261015-500", {
+    skill: "review-impl", mode: "branch", created: manyNow - 600, meta: "APPROVE",
+    state: { caller: { name: "  ", title: "   ", version: "1.0.0" } },
+    inputs: ["## USER_REQUEST\nInvented request with a blank caller.\n", "## FIXED_ITEMS\nISSUE-1: Invented defect — fixed in src/a.js:1\n\n## DISPUTED_ITEMS\nNone — all issues addressed\n"],
+    rounds: [
+      { status: "completed", started: manyNow - 600, elapsed: 1, review: "### ISSUE-1: Invented defect\n- Category: bug\n- Severity: low\n- Location: `src/a.js:1`\n- Problem: Invented.\n- Suggested fix: Invented.\n\n### VERDICT\n- Status: REVISE\n- Reason: Invented.\n" },
+      { status: "completed", started: manyNow - 300, elapsed: 1, review: "### VERDICT\n- Status: APPROVE\n- Reason: Invented approval.\n" },
+    ],
+  });
+  const d4 = await startDashboard({ root: blankRoot, port: 0, open: false, discoveryFile: null, catalog });
+  const blank = await browser.newPage(1400, 900);
+  try {
+    await blank.goto(`${d4.url}#/s/quill/review-impl-20261015-500`);
+    await blank.waitFor(`document.querySelectorAll("#thread .m").length > 0 && document.querySelector("#thread .mark.ag")`);
+    assert.equal(await blank.evaluate(`document.querySelector("#thread .mark.ag img").alt`), "AG");
+    await blank.evaluate(`location.hash = "#/settings"`);
+    await blank.waitFor(`document.querySelectorAll("#avatars tr").length === 3`);
+    assert.equal(await blank.evaluate(`document.querySelectorAll("#avatars tr")[2].querySelector("img").alt`), "AG");
+  } finally {
+    await d4.close();
+  }
+
   // Nothing in progress: the empty state with the full-body avatars
   const empty = await browser.newPage(1400, 900);
   const emptyRoot = path.join(tmp, "empty");

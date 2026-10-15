@@ -233,9 +233,11 @@ function party(who, d) {
     return { letters: REVIEWER_LETTERS[r] || r.slice(0, 2).toUpperCase(), tip: REVIEWERS[r] || r };
   }
   const c = d.facts.caller || {};
-  const letters = CALLER_LETTERS[c.name] || (c.title ? c.title.trim()[0].toUpperCase() : "AG");
-  return { letters, tip: c.title || "Agent" };
+  return { letters: CALLER_LETTERS[c.name] || initial(c.title), tip: (c.title || "").trim() || "Agent" };
 }
+
+/** An agent's letter: the first character of its title, else "AG" (no title, or a blank one). */
+const initial = title => String(title || "").trim().charAt(0).toUpperCase() || "AG";
 
 /** The avatars key of each side: the user's image when one is uploaded. */
 function partyKey(who, d) {
@@ -774,7 +776,7 @@ const avatarSrc = (who, key) => (avatars.keys.includes(key) ? `avatars/${encodeU
 function renderAvatarTable() {
   $("#avatars").innerHTML = avatars.parties.map(p => {
     const has = avatars.keys.includes(p.key);
-    const letters = p.who === "us" ? "Y" : p.who === "rv" ? "CX" : p.name ? CALLER_LETTERS[p.name] || p.label.split(" · ")[1].trim()[0].toUpperCase() : "AG";
+    const letters = p.who === "us" ? "Y" : p.who === "rv" ? "CX" : p.name ? CALLER_LETTERS[p.name] || initial(p.label.split(" · ")[1]) : "AG";
     return `<tr><td><div class="mark ${p.who}"><img src="${avatarSrc(p.who, p.key)}" alt="${esc(letters)}"></div>${esc(p.label)}</td>
       <td class="soft">${esc(p.seenIn)}</td>
       <td class="right"><label><a>${has ? "Change" : "Upload image"}</a><input type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-av="${esc(p.key)}" hidden></label>${has ? ` · <a data-av-clear="${esc(p.key)}">remove</a>` : ""}</td></tr>`;
