@@ -14,6 +14,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderSkillTemplate } from './lib/render-skill.js';
 
+// `npx github:lploc94/cross-review dashboard`: run the dashboard from the package itself; no install step runs
+if (process.argv[2] === 'dashboard') {
+  const { runDashboardCli } = await import('../skill-packs/cross-review/scripts/lib/dashboard/server.js');
+  process.exit(await runDashboardCli(process.argv.slice(3)));
+}
+
 // ---------------------------------------------------------------------------
 // Paths
 // ---------------------------------------------------------------------------
@@ -221,7 +227,8 @@ try {
     fs.copyFileSync(path.join(skillPackDir, 'scripts', file), path.join(stagedScripts, file));
   }
   copyDirSync(path.join(skillPackDir, 'scripts', 'lib'), path.join(stagedScripts, 'lib'));
-  for (const file of ['package.json', 'package-lock.json']) {
+  // manifest.json gives the dashboard its pack version
+  for (const file of ['package.json', 'package-lock.json', 'manifest.json']) {
     fs.copyFileSync(path.join(skillPackDir, file), path.join(stagedRuntime, file));
   }
   if (process.platform !== 'win32') {

@@ -2025,6 +2025,12 @@ function main() {
       verb(rest).then(code => process.exit(code));
       return;
     }
+    case "dashboard":
+      // Loaded on demand: the review commands never pay for the dashboard modules
+      import("./lib/dashboard/server.js")
+        .then(m => m.runDashboardCli(rest))
+        .then(code => process.exit(code));
+      return;
     default:
       process.stderr.write(
         "review-runner.js — Cross-platform runner for reviewer CLIs (v15)\n\n" +
@@ -2032,7 +2038,8 @@ function main() {
         "  node review-runner.js begin --skill <name> [--mode <mode>] --input <file|-> [--working-dir <dir>] [--model <name>] [--effort <level>] [--timeout <s>]\n" +
         "  node review-runner.js wait <session_dir> [--max-wait <s>]\n" +
         "  node review-runner.js reply <session_dir> --input <file|-> [--model <name>] [--effort <level>]\n" +
-        "  node review-runner.js end <session_dir> [--outcome consensus|stalemate]\n\n" +
+        "  node review-runner.js end <session_dir> [--outcome consensus|stalemate]\n" +
+        "  node review-runner.js dashboard [--root <dir>] [--port <n>] [--no-open] [--idle-exit <s>]\n\n" +
         "Usage (low-level):\n" +
         "  node review-runner.js version\n" +
         "  node review-runner.js init --skill-name <name> --working-dir <dir>\n" +

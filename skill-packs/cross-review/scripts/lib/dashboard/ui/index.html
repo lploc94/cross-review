@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>cross-review</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="app.css">
+<script type="module" src="app.js"></script>
+</head>
+<body>
+<div class="top"><div class="wrap">
+  <div class="name" data-i="logo">cross-review</div>
+  <nav><a href="#/" data-nav="sessions" data-i="list">Sessions</a><a href="#/settings" data-nav="settings" data-i="sliders">Settings</a></nav>
+  <div class="where" id="where"></div>
+</div></div>
+
+<main class="wrap">
+<section id="sessions" class="view">
+  <h1>In progress</h1>
+  <div class="sub">Updates live. A session stays here until it ends, including while it waits for the agent or after it stopped.</div>
+  <table class="gap">
+    <thead><tr><th class="w-state">State</th><th>Session</th><th>Now</th><th class="num w-for">For</th></tr></thead>
+    <tbody id="active"></tbody>
+  </table>
+
+  <h2>History</h2>
+  <div class="filters">
+    <select id="f-ws" aria-label="Workspace"><option value="">All workspaces</option></select>
+    <select id="f-skill" aria-label="Skill"><option value="">All skills</option><option>review-plan</option><option>review-impl</option><option>review-think</option><option>review-pr</option></select>
+    <select id="f-result" aria-label="Result"><option value="">Any result</option><option>approved</option><option>consensus</option><option>stalemate</option><option>stopped</option><option>no reply</option></select>
+    <input type="text" id="f-search" placeholder="Search subject, findings, files" aria-label="Search">
+  </div>
+  <table>
+    <thead><tr><th class="w-state">Result</th><th>Session</th><th class="num">Rounds</th><th>Issues</th><th class="nw">Model</th><th class="num nw">Reviewer time</th><th class="num nw">When</th></tr></thead>
+    <tbody id="history"></tbody>
+  </table>
+</section>
+
+<section id="detail" class="view">
+  <div class="crumbs"><a href="#/">Sessions</a> / <span id="d-ws"></span></div>
+  <h1 id="d-title"></h1>
+  <div class="meta" id="d-meta"></div>
+</section>
+
+<section id="settings" class="view">
+  <h1>Settings</h1>
+</section>
+</main>
+</body>
+</html>
