@@ -1,0 +1,4 @@
+interface:
+  display_name: "Loop Plan"
+  short_description: "Draft reviewed, execution-ready plans"
+  default_prompt: "Use $loop-plan to turn this request into a code-grounded phased implementation plan."

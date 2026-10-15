@@ -5,18 +5,27 @@ description: Create an execution-ready, code-grounded phased implementation plan
 
 # Loop Plan
 
-Create a plan that another session can execute without guessing requirements. This skill plans only; it does not implement application code.
+Create a plan that another session can execute without guessing requirements. This skill plans only; it does not implement application code. Spikes live only under `.codex-review/spikes/<plan-name>/`.
 
 ## Discovery and intent
 
-1. Read applicable `CLAUDE.md`/`AGENTS.md`/repository instructions, inspect `git status`, recent history, relevant files, symbols, callers, commands, and existing tests before drafting.
+1. Read applicable {{CLIENT_INSTRUCTIONS}}/repository instructions, inspect `git status`, recent history, relevant files, symbols, callers, commands, and existing tests before drafting.
 2. Separate the user's target from reports, assumptions, completed work, and out-of-scope ideas. Preserve the user's expected behavior as the source of truth.
-3. Find an established repository pattern for each proposed change and cite its path/symbol. Choose the smallest project-consistent design; do not add speculative abstractions or compatibility behavior.
-4. Resolve ordinary engineering choices autonomously. Ask only when a material product, API, schema, dependency, compatibility, or operational decision cannot be inferred safely.
+3. For each proposed change, cite the repository pattern (path/symbol) and the current established standard for the problem (a current source). When the repository pattern is itself the tangled part, present two options, patch within it or move to the standard, as a user decision. Otherwise choose the smallest project-consistent design; do not add speculative abstractions or compatibility behavior.
+4. Spike every technical assumption you have not seen work here (library API, platform behavior, external capacity, performance) in `.codex-review/spikes/<plan-name>/`, and record it in `Feasibility evidence`.
+5. Resolve assumptions at plan time, by spike or by asking the user. The plan handed to implementation must not contain hard stops that depend on something nobody can verify; record what remains as an assumption with a default and a fallback. Hard stops are only for data loss, security, or irreversible actions.
+6. Resolve ordinary engineering choices autonomously. Ask only when a material product, API, schema, dependency, compatibility, or operational decision cannot be inferred safely.
+
+## Limits
+
+Only when the plan sets or depends on a limit:
+- Correctness validation (rejecting bad input) is not a capacity limit; keep them apart.
+- Each capacity limit states the protected resource, the failure it prevents, why that number (a real ceiling, a measurement, or well above the largest normal load), and the soft handling when reached (continue in parts, backpressure, signalled degradation). Never truncate or drop silently.
+- External capacity (context size, rate limits, body size, quotas) comes from a current source or a measurement, with source and date.
 
 ## Plan contract
 
-Write a descriptively named `<kebab-case-summary>-plan.md` in the repository unless the user specifies another descriptive path. The filename must identify the work (for example, `implement-login-plan.md`, `migrate-auth-tokens-plan.md`, or `add-search-filters-plan.md`); never create a generic `plan.md`.
+Write a descriptively named `<kebab-case-summary>-plan.md` in the repository unless the user specifies another descriptive path; the name identifies the work (for example `migrate-auth-tokens-plan.md`), never a generic `plan.md`.
 
 Use this exact top-level order:
 
@@ -27,15 +36,26 @@ loop-plan/v1
 ## Target
 ## Scope
 ## Invariants
+## Fixed decisions
 ## Baseline
 ## Design and project patterns
+## Feasibility evidence
+## Capacity
 ## Global Gates
+## Review checkpoints
 ## Plan Review
 ## Phase 1: <name>
 ...
 ## Completion Criteria
 ## Progress Log
 ```
+
+- `Fixed decisions`: choices implementation must not change on its own (technology, dependency, interface, limit), each with its reason.
+- `Baseline`: completed work, and the real duration of each gate command.
+- `Feasibility evidence`: assumption | spike or source | result | date.
+- `Capacity`: the limits described under Limits, or `N/A`.
+- `Review checkpoints`: which phases end with `{{CLIENT_SKILL}}codex-impl-review` and why (after phases that build a contract, schema, migration, state, or money flow), plus one final checkpoint on the cumulative diff. Name a model per checkpoint when the user wants one.
+- `Plan Review`: starts as `pending`; see Quality and review.
 
 Repeat the complete phase block for every phase, in dependency order:
 
@@ -55,26 +75,36 @@ Repeat the complete phase block for every phase, in dependency order:
 ### Acceptance criteria
 - [ ] AC-N: <binary observable criterion> — proven by <test or inspection>
 ### Focused verification
-`<exact command>`
+`<exact narrow command per AC>`
 ### Phase gates
-`<exact command(s)>`
+`<light command(s) for the affected area>`
 ### Review
-Implementation review is required; verdict must be APPROVE.
+Checkpoint: `{{CLIENT_SKILL}}codex-impl-review` | None (covered by the checkpoint after Phase M)
 ### Commit
 `<proposed commit message>`
 ```
 
-Every phase must describe code evidence, the observable contract, production obligations separately from tests, failure/boundary/state cases where relevant, an oracle that rejects the plausible naive implementation, exact commands and expected outcomes, and a single cohesive commit boundary.
+Every phase must describe code evidence, the observable contract, production obligations separately from tests, failure/boundary/state cases where relevant, an oracle that rejects the plausible naive implementation, exact commands and expected outcomes, and a single cohesive commit boundary. Test ladder: a narrow command per AC, light phase gates, and the full suite only in `Global Gates`.
 
 ## Quality and review
 
 - Acceptance criteria are binary and map to tests or concrete inspection evidence.
-- Include repository regression gates, not only focused tests.
-- Document dependencies, ownership boundaries, invariants, and explicit exclusions.
-- Record completed baseline work so `loop-implement` does not repeat it.
-- After drafting, perform an intent-fidelity review: verify the plan still produces the user's requested outcome and has no accidental scope expansion.
-- Perform a plan self-review for stale paths, missing integration, weak or overfit tests, phase sizing, and resumability. Set `Plan Review` to `APPROVE` only after this review is complete; otherwise leave it `pending` and do not authorize implementation.
+- Document dependencies, ownership boundaries, invariants, and explicit exclusions. Record completed baseline work so `{{CLIENT_SKILL}}loop-implement` does not repeat it.
+- Before handoff, check two things: every AC has a test and a narrow command, and every risky assumption has `Feasibility evidence` or a user decision.
+- `Plan Review` stays `pending` until `{{CLIENT_SKILL}}codex-plan-review` returns APPROVE or the user approves; then write `APPROVE (codex-plan-review <session id>, <date>)` or `APPROVE (user, <date>)`.
 
-## Handoff
+## Talking with the user
 
-End with a concise expectation check: summarize the implementation story, key design decision, material assumptions, exact descriptive plan path, phase count, and review status. Invite correction before `/loop-implement` starts. Do not modify production code.
+Stop briefly three times; the goal is that the user understands, not that they read a lot:
+1. After discovery: restate the target, what is out of scope, and the assumptions; invite correction.
+2. After spikes, before writing phases: the main design decisions, especially patch versus standard and breaking changes.
+3. Handoff: the implementation story in plain words, the review checkpoints, remaining risks, the exact plan path, phase count, and review status. Ask whether to run `{{CLIENT_SKILL}}codex-plan-review` or whether the user approves directly, and invite correction before `{{CLIENT_SKILL}}loop-implement` starts.
+
+Present each decision on its own, in the user's language, explaining any term you must use:
+1. Context: what this part of the system does today, in 1–3 sentences.
+2. Problem: what happens if it is left as is, with a concrete example the user can see.
+3. Options: for each, what changes, what it costs (time, scope, breaking), its risk, and whether it can be reversed.
+4. Recommendation and why, tied to evidence (spike, source, data), with its benefit, its harm if any, and its concrete impact.
+5. If agreed, what happens next: scope, files or areas changed, what stays the same.
+
+Silence or a generic "ok" approves nothing that was not presented. Do not modify production code.

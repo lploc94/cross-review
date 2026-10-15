@@ -28,7 +28,7 @@ const runnerDir = path.join(skillsRoot, 'codex-review');
 const runnerPath = path.join(runnerDir, 'scripts', 'codex-runner.js');
 
 // RUNNER_SKILLS drive Codex through codex-runner.js; their SKILL.md templates are rendered with the shared protocol and need references/.
-// PLAIN_SKILLS are self-contained SKILL.md files copied as-is.
+// PLAIN_SKILLS are self-contained SKILL.md templates rendered only with the client's {{CLIENT_*}} values.
 const RUNNER_SKILLS = ['codex-plan-review', 'codex-impl-review', 'codex-think-about', 'codex-commit-review', 'codex-pr-review'];
 const PLAIN_SKILLS = ['loop-plan', 'loop-implement'];
 // Skills removed from the pack; previously installed copies are deleted on install.
@@ -105,7 +105,8 @@ try {
     fs.mkdirSync(skillDestDir, { recursive: true });
 
     if (PLAIN_SKILLS.includes(skill)) {
-      fs.copyFileSync(path.join(skillSrcDir, 'SKILL.md'), path.join(skillDestDir, 'SKILL.md'));
+      const rendered = renderSkillTemplate(skillPackDir, skill, { client: 'claude' });
+      fs.writeFileSync(path.join(skillDestDir, 'SKILL.md'), rendered, 'utf8');
       continue;
     }
     // Inline the shared protocol and inject runner path and skills dir

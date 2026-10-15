@@ -13,6 +13,12 @@ export const PROTOCOL_VARIANTS = {
   'codex-think-about': 'cross-analysis',
 };
 
+// Values for {{CLIENT_*}} placeholders in skills installed for both Claude Code and Codex
+export const CLIENTS = {
+  claude: { CLIENT_SKILL: '/', CLIENT_INSTRUCTIONS: '`CLAUDE.md`/`AGENTS.md`' },
+  codex: { CLIENT_SKILL: '$', CLIENT_INSTRUCTIONS: '`AGENTS.md`' },
+};
+
 function readProtocol(skillPackDir, name) {
   const file = path.join(skillPackDir, 'shared', 'protocol', `${name}.md`);
   return fs.readFileSync(file, 'utf8').trimEnd();
@@ -22,9 +28,15 @@ function readProtocol(skillPackDir, name) {
  * Returns the rendered SKILL.md text. Throws when the template lacks a required
  * placeholder or when any `{{...}}` placeholder is left after rendering.
  */
-export function renderSkillTemplate(skillPackDir, skill, { runnerPath, skillsDir } = {}) {
+export function renderSkillTemplate(skillPackDir, skill, { runnerPath, skillsDir, client } = {}) {
   const templatePath = path.join(skillPackDir, 'skills', skill, 'SKILL.md');
   let text = fs.readFileSync(templatePath, 'utf8');
+
+  if (client !== undefined) {
+    const values = CLIENTS[client];
+    if (!values) throw new Error(`Unknown client "${client}" (expected ${Object.keys(CLIENTS).join(' or ')})`);
+    for (const [name, value] of Object.entries(values)) text = text.replaceAll(`{{${name}}}`, value);
+  }
 
   const variant = PROTOCOL_VARIANTS[skill];
   if (variant) {

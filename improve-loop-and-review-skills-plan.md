@@ -850,3 +850,22 @@ Checkpoint cuối: `/codex-impl-review` trên diff cộng dồn từ `51d4351`.
     - plan `prompts.md`:
       - L59–65: "Standards and Over-Engineering" (định nghĩa lại over-engineering, kiểm bằng chứng khi đổi sang chuẩn, chuyện vá thay cho chuẩn nêu thành `scope`).
       - L67–70: "Limits and Capacities".
+- 2026-10-15 Phase 5 xong. Full gate: ba test cũ pass, `node --test tests/` 67/67. `tests/loop-skills.test.js` 5/5. Trên SKILL.md cũ 4/5 test đỏ; test còn lại (client lạ bị từ chối) chỉ kiểm renderer.
+  - `render-skill.js` có thêm `CLIENTS` (`CLIENT_SKILL` là `/` hoặc `$`, `CLIENT_INSTRUCTIONS`). Installer render loop skills với `client: "claude"`. `agents/openai.yaml` chép nguyên từ `~/.codex/skills/loop-plan`.
+  - loop-plan dài 110 dòng (giới hạn 112). Schema vẫn `loop-plan/v1`; các mục mới chỉ chèn vào, không đổi tên mục cũ.
+  - Khi đối chiếu AC-5.3, tôi bỏ "Baseline ghi kết quả gate hiện tại" khỏi bản nháp, vì đó là luật "chạy gate ở baseline lúc plan" trong bảng "Không đưa vào". Baseline chỉ còn ghi thời lượng lệnh.
+  - AC-5.2, đối chiếu mục 21.3 (các dòng có `plan`) với SKILL.md:
+
+    | Thay đổi ở 21.3 | Câu trong SKILL.md |
+    |---|---|
+    | APPROVE chỉ từ codex-plan-review hoặc user, kèm nguồn | Quality and review, bullet `Plan Review` stays `pending`… |
+    | Review checkpoints, kèm model | Mục `Review checkpoints` trong danh sách heading; phase block, mục `### Review` |
+    | Thang test và thời lượng ở Baseline | "Test ladder: …" sau phase block; bullet `Baseline` |
+    | Spike và Feasibility evidence | Discovery bước 4; bullet `Feasibility evidence` |
+    | Giải quyết giả định lúc plan, không có điểm dừng cứng không kiểm được | Discovery bước 5 |
+    | Chuẩn ngành: hai phương án theo mẫu quyết định | Discovery bước 3; Talking with the user, điểm dừng 2 |
+    | Fixed decisions | Bullet `Fixed decisions` |
+    | Chính sách giới hạn, bản gọn | Mục Limits; bullet `Capacity` |
+    | 3 điểm dừng, mẫu 5 phần | Mục Talking with the user |
+
+  - AC-5.3: không có Impact map, Failure modes, bảng State and lifecycle, luật chạy gate ở baseline hay cấm thu hẹp suite, checklist bẫy, hay bắt buộc test đột biến. Phần tự kiểm chỉ còn 2 ý mà Behavioral contract cho phép.
