@@ -48,6 +48,21 @@ test("installing over an old install leaves a clean, registered install and keep
   }
 });
 
+test("cleanup never deletes the new install when the Codex skills root is an alias", { timeout: 600_000 }, () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "install-alias-"));
+  const env = { ...process.env, HOME: home, CODEX_HOME: path.join(home, ".codex") };
+  try {
+    fs.mkdirSync(path.join(home, ".agents", "skills"), { recursive: true });
+    fs.mkdirSync(path.join(home, ".codex"), { recursive: true });
+    fs.symlinkSync(path.join(home, ".agents", "skills"), path.join(home, ".codex", "skills"));
+    execFileSync(process.execPath, [INSTALLER], { env, stdio: "pipe" });
+    const out = execFileSync(process.execPath, [CHECK, home], { env, encoding: "utf8" });
+    assert.match(out, /install-check: ok/);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test("install-check rejects a broken install", () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "install-broken-"));
   try {

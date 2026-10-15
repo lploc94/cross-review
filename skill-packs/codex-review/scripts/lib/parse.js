@@ -66,6 +66,33 @@ function parseFields(blockContent) {
 const VERDICT_STATUSES = ["APPROVE", "REVISE", "CONSENSUS", "CONTINUE", "STALEMATE"];
 
 /**
+ * Blank out fenced code blocks (fence lines included) while keeping every offset, so
+ * markers quoted inside evidence or examples are not mistaken for real ones.
+ */
+/**
+ * Codex sometimes wraps its whole answer in one ```markdown fence. Return the inner text
+ * when the output is exactly one fenced block, else the output unchanged.
+ */
+function unwrapWholeFence(md) {
+  const lines = md.trim().split("\n");
+  const fences = lines.filter(l => l.trim().startsWith("```")).length;
+  if (fences === 2 && lines.length > 2 && lines[0].trim().startsWith("```") && lines[lines.length - 1].trim() === "```") {
+    return lines.slice(1, -1).join("\n");
+  }
+  return md;
+}
+
+function maskFences(md) {
+  let inFence = false;
+  return md.split("\n").map(line => {
+    const fence = line.trim().startsWith("```");
+    const masked = inFence || fence;
+    if (fence) inFence = !inFence;
+    return masked ? " ".repeat(line.length) : line;
+  }).join("\n");
+}
+
+/**
  * Normalize a raw verdict status ("**APPROVE**", "`approve`.", "Stalemate") to one of
  * VERDICT_STATUSES. Returns null when the value does not start with a known status.
  */
@@ -85,7 +112,8 @@ export function normalizeVerdictStatus(raw) {
  * "- Status:" / "- Reason:" fields, and inline "VERDICT: X" values. When the output
  * contains several verdict markers, the last one wins.
  */
-export function parseVerdict(md) {
+export function parseVerdict(raw) {
+  const md = maskFences(unwrapWholeFence(raw || ""));
   // Heading containing the word ("### VERDICT", "## Final Plan Review Verdict: APPROVE"),
   // a standalone bold "**VERDICT**" line, or an inline "VERDICT: X" line.
   const markerRegex = /^(?:#{1,3}[ \t]*(?:[^\n]*?[ \t])?\**VERDICT\**[ \t]*(?::[ \t]*(.*))?|\*\*VERDICT\*\*[ \t]*(?::[ \t]*(.*))?|VERDICT[ \t]*:[ \t]*(.*))$/gim;
@@ -263,12 +291,14 @@ export function parseOutputMarkdown(md, skillHint) {
     return { format: "unknown", raw_markdown: md || "", parse_error: "Empty output" };
   }
 
-  // Step 1: Detect format variant
-  const hasResponse = /^### RESPONSE-\d+:/m.test(md);
-  const hasIssue = /^### ISSUE-\d+:/m.test(md);
-  const hasOverallAssessment = /^### Overall Assessment/m.test(md);
-  const hasKeyInsights = /^### Key Insight/m.test(md);
-  const hasConsiderations = /^### Considerations/m.test(md);
+  md = unwrapWholeFence(md);
+  // Step 1: Detect format variant (ignoring markers quoted inside code fences)
+  const masked = maskFences(md);
+  const hasResponse = /^### RESPONSE-\d+:/m.test(masked);
+  const hasIssue = /^### ISSUE-\d+:/m.test(masked);
+  const hasOverallAssessment = /^### Overall Assessment/m.test(masked);
+  const hasKeyInsights = /^### Key Insight/m.test(masked);
+  const hasConsiderations = /^### Considerations/m.test(masked);
 
   let format;
   if (hasIssue && hasOverallAssessment) {
@@ -294,7 +324,7 @@ export function parseOutputMarkdown(md, skillHint) {
   const blockPositions = [];
   let m;
 
-  while ((m = blockRegex.exec(md)) !== null) {
+  while ((m = blockRegex.exec(masked)) !== null) {
     blockPositions.push({
       prefix: m[1],
       id: parseInt(m[2], 10),

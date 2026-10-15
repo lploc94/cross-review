@@ -267,9 +267,11 @@ try {
     ...[claudeSkillsRoot, agentsSkillsRoot].flatMap(root => REMOVED_SKILLS.map(name => ({ root, name }))),
     ...['codex-review', ...SKILLS, ...REMOVED_SKILLS].map(name => ({ root: legacyCodexSkillsRoot, name })),
   ];
+  // A stale root may alias an install root (e.g. ~/.codex/skills → ~/.agents/skills); never delete what was just installed
+  const installedReal = new Set(targets.flatMap(t => t.dirs.map(dir => fs.realpathSync(path.join(t.root, dir)))));
   for (const { root, name } of stale) {
     const dir = path.join(root, name);
-    if (!fs.existsSync(dir)) continue;
+    if (!fs.existsSync(dir) || installedReal.has(fs.realpathSync(dir))) continue;
     if (!isPackInstall(dir, name)) {
       console.warn(`Warning: left ${dir} in place; it does not look like a codex-review install`);
       continue;

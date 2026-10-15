@@ -192,3 +192,26 @@ test("only review formats the pack still uses are detected", () => {
   assert.equal(crossParsed.blocks.length, 0, "CROSS blocks belonged to the removed codebase review");
   assert.equal(crossParsed.verdict.status, "REVISE");
 });
+
+test("verdict markers and blocks inside code fences are ignored", () => {
+  const quotedInVerdict = `${ISSUE_BLOCK}\n### VERDICT\n- Status: REVISE\n- Reason: once fixed, the output should read\n\`\`\`\n### VERDICT\n- Status: APPROVE\n\`\`\`\n`;
+  assert.equal(parseVerdict(quotedInVerdict).status, "REVISE");
+  assert.equal(parseOutputMarkdown(quotedInVerdict).verdict.status, "REVISE");
+
+  const quotedBefore = "```\nVERDICT: APPROVE\n```\n\n### VERDICT\n- Status: REVISE\n";
+  assert.equal(parseVerdict(quotedBefore).status, "REVISE");
+
+  const fencedOnly = "Example output:\n```\n### VERDICT\n- Status: APPROVE\n```\n";
+  assert.equal(parseVerdict(fencedOnly), null, "a verdict that only appears in a fence is no verdict");
+
+  const fencedIssue = `${ISSUE_BLOCK}\n- Evidence: the template reads\n\`\`\`\n### ISSUE-9: Example\n\`\`\`\n\n### VERDICT\n- Status: REVISE\n`;
+  assert.deepEqual(parseOutputMarkdown(fencedIssue).blocks.map(b => b.id), [1], "a quoted ISSUE heading is not a block");
+});
+
+test("an answer wrapped entirely in one fence is parsed as its content", () => {
+  const wrapped = "```markdown\n### Key Insights\n- a\n\n### Considerations\n- b\n```\n";
+  assert.equal(parseOutputMarkdown(wrapped).format, "think-about");
+  const wrappedReview = `\`\`\`markdown\n${ISSUE_BLOCK}\n### VERDICT\n- Status: REVISE\n\`\`\``;
+  assert.equal(parseOutputMarkdown(wrappedReview).verdict.status, "REVISE");
+  assert.equal(parseVerdict(wrappedReview).status, "REVISE");
+});

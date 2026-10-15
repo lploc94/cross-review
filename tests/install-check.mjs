@@ -81,9 +81,11 @@ for (const skill of PLAIN_SKILLS) {
 }
 
 // This pack's copies are gone from Codex's deprecated skills root
+const installedReal = new Set([...SKILLS.flatMap(s => [path.join(claudeRoot, s), path.join(agentsRoot, s)]), runtime]
+  .filter(p => fs.existsSync(p)).map(p => fs.realpathSync(p)));
 for (const name of ["codex-review", ...SKILLS, ...REMOVED_SKILLS]) {
   const dir = path.join(legacyRoot, name);
-  if (!fs.existsSync(dir)) continue;
+  if (!fs.existsSync(dir) || installedReal.has(fs.realpathSync(dir))) continue;
   const ours = name === "codex-review"
     ? fs.existsSync(path.join(dir, "scripts", "codex-runner.js"))
     : new RegExp(`^name:\\s*${name}\\s*$`, "m").test(fs.existsSync(path.join(dir, "SKILL.md")) ? fs.readFileSync(path.join(dir, "SKILL.md"), "utf8") : "");
