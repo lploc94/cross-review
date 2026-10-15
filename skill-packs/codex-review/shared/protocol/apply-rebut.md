@@ -8,4 +8,9 @@ Codex's verdict decides the end: `APPROVE` or stalemate gives `next: done`. Othe
 - **plan-gap**: the approved plan itself causes a bug, a performance loss, or a real risk that only showed up now. Do not redesign on your own. Present it to the user as a plan-change proposal: context, problem, options with cost, risk and reversibility, recommendation with benefit and harm, and what happens next if accepted. If the user agrees, record the change and its date in the plan; no new plan review is needed.
 - **USER DECISION**: a valid finding whose fix would materially change user-visible behavior, scope, API, schema, persistence, compatibility, dependencies, or architecture. Finish the other fixes, then ask one decision at a time in the same five-part form, and wait for the answer before changing anything for it.
 
+Fixing accepted issues, whether the fix is Codex's suggestion or your own:
+- Judge the fix against the original target, not the finding's wording. Afterwards the work must still meet the request and the approved plan: its acceptance criteria, fixed decisions, and limits. A fix that would change the target is a plan-gap or USER DECISION, not a fix.
+- Change only what the defect needs. Do not widen a contract, loosen a check, add a limit, or refactor nearby code in passing.
+- Most issues raised after the first round are bugs introduced by the previous round's fixes. Before replying, check everything each fix touches: what depends on the changed part (callers, other phases or sections), other places with the same pattern (fix the same defect there too), and the error and state paths it alters. Then rerun the affected verification.
+
 Then reply with the rebuttal placeholders, even when everything was fixed: `FIXED_ITEMS` (one line per issue: `ISSUE-N: <title> — fixed in <file>:<line>`) and `DISPUTED_ITEMS` (`ISSUE-N: <title> — <evidence>`, or `None — all issues addressed`). Codex re-verifies and may raise new issues. There is no round cap.

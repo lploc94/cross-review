@@ -40,7 +40,7 @@ Plan changes:
 2. Reuse each phase's AC evidence; check only what spans phases: invariants, ownership boundaries, exclusions.
 3. Self-audit integration over the cumulative diff and commit history: cross-phase interfaces and state boundaries.
 4. Run the plan's final review checkpoint with `{{CLIENT_SKILL}}codex-impl-review` on the cumulative diff.
-5. Fix defects from steps 3–4 with a narrow regression test first, then the affected phase gates; rerun the full suite only once the fixes are in. Ask before any material scope the audit uncovers; do not hide it in a repair commit.
+5. Fix defects from steps 3–4 with a narrow regression test first, then the affected phase gates. Each fix still meets the plan's criteria and changes only what the defect needs; check what depends on the changed code and other places with the same pattern, since fixes are the main source of new bugs; rerun the full suite only once the fixes are in. Ask before any material scope the audit uncovers; do not hide it in a repair commit.
 6. Update `Completion Criteria` in the final commit. Verify the worktree is clean apart from recorded unrelated changes.
 
 ## Stop conditions and reporting
