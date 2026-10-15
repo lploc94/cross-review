@@ -569,7 +569,7 @@ export function classify(parsed, { now = Math.floor(Date.now() / 1000), isAlive 
   };
 
   // Steps and thread share anchors: story index i ↔ message s<i>
-  const steps = story.map((x, i) => ({ ...stepLabel(x, peer), who: x.who, jump: `s${i}` }));
+  const steps = story.map((x, i) => ({ ...stepLabel(x, peer), who: x.who, jump: `s${i}`, ...(x.failed ? { tone: "stopped" } : {}) }));
   if (cls.state === "running") steps.push({ strong: `Round ${last.round}`, text: "in progress", who: "tail", tone: "running", jump: "s-live" });
   else if (cls.state === "waiting" && cls.group === "active") steps.push({ strong: null, text: "agent's turn", who: "tail", tone: "waiting", jump: null });
 
@@ -581,7 +581,7 @@ export function classify(parsed, { now = Math.floor(Date.now() / 1000), isAlive 
     const r = rounds.find(y => y.round === x.round);
     if (x.who === "rv") {
       if (x.failed) {
-        thread.push({ who: "rv", round: x.round, kind: "stopped", anchor: `s${i}`, secs: r.secs, error: stopReason(r, state), activityCount: r.items.length, hasPrompt: r.hasPrompt });
+        thread.push({ who: "rv", round: x.round, kind: "stopped", anchor: `s${i}`, secs: r.secs, failed: Boolean(r.final && r.final.status === "failed"), error: stopReason(r, state), activityCount: r.items.length, hasPrompt: r.hasPrompt });
       } else {
         thread.push({ ...reviewMessage(r, peer), anchor: `s${i}` });
       }

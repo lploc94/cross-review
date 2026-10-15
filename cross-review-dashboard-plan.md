@@ -943,3 +943,20 @@ Checkpoint: `/review-impl` (checkpoint cuối, diff cộng dồn từ trước P
   Không có công cụ GitNexus trong phiên này nên không chạy `gitnexus_impact`/`detect_changes`.
 - 2026-10-15, checkpoint sau Phase 3 (`review-impl-20261015-012`) round 1: REVISE, 4 issue, nhận sửa cả 4 kèm test hồi quy: `/api/session` phục vụ cả phiên là symlink mà danh sách bỏ qua (giờ chỉ nhận thư mục `listSessions` trả về); round thất bại chưa ai poll mất `thread_id` trong log nên bị coi là không resume được; round hoàn tất chưa ai poll thiếu phép tính hội tụ của runner (tách thành `scripts/lib/convergence.js`, runner và dashboard dùng chung); `inputValues` tách theo mọi heading viết hoa (giờ dùng tên placeholder của skill như runner, `placeholderNames` được export từ `review-core.js`). Cả suite 138/138, `dashboard-ui` ok.
   Round 2: ISSUE-1–4 được xác nhận đã sửa; ISSUE-5 (do bản sửa ISSUE-4 sinh ra): tên placeholder phải lấy từ `state.skills_dir` của phiên, cache theo thư mục và skill. Đã sửa kèm test hai phiên dùng hai thư mục prompt; cả suite 139/139.
+  Round 3: ISSUE-6, dọn profile Chrome sau test UI thỉnh thoảng lỗi `ENOTEMPTY` vì Chrome còn ghi vài file sau khi bị kill. Đã sửa bằng `rmSync` có thử lại, commit `ad642a0`, `dashboard-ui` ok 5/5 lần chạy. Round 4: APPROVE, `review_end` đã finalize.
+- 2026-10-15, Phase 4 xong. Red: `node --test tests/dashboard-markdown.test.js tests/dashboard-feed.test.js tests/dashboard-server.test.js` fail (chưa có `feed.js`, `markdown.js`; `/api/activity` 404; không có sự kiện SSE của phiên).
+  - AC-4.1: `dashboard-markdown.test.js` 4/4.
+  - AC-4.2: `dashboard-feed.test.js` 6/6 (2b, 2c); `dashboard-server.test.js` 20/20, gồm 5 test mới: phân trang activity, prompt 404, `add` theo thứ tự có `t`, `update` cùng key với exit 0/1 và `total` không tính dòng `started`, kết nối lại có `snapshot` với total mới, round kết thúc khi mất kết nối vẫn giữ round R và `/api/session` trả `waiting`, `session` khi finalize, reveal 403/404.
+  - AC-4.3: `node tests/dashboard-ui.mjs` ok 6/6 lần chạy. Ảnh 1400px của running, approved (deep link `ISSUE-2`), waiting, stopped, stalemate, think nằm trong thư mục tạm (đã xoá sau khi xem), đặt cạnh mock: bố cục, bong bóng, finding, ledger, aside, bước, đồng hồ khớp. Waiting giống mock từng chữ. Khác do dữ liệu: câu stopped là lỗi thật của round ("You've hit your usage limit…"); Model là "Codex default" vì Phase 5 mới có catalog.
+  - Phase gates: 52/52. Cả suite 154/154. Ba test legacy pass. Cài vào HOME tạm rồi `install-check` ok, UI cài có `feed.js` và `markdown.js`.
+
+  Lệch plan:
+  - **Đếm 20 dòng.** Mock gộp các lần đọc file liền nhau thành một dòng, nên 20 event có thể chỉ hiện 18 dòng. Test 3 vì vậy kiểm tổng `data-n` (số event mỗi dòng) bằng 20, thay vì đếm `#acts .act` bằng 20.
+  - **Câu đầu của round đang chạy** ("Checking the reply to ISSUE-3.") được dựng phía client từ reply gần nhất của agent.
+  - **Model thêm hai trường:** `tone: "stopped"` cho bước của round bị dừng, và `failed` cho tin nhắn round bị dừng (để in "The turn failed: …").
+  - **Fixture:** review round 2 của phiên think thêm `### Key Insights`, vì parser thật không nhận ra review quá ngắn (UI từng hiện "no verdict"). Test UI nay kiểm verdict cuối là `consensus`.
+  - **`startDashboard` nhận thêm `reveal`** để test không mở Finder thật.
+  - **Bỏ qua render khi detail không đổi:** trang không dựng lại khi detail giống lần trước. Lần tải thứ hai lúc mở trang (do `snapshot`) từng xoá hiệu ứng nhấp nháy của deep link; test UI fail 3/4 lần trước khi sửa.
+  - **Một stream mỗi lúc:** trang Sessions mở stream danh sách, trang chi tiết mở stream của phiên, Settings không mở stream nào. Rời view thì stream được đóng.
+
+  Không có công cụ GitNexus trong phiên này.

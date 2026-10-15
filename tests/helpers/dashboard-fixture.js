@@ -276,7 +276,7 @@ export function buildFixture(root, { now = Math.floor(Date.now() / 1000), livePi
     state: { ended_at: now - 3000, end_outcome: "finalized" },
     rounds: [
       { status: "completed", started: now - 5000, elapsed: 300, review: "### Position\nStart with a fixed set.\n\n### Key Insights\n- Fewer migrations.\n\n### Suggested Status\nCONTINUE\n", acts: activity(4) },
-      { status: "completed", started: now - 4000, elapsed: 200, review: "### Position\nAgreed.\n\n### Suggested Status\nCONSENSUS\n", acts: activity(2) },
+      { status: "completed", started: now - 4000, elapsed: 200, review: "### Position\nAgreed.\n\n### Key Insights\n- The import path settles it.\n\n### Suggested Status\nCONSENSUS\n", acts: activity(2) },
     ],
   });
   s.pr = writeSession(sess(inkwell), "review-pr-20261015-001", {

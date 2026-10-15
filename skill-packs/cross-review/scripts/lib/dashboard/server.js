@@ -13,7 +13,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-import { classify, readSession } from "./model.js";
+import { classify, readSession, roundActivity } from "./model.js";
 import { findWorkspaces, isWorkspace, listSessions, sessionsDir, SCAN_DEPTH, SESSION_ID_RE } from "./scan.js";
 import { discoveryFile, removeDiscoveryIfOwn, writeDiscovery } from "./discovery.js";
 
@@ -26,6 +26,7 @@ export const PORT_MAX = 30000;
 export const PORT_TRIES = 50;
 const PING_MS = 15000;
 const REQUEST_SCAN_AGE_MS = 5000;
+const ACTIVITY_PAGE = 20;
 const COOKIE = "cr_token";
 
 // The only files the server hands out; a request path is a key here or a 404
@@ -34,6 +35,8 @@ const STATIC = {
   "/app.js": ["app.js", "text/javascript; charset=utf-8"],
   "/app.css": ["app.css", "text/css; charset=utf-8"],
   "/icons.js": ["icons.js", "text/javascript; charset=utf-8"],
+  "/feed.js": ["feed.js", "text/javascript; charset=utf-8"],
+  "/markdown.js": ["markdown.js", "text/javascript; charset=utf-8"],
   "/LICENSE-lucide.txt": ["LICENSE-lucide.txt", "text/plain; charset=utf-8"],
 };
 for (const who of ["reviewer", "agent", "you"]) {
@@ -66,8 +69,8 @@ function tildePath(p) {
   return p === home ? "~" : p.startsWith(home + path.sep) ? `~${p.slice(home.length)}` : p;
 }
 
-/** Stat of every file the session's parse depends on; equal strings mean nothing changed. */
-function signature(dir) {
+/** Stat of every file the session's parse depends on, one string per file. */
+function signatureParts(dir) {
   const parts = [];
   for (const sub of ["", "inputs", "outputs", "prompts"]) {
     let names;
@@ -83,8 +86,16 @@ function signature(dir) {
       } catch {}
     }
   }
-  return parts.join("|");
+  return parts;
 }
+
+/** Equal strings mean nothing the parse reads has changed. */
+const signature = dir => signatureParts(dir).join("|");
+
+// The reviewer's event log and its line times change with every activity item; the rest
+// (state, rounds, final, meta, review, inputs, analysis) is what a `session` event is about
+const ACTIVITY_FILE = /^(\/output\.jsonl|outputs\/(?:output|times)-round-\d+\.jsonl):/;
+const sessionFiles = dir => signatureParts(dir).filter(p => !ACTIVITY_FILE.test(p)).join("|");
 
 // ---------- the live list ----------
 
@@ -233,6 +244,14 @@ export function createListWatcher({ root, now = () => Math.floor(Date.now() / 10
       const dir = path.join(sessionsDir(abs), id);
       return listSessions(abs).includes(dir) && fs.existsSync(path.join(dir, "state.json")) ? dir : null;
     },
+    /** Display name of a workspace key: its folder name, or the key when two share it. */
+    wsName(ws) {
+      const all = workspaces();
+      const abs = all.get(ws);
+      if (!abs) return ws;
+      const base = path.basename(abs);
+      return [...all.values()].filter(p => path.basename(p) === base).length > 1 ? ws : base;
+    },
     parsedFor,
     now,
     isAlive,
@@ -290,6 +309,18 @@ export function openBrowser(url) {
   } catch {}
 }
 
+/** Show a folder in the system's file manager. */
+export function revealFolder(dir) {
+  const [cmd, args] = process.platform === "darwin" ? ["open", [dir]]
+    : process.platform === "win32" ? ["explorer", [dir]]
+      : ["xdg-open", [dir]];
+  try {
+    const child = spawn(cmd, args, { stdio: "ignore", detached: true });
+    child.on("error", () => {});
+    child.unref();
+  } catch {}
+}
+
 // ---------- the 401 page ----------
 
 const DENIED_CSS = "body{margin:0;background:#f8f7f3;color:#1c1b19;font:15px/1.55 -apple-system,BlinkMacSystemFont,\"Helvetica Neue\",Helvetica,Arial,sans-serif}"
@@ -313,12 +344,12 @@ function deniedHtml() {
 
 /**
  * Start the dashboard. Options besides the documented four are for tests: pickPort,
- * discoveryFile (null: none), now, tickMs, rescanMs, isAlive.
+ * discoveryFile (null: none), now, tickMs, rescanMs, isAlive, reveal.
  */
 export async function startDashboard({
   root = process.cwd(), port = null, open = false, idleExitSeconds = null,
   pickPort = randomPort, discoveryFile: discFile = discoveryFile(), host = "127.0.0.1",
-  now, tickMs, rescanMs, isAlive,
+  now, tickMs = 1000, rescanMs, isAlive, reveal = revealFolder,
 } = {}) {
   const watcher = createListWatcher({ root, now, tickMs, rescanMs, isAlive });
   const token = crypto.randomBytes(32).toString("hex");
@@ -373,19 +404,102 @@ export async function startDashboard({
     });
   }
 
-  function stream(req, res, url) {
-    if (url.searchParams.get("view") !== "list") return fail(res, 400, "unknown view");
+  function openStream(req, res) {
     res.writeHead(200, { ...BASE_HEADERS, "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-store", Connection: "keep-alive" });
     res.write(": connected\n\n");
     const entry = { res };
     streams.add(entry);
-    const unsubscribe = watcher.subscribe(payload => res.write(`event: sessions\ndata: ${JSON.stringify(payload)}\n\n`));
     const ping = setInterval(() => res.write(": ping\n\n"), PING_MS);
+    const cleanups = [() => clearInterval(ping)];
     req.on("close", () => {
-      clearInterval(ping);
-      unsubscribe();
+      for (const fn of cleanups) fn();
       streams.delete(entry);
       if (!streams.size) idleSince = Date.now();
+    });
+    return {
+      event: (name, value) => res.write(`event: ${name}\ndata: ${JSON.stringify(value)}\n\n`),
+      onClose: fn => cleanups.push(fn),
+    };
+  }
+
+  function stream(req, res, url) {
+    const view = url.searchParams.get("view");
+    if (view === "list") {
+      const s = openStream(req, res);
+      s.onClose(watcher.subscribe(payload => s.event("sessions", payload)));
+      return;
+    }
+    if (view !== "session") return fail(res, 400, "unknown view");
+    const dir = watcher.resolve(url.searchParams.get("ws"), url.searchParams.get("id"));
+    const first = dir && watcher.parsedFor(dir);
+    if (!first) return fail(res, 404, "no such session");
+    sessionStream(openStream(req, res), dir);
+  }
+
+  /**
+   * One session, live: `snapshot {round, total}` on connect; `activity` add/update for
+   * items of the latest round, by key; `session` when its files or its state change.
+   */
+  function sessionStream(s, dir) {
+    const look = () => {
+      const parsed = watcher.parsedFor(dir);
+      if (!parsed) return null;
+      const round = parsed.rounds.length ? parsed.rounds[parsed.rounds.length - 1].round : 0;
+      const { items } = roundActivity(parsed, round) || { items: [] };
+      let status = null;
+      try {
+        const { detail } = classify(parsed, { now: watcher.now(), isAlive: watcher.isAlive });
+        status = JSON.stringify([detail.state, detail.group, detail.status, detail.warn]);
+      } catch {}
+      return { round, items, sig: `${sessionFiles(dir)}\n${status}` };
+    };
+    let cur = look();
+    let known = new Map(cur.items.map(it => [it.key, it.lastLine]));
+    s.event("snapshot", { round: cur.round, total: cur.items.length });
+    const timer = setInterval(() => {
+      const next = look();
+      if (!next) return;
+      if (next.round !== cur.round) known = new Map();
+      if (next.sig !== cur.sig || next.round !== cur.round) s.event("session", { round: next.round });
+      for (const it of next.items) {
+        const was = known.get(it.key);
+        if (was === undefined) s.event("activity", { op: "add", key: it.key, item: it, total: next.items.length });
+        else if (was !== it.lastLine) s.event("activity", { op: "update", key: it.key, item: it, total: next.items.length });
+        known.set(it.key, it.lastLine);
+      }
+      cur = next;
+    }, tickMs);
+    s.onClose(() => clearInterval(timer));
+  }
+
+  const intParam = (url, name) => {
+    const v = url.searchParams.get(name);
+    return v === null ? null : /^\d+$/.test(v) ? Number(v) : NaN;
+  };
+
+  function activityPage(res, url) {
+    const dir = watcher.resolve(url.searchParams.get("ws"), url.searchParams.get("id"));
+    const parsed = dir && watcher.parsedFor(dir);
+    if (!parsed) return fail(res, 404, "no such session");
+    const limit = intParam(url, "limit") ?? ACTIVITY_PAGE;
+    const before = intParam(url, "before");
+    const asked = intParam(url, "round");
+    if (Number.isNaN(limit) || limit < 1 || Number.isNaN(before) || Number.isNaN(asked)) return fail(res, 400, "round, before and limit must be whole numbers");
+    const round = asked ?? (parsed.rounds.length ? parsed.rounds[parsed.rounds.length - 1].round : 0);
+    const act = roundActivity(parsed, round);
+    if (!act) return fail(res, 404, "no such round");
+    const older = before === null ? act.items : act.items.filter(it => it.line < before);
+    const items = older.slice(-limit);
+    return json(res, 200, { round, items, total: act.total, hasEarlier: older.length > items.length });
+  }
+
+  function promptText(res, url) {
+    const dir = watcher.resolve(url.searchParams.get("ws"), url.searchParams.get("id"));
+    const round = intParam(url, "round");
+    if (!dir || !Number.isInteger(round) || round < 1) return fail(res, 404, "no such prompt");
+    fs.readFile(path.join(dir, "prompts", `round-${String(round).padStart(3, "0")}.txt`), "utf8", (err, text) => {
+      if (err) return fail(res, 404, "no such prompt");
+      send(res, 200, text, "text/plain; charset=utf-8", { "Cache-Control": "no-store" });
     });
   }
 
@@ -409,13 +523,19 @@ export async function startDashboard({
     const route = url.pathname;
     if (req.method === "POST") {
       if (!viaBearer && !allowedOrigins.has(String(req.headers.origin || ""))) return fail(res, 403, "cross-origin request");
+      let body;
+      try {
+        body = JSON.parse((await readBody(req)).toString("utf8"));
+      } catch {
+        return fail(res, 400, "body must be JSON");
+      }
+      if (route === "/api/reveal") {
+        const dir = body && watcher.resolve(body.ws, body.id);
+        if (!dir) return fail(res, 404, "no such session");
+        reveal(dir);
+        return json(res, 200, { ok: true });
+      }
       if (route === "/api/workspaces") {
-        let body;
-        try {
-          body = JSON.parse((await readBody(req)).toString("utf8"));
-        } catch {
-          return fail(res, 400, "body must be JSON");
-        }
         try {
           return json(res, 200, { ws: watcher.addWorkspace(body && body.path) });
         } catch (e) {
@@ -442,8 +562,12 @@ export async function startDashboard({
         const parsed = dir && watcher.parsedFor(dir);
         if (!parsed) return fail(res, 404, "no such session");
         const { detail } = classify(parsed, { now: watcher.now(), isAlive: watcher.isAlive });
-        return json(res, 200, { ...detail, ws, serverTime: watcher.now() });
+        return json(res, 200, { ...detail, ws, wsName: watcher.wsName(ws), serverTime: watcher.now() });
       }
+      case "/api/activity":
+        return activityPage(res, url);
+      case "/api/prompt":
+        return promptText(res, url);
       case "/api/stream":
         return stream(req, res, url);
       default:

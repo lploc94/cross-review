@@ -81,6 +81,101 @@ try {
   await page.evaluate(`location.hash = "#/no/such/place"`);
   await page.waitFor(`location.hash === "#/" && document.getElementById("sessions").classList.contains("on")`);
 
+  // ---------- session pages ----------
+  const open = async (key, suffix = "") => {
+    const id = path.basename(fx.sessions[key]);
+    const ws = encodeURIComponent(path.relative(root, path.dirname(path.dirname(path.dirname(fx.sessions[key])))));
+    await page.evaluate(`location.hash = "#/s/${ws}/${id}${suffix}"`);
+    await page.waitFor(`document.getElementById("detail").classList.contains("on") && document.querySelector("#d-meta > .mono")?.textContent === "${id}" && document.querySelector("#status .what")`);
+  };
+  const statusOf = () => page.evaluate(`({ cls: document.getElementById("status").className, what: document.querySelector("#status .what").textContent.trim() })`);
+
+  // Running: status, five steps ending "Round 3 in progress", both sides, the finding, 20 live events
+  await open("running");
+  await page.waitFor(`document.querySelectorAll("#acts .act").length > 0`);
+  const run = await page.evaluate(`(() => ({
+    status: document.getElementById("status").className,
+    spin: !!document.querySelector("#status .what svg"),
+    steps: [...document.querySelectorAll("#steps .s")].map(s => s.textContent.trim()),
+    you: document.querySelector("#thread .m.r.us .mark")?.title,
+    rvLeft: [...document.querySelectorAll("#thread .m")].some(m => !m.classList.contains("r") && m.querySelector(".mark.rv")),
+    finding3: !!document.querySelector('#thread .finding[data-issue="3"]'),
+    lines: document.querySelectorAll("#acts .act").length,
+    events: [...document.querySelectorAll("#acts .act")].reduce((n, a) => n + Number(a.dataset.n), 0),
+    earlier: document.getElementById("earlier").textContent,
+    count: document.getElementById("act-count").textContent,
+    ledger: document.getElementById("ledger").textContent,
+    avatars: [...document.querySelectorAll("#thread .mark img")].every(i => i.complete && i.naturalWidth > 0),
+    clock: document.querySelector("#status .next .run-clock")?.textContent,
+    inlineStyle: document.querySelectorAll("[style]").length,
+  }))()`);
+  assert.equal(run.status, "status running");
+  assert.ok(run.spin);
+  assert.equal(run.steps.length, 5);
+  assert.equal(run.steps[4], "Round 3 in progress");
+  assert.equal(run.you, "You");
+  assert.ok(run.rvLeft, "the reviewer speaks from the left");
+  assert.ok(run.finding3);
+  assert.equal(run.events, 20, "the window holds the latest 20 events");
+  assert.ok(run.lines <= 20 && run.lines > 0);
+  assert.equal(run.earlier, "show 20 earlier");
+  assert.equal(run.count, "latest 20 of 45 events");
+  assert.match(run.ledger, /checking now/);
+  assert.ok(run.avatars, "default avatars load");
+  assert.match(run.clock, /^\d+:\d\d$/);
+  assert.equal(run.inlineStyle, 0);
+  await page.screenshot(path.join(shots, "detail-running-1400.png"));
+
+  // A new event arrives live; "show 20 earlier" grows the window; a line opens its raw command
+  fs.appendFileSync(path.join(fx.sessions.running, "output.jsonl"), JSON.stringify({ type: "item.completed", item: { id: "ui_new", type: "reasoning", text: "Invented live thought." } }) + "\n");
+  await page.waitFor(`document.getElementById("act-count").textContent === "latest 20 of 46 events"`);
+  assert.match(await page.evaluate(`[...document.querySelectorAll("#acts .act")].pop().textContent`), /Invented live thought/);
+  await page.evaluate(`document.getElementById("earlier").click()`);
+  await page.waitFor(`document.getElementById("act-count").textContent === "latest 40 of 46 events"`);
+  await page.evaluate(`document.querySelector("#acts .act[data-raw]").click()`);
+  assert.equal(await page.evaluate(`document.querySelector("#acts .act[data-raw]").classList.contains("open")`), true);
+  fs.appendFileSync(path.join(fx.sessions.running, "output.jsonl"), JSON.stringify({ type: "item.completed", item: { id: "ui_new2", type: "reasoning", text: "Second live thought." } }) + "\n");
+  await page.waitFor(`document.getElementById("act-count").textContent === "latest 40 of 47 events"`);
+  assert.equal(await page.evaluate(`document.querySelector("#acts .act[data-raw]").classList.contains("open")`), true, "an open line stays open");
+
+  // A finished round: activity (N) and prompt sent open in place
+  await page.evaluate(`document.querySelector('#thread [data-past="1"]').click()`);
+  await page.waitFor(`document.querySelectorAll('#past-1 .act').length > 0`);
+  await page.evaluate(`document.querySelector('#thread [data-prompt="1"]').click()`);
+  await page.waitFor(`document.querySelector('#prompt-1')?.textContent === "Invented prompt for round 1.\\n"`);
+
+  // Approved, deep link to ISSUE-2: the finding flashes
+  await open("approved", "/ISSUE-2");
+  await page.waitFor(`document.querySelector('#thread .finding[data-issue="2"]')?.classList.contains("flash")`);
+  await page.screenshot(path.join(shots, "detail-approve-1400.png"));
+
+  // The other states read like the mock
+  const expect = {
+    approved: ["status approve", "Approved in round 3."],
+    waiting: ["status waiting", "Round 2 left one issue open. The agent has to fix or dispute it."],
+    stopped: ["status stopped", /^Stopped in round 3: /],
+    stalemate: ["status stalemate", "Stalemate on ISSUE-3. You decide."],
+    think: ["status consensus", "Consensus in round 2."],
+  };
+  for (const [key, [cls, what]] of Object.entries(expect)) {
+    await open(key);
+    const s = await statusOf();
+    assert.equal(s.cls, cls, key);
+    if (what instanceof RegExp) assert.match(s.what, what, key); else assert.equal(s.what, what, key);
+    await page.screenshot(path.join(shots, `detail-${key}-1400.png`));
+  }
+  // The peer session: the reviewer's text as written, the agent's own analysis, no ledger
+  const think = await page.evaluate(`({
+    h3: document.querySelector("#thread .bubble h3")?.textContent,
+    analysis: [...document.querySelectorAll("#thread .m.r .who")].some(w => /independent analysis/.test(w.textContent)),
+    ledger: document.getElementById("issues-box").classList.contains("on"),
+    last: [...document.querySelectorAll("#thread .who .st")].pop()?.textContent,
+  })`);
+  assert.equal(think.last, "consensus");
+  assert.equal(think.h3, "Position");
+  assert.ok(think.analysis);
+  assert.equal(think.ledger, false);
+
   // Nothing in progress: the empty state with the full-body avatars
   const empty = await browser.newPage(1400, 900);
   const emptyRoot = path.join(tmp, "empty");
@@ -96,7 +191,7 @@ try {
   }
 
   console.log(`dashboard-ui: ok (${dom.active.length} in progress, ${dom.history} in history)`);
-  console.log(`screenshot: ${path.join(shots, "sessions-1400.png")}`);
+  console.log(`screenshots: ${shots}`);
 } finally {
   await browser.close();
   await d.close();

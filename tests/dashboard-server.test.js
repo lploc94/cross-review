@@ -513,3 +513,163 @@ test("POST /api/workspaces: a workspace outside the root is followed under its a
     await d.close();
   }
 });
+
+// ---------- Phase 4: activity, prompt, reveal, session stream ----------
+
+const q = (fx, key) => `ws=harbor-app&id=${idOf(fx.sessions[key])}`;
+const lineCount = file => fs.readFileSync(file, "utf8").split("\n").length - 1;
+const appendLines = (file, lines) => fs.appendFileSync(file, lines.map(l => JSON.stringify(l)).join("\n") + "\n");
+const started = (id, command) => ({ type: "item.started", item: { id, type: "command_execution", command: `/bin/zsh -lc '${command}'`, aggregated_output: "", exit_code: null, status: "in_progress" } });
+const completed = (id, command, exit) => ({ type: "item.completed", item: { id, type: "command_execution", command: `/bin/zsh -lc '${command}'`, aggregated_output: "", exit_code: exit, status: exit === 0 ? "completed" : "failed" } });
+
+test("/api/activity: pages of 20 by `before`, hasEarlier false on the last page; unknown round and bad limit fail", async () => {
+  const { d, fx } = await serve();
+  try {
+    const p1 = await getJson(d, `/api/activity?${q(fx, "running")}&limit=20`);
+    assert.equal(p1.round, 3);
+    assert.equal(p1.total, 45);
+    assert.equal(p1.items.length, 20);
+    assert.equal(p1.hasEarlier, true);
+    for (let i = 1; i < p1.items.length; i++) assert.ok(p1.items[i - 1].line < p1.items[i].line);
+    assert.ok(p1.items.every(x => /^3:item_\d+$/.test(x.key) && typeof x.t === "number" && x.text));
+    const p2 = await getJson(d, `/api/activity?${q(fx, "running")}&round=3&before=${p1.items[0].line}&limit=20`);
+    assert.equal(p2.items.length, 20);
+    assert.equal(p2.hasEarlier, true);
+    assert.ok(p2.items[19].line < p1.items[0].line);
+    const p3 = await getJson(d, `/api/activity?${q(fx, "running")}&round=3&before=${p2.items[0].line}&limit=20`);
+    assert.equal(p3.items.length, 5);
+    assert.equal(p3.hasEarlier, false);
+    assert.equal(new Set([...p1.items, ...p2.items, ...p3.items].map(x => x.key)).size, 45);
+    const r1 = await getJson(d, `/api/activity?${q(fx, "running")}&round=1`);
+    assert.equal(r1.round, 1);
+    assert.equal(r1.total, 12);
+    assert.ok(r1.items.every(x => x.key.startsWith("1:")));
+    assert.equal((await request(d.port, `/api/activity?${q(fx, "running")}&round=9`, { headers: bearer(d) })).status, 404);
+    assert.equal((await request(d.port, `/api/activity?${q(fx, "running")}&limit=-1`, { headers: bearer(d) })).status, 400);
+    assert.equal((await request(d.port, `/api/activity?ws=harbor-app&id=review-impl-20261015-999`, { headers: bearer(d) })).status, 404);
+  } finally {
+    await d.close();
+  }
+});
+
+test("/api/prompt: the round's prompt as text; a round without one is 404", async () => {
+  const { d, fx } = await serve();
+  try {
+    const r = await request(d.port, `/api/prompt?${q(fx, "approved")}&round=2`, { headers: bearer(d) });
+    assert.equal(r.status, 200);
+    assert.equal(r.text, "Invented prompt for round 2.\n");
+    assert.match(r.headers["content-type"], /^text\/plain/);
+    assert.equal((await request(d.port, `/api/prompt?${q(fx, "approved")}&round=7`, { headers: bearer(d) })).status, 404);
+    assert.equal((await request(d.port, `/api/prompt?${q(fx, "approved")}&round=x`, { headers: bearer(d) })).status, 404);
+  } finally {
+    await d.close();
+  }
+});
+
+test("session stream: snapshot first; new items arrive as `add` in order with `t`; a command's completion is an `update` of the same key", async () => {
+  const { d, fx } = await serve({ tickMs: 100 });
+  const dir = fx.sessions.running;
+  const log = path.join(dir, "output.jsonl");
+  const times = path.join(dir, "outputs", "times-round-003.jsonl");
+  const s = sse(d.port, `/api/stream?view=session&${q(fx, "running")}`, bearer(d));
+  try {
+    const snap = await s.next(() => true);
+    assert.equal(snap.event, "snapshot");
+    assert.deepEqual(snap.json, { round: 3, total: 45 });
+
+    const base = lineCount(log);
+    const startedAt = JSON.parse(fs.readFileSync(path.join(dir, "rounds.json"), "utf8"))[2].started_at;
+    appendLines(log, [
+      { type: "item.completed", item: { id: "new_a", type: "reasoning", text: "Invented thought A." } },
+      { type: "item.completed", item: { id: "new_b", type: "reasoning", text: "Invented thought B." } },
+      { type: "item.completed", item: { id: "new_c", type: "reasoning", text: "Invented thought C." } },
+    ]);
+    fs.appendFileSync(times, `${JSON.stringify([base + 3, startedAt + 500])}\n`);
+    const adds = [];
+    for (let i = 0; i < 3; i++) adds.push(await s.next(e => e.event === "activity"));
+    assert.deepEqual(adds.map(e => [e.json.op, e.json.key]), [["add", "3:new_a"], ["add", "3:new_b"], ["add", "3:new_c"]]);
+    assert.deepEqual(adds.map(e => e.json.total), [48, 48, 48]);
+    assert.ok(adds.every(e => e.json.item.t === 500 && e.json.item.key === e.json.key));
+
+    appendLines(log, [started("cmd_ok", "node --test tests/a.test.js"), started("cmd_bad", "npm test")]);
+    const a1 = await s.next(e => e.event === "activity" && e.json.key === "3:cmd_ok");
+    const a2 = await s.next(e => e.event === "activity" && e.json.key === "3:cmd_bad");
+    assert.equal(a1.json.op, "add");
+    assert.equal(a2.json.op, "add");
+    assert.equal(a1.json.item.exitCode, null);
+    appendLines(log, [completed("cmd_ok", "node --test tests/a.test.js", 0), completed("cmd_bad", "npm test", 1)]);
+    const u1 = await s.next(e => e.event === "activity" && e.json.key === "3:cmd_ok");
+    const u2 = await s.next(e => e.event === "activity" && e.json.key === "3:cmd_bad");
+    assert.deepEqual([u1.json.op, u1.json.item.exitCode, u1.json.item.result], ["update", 0, "passed"]);
+    assert.deepEqual([u2.json.op, u2.json.item.exitCode, u2.json.item.result], ["update", 1, "failed (exit 1)"]);
+    assert.equal(u2.json.total, 50);
+
+    const page = await getJson(d, `/api/activity?${q(fx, "running")}&limit=20`);
+    assert.equal(page.total, 50);
+    assert.equal(page.items.filter(x => x.key === "3:cmd_ok" || x.key === "3:cmd_bad").length, 2);
+  } finally {
+    s.close();
+    await d.close();
+  }
+});
+
+test("session stream: reconnect gets a snapshot with the new total; a round that ended while away keeps its round and reads as waiting", async () => {
+  const { d, fx } = await serve({ tickMs: 100 });
+  const dir = fx.sessions.running;
+  const log = path.join(dir, "output.jsonl");
+  const url = `/api/stream?view=session&${q(fx, "running")}`;
+  let s = sse(d.port, url, bearer(d));
+  try {
+    assert.deepEqual((await s.next(() => true)).json, { round: 3, total: 45 });
+    s.close();
+    appendLines(log, [
+      { type: "item.completed", item: { id: "away_1", type: "reasoning", text: "Invented while away 1." } },
+      { type: "item.completed", item: { id: "away_2", type: "reasoning", text: "Invented while away 2." } },
+    ]);
+    s = sse(d.port, url, bearer(d));
+    const again = await s.next(() => true);
+    assert.equal(again.event, "snapshot");
+    assert.deepEqual(again.json, { round: 3, total: 47 });
+    s.close();
+
+    // Round 3 ends with REVISE while nobody watches; no round 4 starts
+    const { parseOutputMarkdown } = await import("../skill-packs/cross-review/scripts/lib/parse.js");
+    const r3 = "### ISSUE-3: Per-skill override ignored\n- Severity: medium\n- Location: scripts/lib/config.js:63\n- Problem: Still replaced.\n\n### VERDICT\n- Status: REVISE\n- Reason: One left.\n";
+    appendLines(log, [{ type: "item.completed", item: { id: "final_msg", type: "agent_message", text: r3 } }, { type: "turn.completed", usage: {} }]);
+    fs.writeFileSync(path.join(dir, "final.txt"), JSON.stringify({ status: "completed", round: 3, elapsed_seconds: 130, thread_id: `thread-${idOf(dir)}`, review: parseOutputMarkdown(r3, "review-impl"), activities: [], convergence: { stalemate: false } }));
+    s = sse(d.port, url, bearer(d));
+    const back = await s.next(() => true);
+    assert.equal(back.event, "snapshot");
+    assert.equal(back.json.round, 3);
+    const detail = await getJson(d, `/api/session?${q(fx, "running")}`);
+    assert.equal(detail.state, "waiting");
+    assert.equal(detail.wsName, "harbor-app");
+
+    // While connected, finalizing the session is a `session` event
+    fs.writeFileSync(path.join(dir, "meta.json"), JSON.stringify({ skill: "review-impl", verdict: "REVISE", rounds: 3 }));
+    await s.next(e => e.event === "session", 3000);
+  } finally {
+    s.close();
+    await d.close();
+  }
+});
+
+test("session stream: unknown session is 404; POST /api/reveal needs a matching Origin and opens only the session's folder", async () => {
+  const opened = [];
+  const { d, fx } = await serve({ reveal: dir => opened.push(dir) });
+  try {
+    assert.equal((await request(d.port, "/api/stream?view=session&ws=harbor-app&id=review-impl-20261015-999", { headers: bearer(d) })).status, 404);
+    const cookie = { Cookie: `cr_token=${d.token}`, "Content-Type": "application/json" };
+    const body = { ws: "harbor-app", id: idOf(fx.sessions.waiting) };
+    assert.equal((await request(d.port, "/api/reveal", { method: "POST", headers: cookie, body })).status, 403);
+    assert.equal((await request(d.port, "/api/reveal", { method: "POST", headers: { ...cookie, Origin: "http://evil.example" }, body })).status, 403);
+    assert.deepEqual(opened, []);
+    const origin = { ...cookie, Origin: `http://127.0.0.1:${d.port}` };
+    assert.equal((await request(d.port, "/api/reveal", { method: "POST", headers: origin, body: { ws: "harbor-app", id: "review-impl-20261015-999" } })).status, 404);
+    const ok = await request(d.port, "/api/reveal", { method: "POST", headers: origin, body });
+    assert.equal(ok.status, 200, ok.text);
+    assert.deepEqual(opened, [fx.sessions.waiting]);
+  } finally {
+    await d.close();
+  }
+});

@@ -153,3 +153,23 @@ th.w-for { width: 90px; }
 .top .where { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* short columns stay on one line, as in the mock */
 .nw { white-space: nowrap; }
+
+/* session page: the mock's inline colours as classes */
+.status.consensus { --c: var(--green); }
+.steps .s.running, .steps .s.running b { color: var(--blue); }
+.steps .s.stopped, .steps .s.stopped b { color: var(--red); }
+.steps .s.waiting { color: var(--amber); }
+.trail b { font-weight: 600; }
+.act .think { color: var(--soft); }
+.act .bad { color: var(--red); }
+#issues-box { display: none; } #issues-box.on { display: block; }
+.bubble h3 { font: 600 14px var(--sans); margin: 10px 0 4px; } .bubble h3:first-child { margin-top: 0; }
+.bubble p { margin: 0 0 6px; } .bubble p:last-child { margin-bottom: 0; }
+.bubble ul, .bubble ol { margin: 4px 0 6px; padding-left: 20px; }
+.bubble pre { margin: 6px 0; }
+.bubble pre code { background: none; padding: 0; }
+.reply-sec .k { display: block; font-weight: 600; }
+.reply-sec + .reply-sec { margin-top: 6px; }
+.past { margin-top: 6px; }
+.past pre { white-space: pre-wrap; max-height: 420px; }
+.notfound { color: var(--muted); margin-top: 20px; }
