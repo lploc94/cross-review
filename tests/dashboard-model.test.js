@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { buildFixture, writeSession } from "./helpers/dashboard-fixture.js";
 import { classify, readSession, parseAgentReply, inputValues, TEXT, LABELS } from "../skill-packs/cross-review/scripts/lib/dashboard/model.js";
@@ -329,4 +330,22 @@ test("inputValues splits only on the skill's placeholders; other uppercase headi
   const reply = inputValues("## FIXED_ITEMS\nISSUE-1: fixed.\n\n## NOTES\nkept\n\n## DISPUTED_ITEMS\nNone\n", "review-plan");
   assert.match(reply.FIXED_ITEMS, /## NOTES\nkept/);
   assert.equal(reply.DISPUTED_ITEMS, "None");
+});
+
+test("each session's inputs split on the placeholders of its own prompts directory (state.skills_dir)", () => {
+  const now = 1_800_000_000;
+  const custom = path.join(tmp, "custom-skills");
+  fs.mkdirSync(path.join(custom, "review-impl", "references"), { recursive: true });
+  const original = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "../skill-packs/cross-review/skills/review-impl/references/prompts.md"), "utf8");
+  fs.writeFileSync(path.join(custom, "review-impl", "references", "prompts.md"), original + "\nInvented custom context: {API}\n");
+  const raw = "## USER_REQUEST\nInvented request.\n\n## API\nInvented separate parameter.\n\n## SESSION_CONTEXT\nInvented context.\n";
+  const approve = "### VERDICT\n- Status: APPROVE\n- Reason: Invented approval.\n";
+  const sess = path.join(tmp, "two-dirs", ".cross-review", "sessions");
+  const ask = (id, state) => {
+    const dir = writeSession(sess, id, { skill: "review-impl", created: now, state, inputs: [raw], meta: "APPROVE", rounds: [{ status: "completed", started: now, elapsed: 1, review: approve }] });
+    return classify(readSession(dir), { now: now + 10 }).detail.thread.find(x => x.kind === "ask").md;
+  };
+  assert.equal(ask("review-impl-20261015-095", { skills_dir: custom }), "Invented request.");
+  assert.equal(ask("review-impl-20261015-096", {}), "Invented request.\n\n## API\nInvented separate parameter.");
+  assert.equal(inputValues(raw, "review-impl", custom).API, "Invented separate parameter.");
 });

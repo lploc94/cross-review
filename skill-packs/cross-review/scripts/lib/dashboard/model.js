@@ -64,27 +64,30 @@ function completeLines(text) {
   return lines;
 }
 
-const namesBySkill = new Map();
-/** The skill's placeholder names, as the runner reads them; null when its prompts are missing. */
-function skillNames(skill) {
-  if (!namesBySkill.has(skill)) {
+const namesByDir = new Map();
+/** Placeholder names in <skillsDir>/<skill>/references/prompts.md, as the runner reads them; null when missing. */
+function skillNames(skill, skillsDir) {
+  const dir = skillsDir || defaultSkillsDir(skill);
+  const key = `${dir}\0${skill}`;
+  if (!namesByDir.has(key)) {
     let names = null;
     try {
-      names = placeholderNames(defaultSkillsDir(skill), skill);
+      names = placeholderNames(dir, skill);
     } catch {}
-    namesBySkill.set(skill, names);
+    namesByDir.set(key, names);
   }
-  return namesBySkill.get(skill);
+  return namesByDir.get(key);
 }
 
 /**
  * Placeholder values of a stored round input, split the way the runner split it: only the
- * skill's own placeholders start a section, so other `## HEADINGS` stay inside the value.
- * Without the skill's prompts, every `## NAME` and `NAME:` counts.
+ * placeholders of the session's prompts (state.skills_dir, else the default) start a
+ * section, so other `## HEADINGS` stay inside the value. Without the prompts, every
+ * `## NAME` and `NAME:` counts.
  */
-export function inputValues(text, skill) {
+export function inputValues(text, skill, skillsDir = null) {
   if (!text) return {};
-  let names = skill ? skillNames(skill) : null;
+  let names = skill ? skillNames(skill, skillsDir) : null;
   if (!names) {
     names = new Set();
     for (const m of text.matchAll(/^##[ \t]+([A-Z][A-Z_0-9]+)[ \t]*$/gm)) names.add(m[1]);
@@ -257,7 +260,7 @@ function issueInfo(b) {
 function replyFor(parsed, round) {
   const next = parsed.rounds[round]; // round r's reply is input r+1
   if (!next || !next.input) return null;
-  const values = inputValues(next.input, parsed.skill);
+  const values = inputValues(next.input, parsed.skill, parsed.state.skills_dir);
   if (parsed.peer) {
     const sections = [
       ["Agreed", values.AGREED_POINTS],
@@ -463,7 +466,7 @@ function statusSentences(cls, ctx) {
 function titleOf(parsed) {
   const first = parsed.rounds[0] && parsed.rounds[0].input;
   if (!first) return parsed.id;
-  const v = inputValues(first, parsed.skill);
+  const v = inputValues(first, parsed.skill, parsed.state.skills_dir);
   let t = null;
   if (parsed.skill === "review-plan") t = v.PLAN_PATH ? path.basename(v.PLAN_PATH) : null;
   else if (parsed.skill === "review-think") t = v.QUESTION || null;
@@ -478,7 +481,7 @@ function titleOf(parsed) {
 }
 
 function metaLine(parsed) {
-  const v = inputValues(parsed.rounds[0] && parsed.rounds[0].input, parsed.skill);
+  const v = inputValues(parsed.rounds[0] && parsed.rounds[0].input, parsed.skill, parsed.state.skills_dir);
   const mode = parsed.state.mode;
   if (parsed.skill === "review-impl") {
     if (mode === "branch") return { text: `${parsed.skill}, branch since`, code: v.BASE_BRANCH || null };
@@ -571,7 +574,7 @@ export function classify(parsed, { now = Math.floor(Date.now() / 1000), isAlive 
   else if (cls.state === "waiting" && cls.group === "active") steps.push({ strong: null, text: "agent's turn", who: "tail", tone: "waiting", jump: null });
 
   const thread = [];
-  const v1 = inputValues(parsed.rounds[0] && parsed.rounds[0].input, parsed.skill);
+  const v1 = inputValues(parsed.rounds[0] && parsed.rounds[0].input, parsed.skill, parsed.state.skills_dir);
   const ask = parsed.skill === "review-think" ? v1.QUESTION : v1.USER_REQUEST;
   if (ask && ask.trim()) thread.push({ who: "us", kind: "ask", md: ask.trim() });
   story.forEach((x, i) => {
