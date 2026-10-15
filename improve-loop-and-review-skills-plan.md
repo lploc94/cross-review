@@ -380,6 +380,16 @@ Phase 2.
 - Khả thi thì ghi thiết kế tối thiểu vào Progress Log, và hỏi user trước khi làm. Đây là phạm vi mới.
 - Không khả thi thì ghi lý do và hoãn.
 
+### Feasibility evidence
+Đo và tra ngày 2026-10-15.
+
+| Điều cần biết | Kết quả | Nguồn |
+|---|---|---|
+| SDK MCP chính thức cho Node | `@modelcontextprotocol/sdk` 1.32.1 (latest), Node ≥ 18, peer `zod` ^3.25 \|\| ^4.0. Pin 1.32.1 + `zod` 4.6.7. API `McpServer.registerTool` + `StdioServerTransport`; client `Client` + `StdioClientTransport`. | `npm view @modelcontextprotocol/sdk`; docs SDK v1.x `docs/server.md` (context7 `/modelcontextprotocol/typescript-sdk`) |
+| Timeout một tool call | Claude Code: mặc định khoảng 28 giờ (`MCP_TOOL_TIMEOUT`, hoặc trường `timeout` theo server). Codex: `tool_timeout_sec` mặc định 60 giây, `startup_timeout_sec` mặc định 10 giây. Nên `review_wait` lấy mặc định từ env `REVIEW_WAIT_DEFAULT_S` do installer đặt theo client: Codex 50, Claude Code 300; không có env thì 50. | https://code.claude.com/docs/en/mcp ; https://learn.chatgpt.com/docs/extend/mcp?surface=cli |
+| Tiến trình detached sống sót khi server thoát | Có. Test `tests/mcp-server.test.js` SIGKILL server khi Codex giả đang chạy; server mới gọi `review_wait` cùng `session_dir` nhận `completed`/`done`. | đo bằng test |
+| Đăng ký server phạm vi user | Claude Code: `claude mcp add -s user <name> [-e K=V] -- <cmd> <args>`, ghi `$HOME/.claude.json`. Lần thêm thứ hai báo "already exists", nên installer phải `claude mcp remove -s user <name>` trước. Codex: `codex mcp add <name> [--env K=V] -- <cmd> <args>`, ghi `$CODEX_HOME/config.toml` (mặc định `~/.codex`). `CODEX_HOME` phải đã tồn tại; thêm lần hai thì ghi đè, không nhân bản. | đo với HOME/CODEX_HOME tạm; `~/.claude.json` thật không đổi |
+
 ### Documentation
 README: cách dùng MCP và fallback. Viết ở Phase 7.
 
@@ -819,3 +829,7 @@ Checkpoint cuối: `/codex-impl-review` trên diff cộng dồn từ `51d4351`.
 - 2026-10-15 Checkpoint sau Phase 2: `/codex-impl-review` (branch, base `51371a3`, effort high), chạy bằng chính `begin/wait/reply/end` mới, session `codex-impl-review-20261015-001`. APPROVE sau 2 vòng.
   - Vòng 1: 4 issue, đều ACCEPT và đã sửa ở `c923f13`: `wait` mất activities, input CRLF, block ISSUE nuốt `## VERDICT`, `skillsDir` tương đối. Mỗi issue có test hồi quy; cả 4 test đỏ trên code cũ.
   - Codex nhận định việc lõi gọi runner qua tiến trình con là "acceptable adaptation".
+- 2026-10-15 Phase 3 xong. `tests/mcp-server.test.js` 5/5 pass: 4 tool, begin → wait → end, `isError`, server bị kill vẫn tiếp tục được, mặc định wait lấy từ env. Thiếu SDK thì file test fail kèm hướng dẫn `npm ci`, không skip. `npm ci --prefix skill-packs/codex-review` chạy được từ lock.
+  - Codex giả được tách ra `tests/helpers/fake-codex.js`, dùng chung cho hai bộ test.
+  - AC-3.3: `claude -p --mcp-config <file tạm> --strict-mcp-config` (không đăng ký vào config thật) gọi `review_begin → review_wait → review_end` trên repo tạm. Kết quả `completed`, `next: done`, APPROVE; `meta.json` có verdict APPROVE, runner v14.
+  - Spike Claude làm reviewer: khả thi. `claude -p` trả `session_id`; `--resume <id>` giữ được ngữ cảnh giữa các vòng. Read-only chỉ đảm bảo khi mọi lần gọi, kể cả resume, đều truyền giới hạn tool (`--allowedTools Read,Grep,Glob,...` và `--disallowedTools Edit,Write,NotebookEdit`). Lần resume không có giới hạn đã tạo được file. Thiết kế tối thiểu nếu làm: runner thêm backend `claude` ở `launchCodex`, luôn kèm hai cờ đó, và lấy `session_id` thay cho `thread_id`. Đây là phạm vi mới, chờ user quyết; chưa làm.

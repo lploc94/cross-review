@@ -15,6 +15,7 @@ import {
   replySession,
   waitSession,
 } from "../skill-packs/codex-review/scripts/lib/review-core.js";
+import { writeFakeCodex } from "./helpers/fake-codex.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const RUNNER = path.join(ROOT, "skill-packs/codex-review/scripts/codex-runner.js");
@@ -24,30 +25,6 @@ let tmp;
 let workDir;
 let logPath;
 let outputPath;
-
-function writeFakeCodex(binDir) {
-  const fake = path.join(binDir, "codex");
-  fs.writeFileSync(fake, `#!/usr/bin/env node
-const fs = require("node:fs");
-let prompt = "";
-try { prompt = fs.readFileSync(0, "utf8"); } catch {}
-fs.appendFileSync(process.env.FAKE_CODEX_LOG, JSON.stringify({ args: process.argv.slice(2), prompt }) + "\\n");
-const text = fs.readFileSync(process.env.FAKE_CODEX_OUTPUT, "utf8");
-const slowMs = parseInt(process.env.FAKE_CODEX_SLOW_MS || "0", 10);
-if (slowMs > 0) {
-  fs.writeSync(1, JSON.stringify({ type: "thread.started", thread_id: "thread-fake-1" }) + "\\n");
-  fs.writeSync(1, JSON.stringify({ type: "item.completed", item: { type: "reasoning", text: "reading source.js" } }) + "\\n");
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, slowMs);
-}
-const out = [
-  { type: "thread.started", thread_id: "thread-fake-1" },
-  { type: "turn.started" },
-  { type: "item.completed", item: { type: "agent_message", text } },
-  { type: "turn.completed" },
-];
-process.stdout.write(out.map(e => JSON.stringify(e)).join("\\n") + "\\n");
-`, { mode: 0o755 });
-}
 
 before(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), "review-core-test-"));
