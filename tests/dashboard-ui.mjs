@@ -338,6 +338,36 @@ try {
   for (let i = 0; i < 50 && !fs.existsSync(inkFile); i++) await new Promise(r => setTimeout(r, 100));
   assert.deepEqual(JSON.parse(fs.readFileSync(inkFile, "utf8")), { open_dashboard: false });
 
+  // Settings loads that answer out of order: the older load is dropped, the newer page and
+  // its edits stay
+  await page.evaluate(`location.hash = "#/settings"`);
+  await page.waitFor(`document.getElementById("save").textContent === "Save global"`);
+  await page.evaluate(`(() => {
+    const native = window.fetch;
+    window.fetch = async (...args) => {
+      const res = await native(...args);
+      if (args[0] === "/api/settings" && !args[1] && !window.held3) {
+        window.held3 = true;
+        await new Promise(r => { window.releaseLoad = r; });
+      }
+      return res;
+    };
+    location.hash = "#/settings/harbor-app";
+  })()`);
+  await page.waitFor(`typeof window.releaseLoad === "function"`);
+  await page.evaluate(`location.hash = "#/settings/inkwell"`);
+  await page.waitFor(`document.getElementById("save").textContent === "Save for inkwell"`);
+  await page.evaluate(`(() => { const e = document.getElementById("f-effort-set"); e.value = "low"; e.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+  await page.evaluate(`(async () => { window.releaseLoad(); await new Promise(r => setTimeout(r, 300)); })()`);
+  assert.equal(await page.evaluate(`document.getElementById("save").textContent`), "Save for inkwell");
+  assert.match(await page.evaluate(`document.getElementById("preview").textContent`), /"effort": "low"/);
+  // ... and a load that answers after the user left Settings does not pull them back
+  await page.evaluate(`(() => { window.held3 = false; window.releaseLoad = null; location.hash = "#/settings/no-such-workspace"; })()`);
+  await page.waitFor(`typeof window.releaseLoad === "function"`);
+  await page.evaluate(`location.hash = "#/"`);
+  await page.evaluate(`(async () => { window.releaseLoad(); await new Promise(r => setTimeout(r, 300)); })()`);
+  assert.equal(await page.evaluate(`location.hash`), "#/");
+
   // An uploaded avatar replaces the default picture in the session thread
   await page.evaluate(`location.hash = "#/settings"`);
   await page.waitFor(`document.getElementById("avatars-block").classList.contains("on") && document.querySelector('#avatars input[data-av="you"]')`);

@@ -629,6 +629,7 @@ let avatars = { keys: [], parties: [] };
 let avatarStamp = Date.now();
 const sv = { scope: "global", ws: null, draft: {}, touched: new Set(), refreshed: false };
 let pendingSave = null; // a POST /api/settings in flight: the page reloads settings after it
+let settingsLoad = 0; // counts openSettings calls; only the latest one applies its answer
 
 const ALL_PATHS = ["reviewer", "model", "effort", "open_dashboard", ...SKILLS.flatMap(s => [`skills.${s}.model`, `skills.${s}.effort`])];
 const clone = x => JSON.parse(JSON.stringify(x || {}));
@@ -659,8 +660,11 @@ function setPath(obj, p, value) {
 const optionsHtml = opts => opts.map(o => `<option value="${esc(o.value)}"${o.selected ? " selected" : ""}>${esc(o.label)}</option>`).join("");
 
 async function openSettings(r) {
+  const load = ++settingsLoad;
   if (pendingSave) await pendingSave.catch(() => null);
   const [s, a] = await Promise.all([getJson("/api/settings"), getJson("/api/avatars")]);
+  // a newer Settings page was opened meanwhile, or the user left Settings
+  if (load !== settingsLoad || parseRoute(location.hash)?.view !== "settings") return;
   if (!s) {
     $("#settings-error").textContent = "The settings could not be loaded.";
     return;
