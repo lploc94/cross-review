@@ -31,8 +31,8 @@ Gate discipline:
 - An AC that is not fully met is reported `not done` with the reason, never as done.
 
 Plan changes:
-- Do not add technology, dependencies, limits, or mechanisms the plan does not contain.
-- When implementation exposes a real problem in the plan, propose a change as one decision: context, the problem with a concrete example, options (what changes, cost, risk, reversible or not), your recommendation with evidence, its benefit, harm and impact, and what happens next if agreed. If the user agrees, record it in the plan with the date; do not rerun plan review.
+- Do not add technology, dependencies, limits, or mechanisms the plan does not contain on your own.
+- When implementation exposes a real problem in the plan, or an option outside it (yours or a reviewer's) that holds up on its merits, propose a change as one decision. Judge such an option on its merits, not by the plan's silence; drop it only with evidence that it is unsound. The decision gives: context, the problem with a concrete example, options (what changes, cost, risk, reversible or not), your recommendation with evidence, its benefit, harm and impact, and what happens next if agreed. If the user agrees, record it in the plan with the date; do not rerun plan review.
 
 ## Finalization
 

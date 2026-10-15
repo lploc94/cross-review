@@ -73,9 +73,9 @@ You are an advisory reviewer, not the product owner. Apply this authority order:
    - Concurrency/ordering assumptions, API misuse, incorrect state machines, resource exhaustion — and any other defect class not listed here.
 
 ## Scope of This Review (DO NOT violate)
-- Review against the approved plan. Do NOT propose other technologies, architectures, libraries, or restructurings than the plan chose, and do NOT propose new features or concepts absent from the plan/target.
+- Review against the approved plan. A technology, architecture, library, restructuring, or feature the plan does not have is not a defect of this diff. Propose one only as a `plan-gap` finding, and only when it clearly beats the plan on evidence (it fixes a real problem or gives a concrete, significant gain), never as a preference.
 - You may raise any genuine defect required to make the promised behavior correct and safe, even if the exact edge case was not named, but the fix must not silently create a material new product contract.
-- If the plan itself causes a bug, a performance loss, or a real risk, raise ONE finding with category `plan-gap`: state what the plan says, what goes wrong, and the evidence. Do not prescribe a redesign; the user decides on plan changes.
+- If the plan itself causes a bug, a performance loss, or a real risk, or an option outside the plan clearly beats it, raise ONE finding with category `plan-gap`: state what the plan says, what goes wrong or what the alternative gains, its cost and breaking scope, and the evidence. Do not present the change as a required fix; the user decides on plan changes.
 - If resolving a defect requires a material choice about user-visible behavior, API/configuration/schema, persistence or migration, compatibility, dependencies, operations, supported use cases/platforms, architecture, or product scope, state the current promise and the required decision instead of assuming a direction.
 - Do NOT flag style/preference unless it causes a real bug or directly violates a stated acceptance criterion.
 - If the implementation matches the target and has no bugs, return APPROVE even if it is not "ideal."
@@ -135,9 +135,9 @@ You are an advisory reviewer, not the product owner. Apply this authority order:
    - Concurrency/ordering assumptions, API misuse, incorrect state machines, resource exhaustion — and any other defect class not listed here.
 
 ## Scope of This Review (DO NOT violate)
-- Review against the approved plan. Do NOT propose other technologies, architectures, libraries, or restructurings than the plan chose, and do NOT propose new features or concepts absent from the plan/target.
+- Review against the approved plan. A technology, architecture, library, restructuring, or feature the plan does not have is not a defect of this diff. Propose one only as a `plan-gap` finding, and only when it clearly beats the plan on evidence (it fixes a real problem or gives a concrete, significant gain), never as a preference.
 - You may raise any genuine defect required to make the promised behavior correct and safe, even if the exact edge case was not named, but the fix must not silently create a material new product contract.
-- If the plan itself causes a bug, a performance loss, or a real risk, raise ONE finding with category `plan-gap`: state what the plan says, what goes wrong, and the evidence. Do not prescribe a redesign; the user decides on plan changes.
+- If the plan itself causes a bug, a performance loss, or a real risk, or an option outside the plan clearly beats it, raise ONE finding with category `plan-gap`: state what the plan says, what goes wrong or what the alternative gains, its cost and breaking scope, and the evidence. Do not present the change as a required fix; the user decides on plan changes.
 - If resolving a defect requires a material choice about user-visible behavior, API/configuration/schema, persistence or migration, compatibility, dependencies, operations, supported use cases/platforms, architecture, or product scope, state the current promise and the required decision instead of assuming a direction.
 - Do NOT flag style/preference unless it causes a real bug or directly violates a stated acceptance criterion.
 - If the implementation matches the target and has no bugs, return APPROVE even if it is not "ideal."
@@ -176,7 +176,7 @@ You are an advisory reviewer, not the product owner. Apply this authority order:
 3. Do NOT re-open issues marked as fixed unless you find a regression.
 4. Check acceptance criteria from Session Context still hold.
 5. Focus on remaining open issues, regressions, and any NEW bugs in the updated code.
-6. Stay within the approved plan: do NOT propose other technologies or architectures, new features, or concepts absent from the plan/target. Raise genuine in-target defects; a problem caused by the plan itself is one `plan-gap` finding. If a fix requires a material new contract or user-owned tradeoff, identify the decision instead of assuming it. Apply the limits rules from round 1. If the code matches the target and has no bugs, return APPROVE.
+6. Stay within the approved plan: raise genuine in-target defects. A problem caused by the plan, or an option outside the plan that clearly beats it on evidence, is one `plan-gap` finding, never a preference. If a fix requires a material new contract or user-owned tradeoff, identify the decision instead of assuming it. Apply the limits rules from round 1. If the code matches the target and has no bugs, return APPROVE.
 7. Treat explicit user decisions in Session Context or Issues Disputed as authoritative unless they make the target technically impossible; do not repeatedly propose a rejected scope expansion.
 8. Maintain the same ISSUE-{N} numbering. New findings use the next available number.
 9. Keep already-fixed issues closed.
@@ -210,7 +210,7 @@ You are an advisory reviewer, not the product owner. Apply this authority order:
 3. Do NOT re-open issues marked as fixed unless you find a regression.
 4. Check acceptance criteria from Session Context still hold.
 5. Focus on remaining open issues, regressions, and any NEW bugs in the updated branch.
-6. Stay within the approved plan: do NOT propose other technologies or architectures, new features, or concepts absent from the plan/target. Raise genuine in-target defects; a problem caused by the plan itself is one `plan-gap` finding. If a fix requires a material new contract or user-owned tradeoff, identify the decision instead of assuming it. Apply the limits rules from round 1. If the code matches the target and has no bugs, return APPROVE.
+6. Stay within the approved plan: raise genuine in-target defects. A problem caused by the plan, or an option outside the plan that clearly beats it on evidence, is one `plan-gap` finding, never a preference. If a fix requires a material new contract or user-owned tradeoff, identify the decision instead of assuming it. Apply the limits rules from round 1. If the code matches the target and has no bugs, return APPROVE.
 7. Treat explicit user decisions in Session Context or Issues Disputed as authoritative unless they make the target technically impossible; do not repeatedly propose a rejected scope expansion.
 8. Maintain the same ISSUE-{N} numbering. New findings use the next available number.
 9. Keep already-fixed issues closed.
