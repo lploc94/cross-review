@@ -14,7 +14,7 @@ Use this exact shape (copy the entire block below as `{OUTPUT_FORMAT}`):
 - Problem: {clear statement}
 - Evidence: {quote or reference from plan that shows the issue}
 - Why it matters: {impact}
-- Suggested fix: {plan-level change}
+- Suggested fix: {one plan-level fix, or a few genuinely different options each with its tradeoff; advisory — the author may pick one or fix it another way}
 
 ### VERDICT
 - Status: APPROVE | REVISE

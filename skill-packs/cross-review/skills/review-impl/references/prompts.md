@@ -164,7 +164,7 @@ You are an advisory reviewer, not the product owner. Apply this authority order:
 
 ## Instructions
 1. Re-read the current diff — do NOT rely on memory of previous state.
-2. Verify that fixed issues are actually resolved in the updated code.
+2. Verify that fixed issues are actually resolved in the updated code. Judge whether the problem is gone, not whether your suggested fix was used; a different fix that solves it is fine.
 3. Do NOT re-open issues marked as fixed unless you find a regression.
 4. Check acceptance criteria from Session Context still hold.
 5. Focus on remaining open issues, regressions, and any NEW bugs in the updated code.
@@ -198,7 +198,7 @@ You are an advisory reviewer, not the product owner. Apply this authority order:
 
 ## Instructions
 1. Re-read the branch diff against {BASE_BRANCH} — do NOT rely on memory of previous state.
-2. Verify that fixed issues are actually resolved in the committed code.
+2. Verify that fixed issues are actually resolved in the committed code. Judge whether the problem is gone, not whether your suggested fix was used; a different fix that solves it is fine.
 3. Do NOT re-open issues marked as fixed unless you find a regression.
 4. Check acceptance criteria from Session Context still hold.
 5. Focus on remaining open issues, regressions, and any NEW bugs in the updated branch.

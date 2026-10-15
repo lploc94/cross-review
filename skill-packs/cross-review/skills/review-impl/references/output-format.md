@@ -14,7 +14,7 @@ Use this exact shape (copy the entire block below as `{OUTPUT_FORMAT}`):
 - Problem: {clear statement}
 - Evidence: {code snippet or diff excerpt showing the issue}
 - Why it matters: {impact on the target, correctness, security, or runtime stability}
-- Suggested fix: {concrete code change}
+- Suggested fix: {one code fix, or a few genuinely different options each with its tradeoff; advisory — the author may pick one or fix it another way}
 
 ### VERDICT
 - Status: APPROVE | REVISE
