@@ -1,11 +1,13 @@
 ---
 name: loop-plan
-description: Create an execution-ready, code-grounded phased implementation plan before coding. Use when a request needs discovery, explicit acceptance criteria, tests, and resumable phase boundaries.
+description: Create an execution-ready, code-grounded phased implementation plan before coding. Only for large work - several features, many files or components, or work spanning sessions that needs resumable phase boundaries. Not for small fixes or single-feature changes; do those directly.
 ---
 
 # Loop Plan
 
 Create a plan that another session can execute without guessing requirements. This skill plans only; it does not implement application code. Spikes live only under `.codex-review/spikes/<plan-name>/`.
+
+Use it for large work: several features, many files or components, or work that spans sessions. For a small fix or a single-feature change, a phased plan and its reviews cost more time than they save: tell the user, and suggest doing it directly with tests (and `{{CLIENT_SKILL}}codex-impl-review` if they want a review). Plan it only if the user still asks.
 
 ## Discovery and intent
 

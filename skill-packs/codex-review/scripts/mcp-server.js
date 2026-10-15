@@ -50,11 +50,16 @@ function tool(handler) {
 
 const INPUT_HELP = "Markdown with the skill's placeholder values: optional front-matter of `NAME: value` lines between `---` lines, then one `## NAME` section per multi-line value (e.g. `## USER_REQUEST`).";
 
+// The tools never edit the project: they keep session state under .codex-review/ and run a
+// reviewer told not to modify project files. Claude Code plan mode refuses MCP tools without this hint.
+const ANNOTATIONS = { readOnlyHint: true };
+
 function createServer() {
   const server = new McpServer({ name: "codex-review", version: "14.0.0" });
 
   server.registerTool("review_begin", {
     title: "Begin a Codex review",
+    annotations: ANNOTATIONS,
     description: "Start a review session: render round 1 for the skill and launch Codex in the background. Returns session_dir; peer skills (think-about, commit-review, pr-review) also return analysis_prompt for the orchestrator's independent analysis.",
     inputSchema: {
       skill: z.enum(SKILLS),
@@ -77,6 +82,7 @@ function createServer() {
 
   server.registerTool("review_wait", {
     title: "Wait for the current review round",
+    annotations: ANNOTATIONS,
     description: `Wait up to max_wait_seconds (default ${DEFAULT_WAIT_S}) for Codex. Returns the round status, parsed review, activities, and next: running (call again), respond (reply), cross_check (peer skills: compare with your analysis, then reply or end with an outcome), done (end), ask_user, or stopped.`,
     inputSchema: {
       session_dir: z.string(),
@@ -86,6 +92,7 @@ function createServer() {
 
   server.registerTool("review_reply", {
     title: "Send the next review round",
+    annotations: ANNOTATIONS,
     description: "Render the skill's next-round template from the input and resume the Codex thread. Model and effort default to the session's stored values.",
     inputSchema: {
       session_dir: z.string(),
@@ -97,6 +104,7 @@ function createServer() {
 
   server.registerTool("review_end", {
     title: "End a review session",
+    annotations: ANNOTATIONS,
     description: "Finalize (on a normal end) and stop the session. Peer skills pass outcome consensus or stalemate when their exit rule is met; otherwise the session is only stopped.",
     inputSchema: {
       session_dir: z.string(),
