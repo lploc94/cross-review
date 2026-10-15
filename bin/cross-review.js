@@ -383,24 +383,16 @@ try {
     const guidanceBlock = [
       START_MARKER,
       '',
-      '## Cross Review — Auto-review Guidance',
+      '## Cross Review — automatic reviews',
       '',
-      'When the user is working on code changes, **proactively suggest** the appropriate review skill based on context:',
+      'Run these review skills yourself; do not ask first. They apply to every plan and implementation, not only those of the loop-plan and loop-implement skills:',
+      '- After you finish writing a plan (a plan file, plan mode, or a design doc you were asked to write): use the `review-plan` skill on it before presenting it as final or starting to code.',
+      '- After you finish implementing a change and its tests pass, before you report it done or commit: use the `review-impl` skill on the uncommitted changes (or the branch diff).',
       '',
-      '| Context | Suggested Skill | Trigger | Note |',
-      '|---------|----------------|---------|------|',
-      '| Multi-step feature or change that needs a plan | `/loop-plan` | Before coding | |',
-      '| Approved loop plan with incomplete phases | `/loop-implement` | After the plan is approved | |',
-      '| Uncommitted changes (staged/unstaged) | `/review-impl` | Before committing | |',
-      '| Feature branch with commits | `/review-pr` | Before creating/merging PR | |',
-      '| Plan/design document created or modified | `/review-plan` | After writing plan | |',
-      '| Recent commits before push | `/review-commit` | After committing, before push | |',
-      '| Technical question or architecture debate | `/review-think` | On design discussions | |',
-      '',
-      '**Rules:**',
-      '- Always ask the user before running a review skill — never auto-run without confirmation',
-      '- Phrase as a suggestion: "Would you like me to run `/review-impl` before committing?"',
-      '- Only suggest when context clearly matches — do not over-suggest',
+      'Skip the review when:',
+      '- the change is trivial: docs or comments only, or a one-line fix with no behaviour risk;',
+      '- a skill already ran it: the loop-plan skill gets its plan approved through review-plan, and the loop-implement skill runs review-impl at its checkpoints;',
+      '- the user said to skip it this time.',
       '',
       END_MARKER,
     ].join('\n');
@@ -437,18 +429,18 @@ try {
     if (updated === null) {
       console.log('');
       console.log('Optional: npx github:lploc94/cross-review --auto');
-      console.log('  Injects review guidance into ~/.claude/CLAUDE.md');
+      console.log('  Has Claude Code use the review-plan and review-impl skills automatically (block in ~/.claude/CLAUDE.md)');
     } else {
       fs.mkdirSync(claudeDir, { recursive: true });
       fs.writeFileSync(claudeMdPath, updated, 'utf8');
       console.log('');
-      console.log(`Auto-review guidance ${block ? 'updated' : 'injected'} in ~/.claude/CLAUDE.md`);
+      console.log(`Automatic review block ${block ? 'updated' : 'added'} in ~/.claude/CLAUDE.md`);
     }
   } catch (err) {
     console.warn('');
-    console.warn(`Warning: could not inject auto-review guidance into ~/.claude/CLAUDE.md`);
+    console.warn(`Warning: could not write the automatic review block into ~/.claude/CLAUDE.md`);
     console.warn(`  Reason: ${err.message}`);
-    console.warn('  Skills were installed successfully — only guidance injection failed.');
+    console.warn('  Skills were installed successfully — only the automatic review block failed.');
   }
 } catch (err) {
   // Cleanup staging on any error

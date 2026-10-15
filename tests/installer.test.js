@@ -68,6 +68,10 @@ test("upgrading from the codex-review pack removes its skills, runtime, MCP serv
     const md = fs.readFileSync(path.join(home, ".claude", "CLAUDE.md"), "utf8");
     assert.ok(!md.includes("codex-auto-review") && !md.includes("old guidance"), "old guidance block replaced");
     assert.equal(md.split("<!-- cross-review-start -->").length, 2, "one new guidance block");
+    // Only review-plan and review-impl run automatically
+    assert.ok(md.includes("the `review-plan` skill") && md.includes("the `review-impl` skill"), "block names review-plan and review-impl as skills");
+    assert.ok(!/review-(commit|pr|think)/.test(md), "block names no other review skill");
+    assert.ok(!/[/$](review|loop)-/.test(md), "block uses no client-specific invocation syntax");
     assert.ok(md.startsWith("# Mine\n") && md.includes("keep me"), "user content kept");
     execFileSync(process.execPath, [INSTALLER, "--auto"], { env, stdio: "pipe" });
     assert.equal(fs.readFileSync(path.join(home, ".claude", "CLAUDE.md"), "utf8"), md, "--auto leaves a current block as it is");

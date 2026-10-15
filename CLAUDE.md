@@ -43,7 +43,7 @@ Never test the installer against the real HOME; use a temporary `HOME` and `CODE
 ### Installer
 
 `bin/cross-review.js` with `bin/lib/render-skill.js`:
-1. Runtime guard: Node.js >= 22; `--auto` injects guidance into `~/.claude/CLAUDE.md`; `-full` only prints a notice
+1. Runtime guard: Node.js >= 22; `--auto` adds a block to `~/.claude/CLAUDE.md` that runs review-plan/review-impl automatically after any plan/implementation; `-full` only prints a notice
 2. Stage the shared runtime (runner, `lib/`, `mcp-server.js`, `package.json`, lock) and run `npm ci --omit=dev` in it
 3. Render every SKILL.md template. Review skills get `{{PROTOCOL_CORE}}`, `{{PROTOCOL_VARIANT}}` (from `shared/protocol/`) and `{{RUNNER_PATH}}`; loop skills get `{{CLIENT_*}}` values per client. Any leftover `{{` fails the install
 4. Verify the runner (`node review-runner.js version`)
