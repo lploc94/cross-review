@@ -89,3 +89,9 @@ export function renderMarkdown(text) {
   flushList();
   return html.join("");
 }
+
+/** A finding's field: inline when it is one line, blocks (code fences, lists) when it has several. */
+export function renderField(text) {
+  const s = String(text ?? "");
+  return s.includes("\n") ? renderMarkdown(s) : renderInline(s);
+}

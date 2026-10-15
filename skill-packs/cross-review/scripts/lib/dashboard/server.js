@@ -311,15 +311,32 @@ async function listenOnFreePort(server, { port, pickPort, host }) {
 
 // ---------- browser ----------
 
+/**
+ * Open `url` in the default browser. Resolves { ok } once the launcher exits (ok: exit 0),
+ * { ok: false, error } when it cannot start or fails; a launcher still running after 5 s
+ * counts as opened. Never rejects.
+ */
 export function openBrowser(url) {
   const [cmd, args] = process.platform === "darwin" ? ["open", [url]]
     : process.platform === "win32" ? ["cmd", ["/c", "start", "", url]]
       : ["xdg-open", [url]];
-  try {
-    const child = spawn(cmd, args, { stdio: "ignore", detached: true });
-    child.on("error", () => {});
-    child.unref();
-  } catch {}
+  return new Promise(resolve => {
+    let timer = null;
+    const done = r => {
+      clearTimeout(timer);
+      resolve(r);
+    };
+    try {
+      const child = spawn(cmd, args, { stdio: "ignore", detached: true });
+      child.on("error", e => done({ ok: false, error: e.message }));
+      child.on("exit", code => done(code === 0 ? { ok: true } : { ok: false, error: `${cmd} exited with ${code}` }));
+      child.unref();
+      timer = setTimeout(() => done({ ok: true }), 5000);
+      timer.unref();
+    } catch (e) {
+      done({ ok: false, error: e.message });
+    }
+  });
 }
 
 /** Show a folder in the system's file manager. */
@@ -589,7 +606,9 @@ export async function startDashboard({
       return { round, items, sig: `${sessionFiles(dir)}\n${status}` };
     };
     let cur = look();
-    let known = new Map(cur.items.map(it => [it.key, it.lastLine]));
+    // an item changes when its event log grows or the watchdog stamps its time
+    const version = it => `${it.lastLine}:${it.t}`;
+    let known = new Map(cur.items.map(it => [it.key, version(it)]));
     s.event("snapshot", { round: cur.round, total: cur.items.length });
     const timer = setInterval(() => {
       const next = look();
@@ -599,8 +618,8 @@ export async function startDashboard({
       for (const it of next.items) {
         const was = known.get(it.key);
         if (was === undefined) s.event("activity", { op: "add", key: it.key, item: it, total: next.items.length });
-        else if (was !== it.lastLine) s.event("activity", { op: "update", key: it.key, item: it, total: next.items.length });
-        known.set(it.key, it.lastLine);
+        else if (was !== version(it)) s.event("activity", { op: "update", key: it.key, item: it, total: next.items.length });
+        known.set(it.key, version(it));
       }
       cur = next;
     }, tickMs);

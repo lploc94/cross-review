@@ -77,3 +77,20 @@ test("onSnapshot: every snapshot reloads the detail and the activity page; a new
   assert.deepEqual(onSnapshot(view, { round: 4, total: 0 }), ["resetFeed", "reloadDetail", "fetchActivity"]);
   assert.deepEqual(onSnapshot({ feed: null }, { round: 1, total: 0 }), ["resetFeed", "reloadDetail", "fetchActivity"]);
 });
+
+test("reconnect after a long gap: a latest page that does not reach the cached items replaces them, so show earlier pages from the right place", () => {
+  const f = newFeed(3);
+  applyPage(f, { round: 3, items: [1, 2, 3].map(n => item(n)), total: 3, hasEarlier: false });
+  f.shown = 40;
+  // while away, items 4..80 were written; the latest page holds 61..80
+  applyPage(f, { round: 3, items: Array.from({ length: 20 }, (_, i) => item(61 + i)), total: 80, hasEarlier: true }, { latest: true });
+  assert.deepEqual(keys(f), Array.from({ length: 20 }, (_, i) => `3:item_${61 + i}`));
+  assert.equal(f.order[0], "3:item_61", "the next `before` is item 61, not item 1");
+  assert.equal(f.total, 80);
+  assert.equal(f.hasEarlier, true);
+  assert.equal(f.shown, 40, "the reader's window is kept");
+  // an overlapping latest page merges as before
+  applyPage(f, { round: 3, items: Array.from({ length: 20 }, (_, i) => item(62 + i)), total: 81, hasEarlier: true }, { latest: true });
+  assert.equal(f.order.length, 21);
+  assert.equal(f.order[0], "3:item_61");
+});

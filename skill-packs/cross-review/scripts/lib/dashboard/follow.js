@@ -56,7 +56,8 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 /**
  * Show `sessionDir` (started in `workingDir`) in the dashboard. Options besides the two
- * paths are for tests. Returns { url } or { error }.
+ * paths are for tests. Returns { url } or { error } (plus url when only the browser did not
+ * open; the error names the link).
  */
 export async function followInDashboard({
   sessionDir, workingDir,
@@ -83,7 +84,8 @@ export async function followInDashboard({
     const body = await res.json().catch(() => ({}));
     if (!res.ok || typeof body.ws !== "string") return { error: `the dashboard did not take the workspace: ${body.error || res.status}` };
     const url = `http://127.0.0.1:${info.port}/?t=${info.token}#/s/${encodeURIComponent(body.ws)}/${path.basename(sessionDir)}`;
-    openBrowser(url);
+    const opened = await openBrowser(url);
+    if (opened && opened.ok === false) return { url, error: `could not open the browser: ${opened.error}; open ${url}` };
     return { url };
   } catch (e) {
     return { error: `could not open the dashboard: ${e.message}` };

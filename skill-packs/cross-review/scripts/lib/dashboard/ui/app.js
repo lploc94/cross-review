@@ -3,7 +3,7 @@
 // header. Each view has at most one stream open; clocks tick here, against the server's clock.
 
 import { ic } from "./icons.js";
-import { esc, renderInline, renderMarkdown } from "./markdown.js";
+import { esc, renderField, renderInline, renderMarkdown } from "./markdown.js";
 import { PAGE, applyPage, groupReads, mergeActivity, newFeed, onSnapshot, visible } from "./feed.js";
 import { OTHER, SKILLS, effortOptions, inheritedValue, mergeForm, modelOptions, resolveHere } from "./settings.js";
 
@@ -71,7 +71,11 @@ function route() {
   }
   view = null;
   window.scrollTo(0, 0);
-  if (r.view === "sessions") connect("/api/stream?view=list", { sessions: e => apply(JSON.parse(e.data)) });
+  if (r.view === "sessions") {
+    // the page size depends on the visible layout
+    if (data) renderHistory();
+    connect("/api/stream?view=list", { sessions: e => apply(JSON.parse(e.data)) });
+  }
   else connect(null);
   if (r.view === "settings") openSettings(r);
 }
@@ -128,8 +132,8 @@ const modelOf = s => s.model || `${REVIEWERS[s.reviewer] || s.reviewer} default`
 function activeRow(s) {
   const where = `${s.wsName} · ${s.skill} · round ${s.round}${s.state === "waiting" ? " returned" : ""}`;
   return `<tr data-go="${esc(sessionHref(s.ws, s.id))}"><td>${st(s.state, s.label)}</td>
-    <td>${skillIc(s.skill)}${inline(s.title)}<div class="line2">${esc(where)}</div></td>
-    <td class="soft">${esc(s.now)}${s.warn ? `<div class="warn with-i">${ic("warn")}${esc(s.warn)}</div>` : ""}</td>
+    <td class="clip" title="${esc(`${s.title}\n${where}`)}">${skillIc(s.skill)}${inline(s.title)}<div class="line2">${esc(where)}</div></td>
+    <td class="soft clip" title="${esc(s.now)}">${esc(s.now)}${s.warn ? `<div class="warn with-i">${ic("warn")}${esc(s.warn)}</div>` : ""}</td>
     <td class="num mono" data-since="${Number(s.since) || 0}">${clock(nowS() - s.since)}</td></tr>`;
 }
 
@@ -151,6 +155,30 @@ function renderFilters() {
   sel.value = data.workspaces.some(w => w.ws === keep) ? keep : "";
 }
 
+// History pages (user decision 2026-10-15): as many rows as fit below the table's top, so
+// the Sessions page does not scroll; at least HISTORY_MIN_ROWS
+const HISTORY_MIN_ROWS = 3;
+const hist = { page: 0, rowHeight: 0, below: 0 };
+
+function historyPerPage() {
+  const body = $("#history");
+  // rows wrap differently: size the page by the tallest one seen
+  for (const row of body.querySelectorAll("tr[data-go]")) hist.rowHeight = Math.max(hist.rowHeight, row.getBoundingClientRect().height);
+  const rowHeight = hist.rowHeight || 50;
+  const pager = 40; // the pager line and its margin
+  const room = window.innerHeight - (body.getBoundingClientRect().top + window.scrollY) - pager - (hist.below || 48);
+  return Math.max(HISTORY_MIN_ROWS, Math.floor(room / rowHeight));
+}
+
+/** The space under the History block (main's padding, body's margin): measured after a render. */
+function measureBelow() {
+  const pager = $("#h-pager");
+  const last = pager.innerHTML ? pager : $("#history").closest("table");
+  const main = last.closest("main");
+  const gap = main.getBoundingClientRect().bottom - last.getBoundingClientRect().bottom;
+  if (gap >= 0 && last.getBoundingClientRect().height) hist.below = gap + (parseFloat(getComputedStyle(document.body).marginBottom) || 0);
+}
+
 function renderHistory() {
   const ws = $("#f-ws").value;
   const skill = $("#f-skill").value;
@@ -158,8 +186,16 @@ function renderHistory() {
   const q = $("#f-search").value.trim().toLowerCase();
   const rows = data.history.filter(s => (!ws || s.ws === ws) && (!skill || s.skill === skill) && (!result || s.label === result)
     && (!q || s.searchText.includes(q) || s.wsName.toLowerCase().includes(q) || s.id.includes(q)));
-  $("#history").innerHTML = rows.length ? rows.map(historyRow).join("")
+  const per = historyPerPage();
+  const pages = Math.max(1, Math.ceil(rows.length / per));
+  hist.page = Math.min(hist.page, pages - 1);
+  const shown = rows.slice(hist.page * per, (hist.page + 1) * per);
+  $("#history").innerHTML = shown.length ? shown.map(historyRow).join("")
     : `<tr class="empty"><td colspan="7" class="soft">${data.history.length ? "No session matches." : "No finished sessions yet."}</td></tr>`;
+  $("#h-pager").innerHTML = rows.length > per
+    ? `<a data-hpage="-1"${hist.page === 0 ? ' class="off"' : ""}>‹ Newer</a><span>${hist.page * per + 1}–${hist.page * per + shown.length} of ${rows.length}</span><a data-hpage="1"${hist.page >= pages - 1 ? ' class="off"' : ""}>Older ›</a>`
+    : "";
+  measureBelow();
 }
 
 function renderSessions() {
@@ -217,7 +253,7 @@ const withLocations = text => renderInline(text).split(/(<[^>]+>)/)
 function finding(i) {
   const sev = i.severity ? `<span class="sev ${esc(i.severity)}">${esc(i.severity)}</span>` : "";
   const rows = (i.location ? `<dt>Where</dt><dd class="mono">${esc(i.location)}</dd>` : "")
-    + i.rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${renderInline(v)}</dd>`).join("");
+    + i.rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${renderField(v)}</dd>`).join("");
   return `<div class="finding" data-issue="${Number(i.id)}"><div class="t">ISSUE-${Number(i.id)} ${renderInline(i.title)}${sev}</div>${rows ? `<dl>${rows}</dl>` : ""}</div>`;
 }
 
@@ -255,25 +291,45 @@ function runningLine(d) {
   return "Reading the agent's reply.";
 }
 
+function messageHtml(d, x) {
+  if (x.kind === "ask") return msg(d, "us", "<span>asked the agent</span>", renderMarkdown(x.md));
+  if (x.kind === "analysis") return msg(d, "ag", "<span>independent analysis</span>", renderMarkdown(x.md));
+  if (x.kind === "reply") return msg(d, "ag", "<span>reply</span>", replyBody(x.reply), x.anchor);
+  if (x.kind === "review") {
+    const body = (x.reasonMd ? renderMarkdown(x.reasonMd) : "") + x.issues.map(finding).join("") + (x.rawMd ? renderMarkdown(x.rawMd) : "");
+    return msg(d, "rv", `${st(x.verdict.kind, x.verdict.label)}<span>${x.secs != null ? clock(x.secs) : ""}</span>`, body + foot(x), x.anchor);
+  }
+  if (x.kind === "stopped") {
+    const why = x.failed ? `The turn failed: <span class="mono">${esc(x.error)}.</span>` : `Stopped: ${esc(x.error)}.`;
+    return msg(d, "rv", `${st("stopped", "stopped")}<span>${x.secs != null ? clock(x.secs) : ""}</span>`, `<p>${why}</p>${foot(x)}`, x.anchor);
+  }
+  if (x.kind === "running") {
+    return msg(d, "rv", `${st("running", "working")}<span class="run-clock" data-since="${Number(x.startedAt) || 0}"></span>`,
+      `${esc(runningLine(d))}<div class="acts" id="acts"></div><div class="actbar"><a id="earlier"></a><span id="act-count"></span></div>`, "s-live");
+  }
+  return "";
+}
+
+/**
+ * The conversation, newest round first (user decision 2026-10-15). A round is the message
+ * that opened it (the user's ask, or the agent's reply) and what the reviewer answered;
+ * inside a round the messages stay in the order they were written.
+ */
+export function roundGroups(thread) {
+  const groups = [];
+  for (const x of thread) {
+    if (x.kind === "ask" || x.kind === "reply" || !groups.length) groups.push({ round: null, items: [] });
+    const g = groups[groups.length - 1];
+    if (g.round === null && x.round != null && x.who === "rv") g.round = x.round;
+    g.items.push(x);
+  }
+  return groups.reverse();
+}
+
 function threadHtml(d) {
-  return d.thread.map(x => {
-    if (x.kind === "ask") return msg(d, "us", "<span>asked the agent</span>", renderMarkdown(x.md));
-    if (x.kind === "analysis") return msg(d, "ag", "<span>independent analysis</span>", renderMarkdown(x.md));
-    if (x.kind === "reply") return msg(d, "ag", "<span>reply</span>", replyBody(x.reply), x.anchor);
-    if (x.kind === "review") {
-      const body = (x.reasonMd ? renderMarkdown(x.reasonMd) : "") + x.issues.map(finding).join("") + (x.rawMd ? renderMarkdown(x.rawMd) : "");
-      return roundLabel(x.round) + msg(d, "rv", `${st(x.verdict.kind, x.verdict.label)}<span>${x.secs != null ? clock(x.secs) : ""}</span>`, body + foot(x), x.anchor);
-    }
-    if (x.kind === "stopped") {
-      const why = x.failed ? `The turn failed: <span class="mono">${esc(x.error)}.</span>` : `Stopped: ${esc(x.error)}.`;
-      return roundLabel(x.round) + msg(d, "rv", `${st("stopped", "stopped")}<span>${x.secs != null ? clock(x.secs) : ""}</span>`, `<p>${why}</p>${foot(x)}`, x.anchor);
-    }
-    if (x.kind === "running") {
-      return roundLabel(x.round) + msg(d, "rv", `${st("running", "working")}<span class="run-clock" data-since="${Number(x.startedAt) || 0}"></span>`,
-        `${esc(runningLine(d))}<div class="acts" id="acts"></div><div class="actbar"><a id="earlier"></a><span id="act-count"></span></div>`, "s-live");
-    }
-    return "";
-  }).join("");
+  return roundGroups(d.thread)
+    .map(g => (g.round != null ? roundLabel(g.round) : "") + g.items.map(x => messageHtml(d, x)).join(""))
+    .join("");
 }
 
 function ledgerHtml(d) {
@@ -324,8 +380,9 @@ function actLine(g) {
   }
 }
 
+/** Activity lines, newest first (user decision 2026-10-15); reads are folded in log order first. */
 function actsHtml(items, opened, fresh) {
-  return groupReads(items).map(g => {
+  return groupReads(items).reverse().map(g => {
     const key = g.items[0].key;
     const raws = g.items.map(x => x.raw).filter(Boolean);
     const cls = ["act", opened.has(key) ? "open" : "", g.items.some(x => fresh.has(x.key)) ? "new" : ""].filter(Boolean).join(" ");
@@ -422,7 +479,7 @@ async function fetchActivity(v) {
   v.loading++;
   const page = await getJson(`/api/activity?${sessionQuery(v)}&round=${feed.round}&limit=${feed.shown}`);
   if (view !== v) return;
-  if (page && v.feed === feed) applyPage(feed, page);
+  if (page && v.feed === feed) applyPage(feed, page, { latest: true });
   for (const ev of v.buffer) mergeActivity(v.feed, ev);
   v.buffer = [];
   v.loading--;
@@ -486,8 +543,7 @@ function flashIssue(n) {
 }
 
 async function showEarlier(v, feed, round) {
-  const y = window.scrollY;
-  const h = document.body.scrollHeight;
+  // earlier lines go below the list, so the reader's place does not move
   feed.shown += PAGE;
   if (feed.order.length < feed.shown && feed.order.length < feed.total) {
     const first = feed.byKey.get(feed.order[0]);
@@ -496,7 +552,6 @@ async function showEarlier(v, feed, round) {
     if (page) applyPage(feed, page);
   }
   if (round === (v.feed && v.feed.round) && feed === v.feed) renderActs(v); else renderPast(v, round);
-  window.scrollTo(0, y + document.body.scrollHeight - h); // keep the reader's place
 }
 
 async function togglePast(v, round) {
@@ -564,6 +619,7 @@ let catalogInfo = { models: null, codexDefault: null }; // for model names on se
 let avatars = { keys: [], parties: [] };
 let avatarStamp = Date.now();
 const sv = { scope: "global", ws: null, draft: {}, touched: new Set(), refreshed: false };
+let pendingSave = null; // a POST /api/settings in flight: the page reloads settings after it
 
 const ALL_PATHS = ["reviewer", "model", "effort", "open_dashboard", ...SKILLS.flatMap(s => [`skills.${s}.model`, `skills.${s}.effort`])];
 const clone = x => JSON.parse(JSON.stringify(x || {}));
@@ -594,6 +650,7 @@ function setPath(obj, p, value) {
 const optionsHtml = opts => opts.map(o => `<option value="${esc(o.value)}"${o.selected ? " selected" : ""}>${esc(o.label)}</option>`).join("");
 
 async function openSettings(r) {
+  if (pendingSave) await pendingSave.catch(() => null);
   const [s, a] = await Promise.all([getJson("/api/settings"), getJson("/api/avatars")]);
   if (!s) {
     $("#settings-error").textContent = "The settings could not be loaded.";
@@ -806,16 +863,25 @@ async function onSettingsClick(e) {
     sv.touched = new Set(ALL_PATHS);
     renderSettings();
   } else if (t.id === "save") {
-    const config = mergeForm(savedConfig(), sv.draft, sv.touched);
-    const body = sv.scope === "global" ? { scope: "global", config } : { scope: "workspace", ws: sv.ws, config };
-    const res = await fetch("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).catch(() => null);
+    // The reader may switch scope while this saves: the answer updates the level it was
+    // sent for, and the form only when it still shows that level
+    const scope = sv.scope;
+    const ws = sv.ws;
+    const draft = sv.draft;
+    const config = mergeForm(savedConfig(), draft, sv.touched);
+    const body = scope === "global" ? { scope: "global", config } : { scope: "workspace", ws, config };
+    pendingSave = fetch("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const res = await pendingSave.catch(() => null);
+    pendingSave = null;
+    const same = sv.scope === scope && sv.ws === ws && sv.draft === draft;
     if (!res || !res.ok) {
       const msg = res ? (await res.json().catch(() => ({}))).error : null;
-      $("#save-error").textContent = msg || "The settings could not be saved.";
+      if (same) $("#save-error").textContent = msg || "The settings could not be saved.";
       return;
     }
-    if (sv.scope === "global") settings.global = (await res.json()).config; else settings.workspaces[sv.ws] = (await res.json()).config;
-    resetDraft();
+    const saved = (await res.json()).config;
+    if (scope === "global") settings.global = saved; else settings.workspaces[ws] = saved;
+    if (sv.scope === scope && sv.ws === ws && sv.draft === draft) resetDraft();
     renderSettings();
   }
 }
@@ -831,8 +897,19 @@ function apply(payload) {
 
 async function start() {
   document.querySelectorAll("[data-i]").forEach(el => el.insertAdjacentHTML("afterbegin", ic(el.dataset.i)));
-  for (const id of ["#f-ws", "#f-skill", "#f-result"]) $(id).addEventListener("change", () => data && renderHistory());
-  $("#f-search").addEventListener("input", () => data && renderHistory());
+  const refilter = () => {
+    hist.page = 0;
+    if (data) renderHistory();
+  };
+  for (const id of ["#f-ws", "#f-skill", "#f-result"]) $(id).addEventListener("change", refilter);
+  $("#f-search").addEventListener("input", refilter);
+  $("#h-pager").addEventListener("click", e => {
+    const a = e.target.closest("a[data-hpage]");
+    if (!a || !data) return;
+    hist.page = Math.max(0, hist.page + Number(a.dataset.hpage));
+    renderHistory();
+  });
+  window.addEventListener("resize", () => data && $("#sessions").classList.contains("on") && renderHistory());
   document.addEventListener("click", e => {
     const row = e.target.closest("tr[data-go]");
     if (row && !e.target.closest("a")) location.hash = row.dataset.go;

@@ -230,7 +230,8 @@ async function follow(sessionDir) {
     const fn = hooks.follow || (await import("./dashboard/follow.js")).followInDashboard;
     // The workspace as init resolved it: <ws>/.cross-review/sessions/<id>
     const r = await fn({ sessionDir, workingDir: path.dirname(path.dirname(path.dirname(sessionDir))) });
-    return r && r.url ? { dashboard_url: r.url } : { dashboard_error: (r && r.error) || "the dashboard did not answer" };
+    // a page that exists but did not open is an error; its text carries the link
+    return r && r.url && !r.error ? { dashboard_url: r.url } : { dashboard_error: (r && r.error) || "the dashboard did not answer" };
   } catch (e) {
     return { dashboard_error: e.message };
   }
@@ -379,7 +380,10 @@ export async function replySession(sessionDir, { inputText, inputFile, model, ef
   if (state.timeout) args.push("--timeout", String(state.timeout));
   const result = await runnerJson(args, prompt, "RESUME_FAILED");
   writeRoundInput(sessionDir, result.round, raw);
-  updateState(sessionDir, { ended_at: null, end_outcome: null });
+  const sources = { ...(state.settings_sources || {}) };
+  if (model) sources.model = "requested";
+  if (effort) sources.effort = "requested";
+  updateState(sessionDir, { ended_at: null, end_outcome: null, ...(model || effort ? { settings_sources: sources } : {}) });
   return result;
 }
 

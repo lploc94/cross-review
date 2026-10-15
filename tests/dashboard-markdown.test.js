@@ -35,3 +35,11 @@ test("headings, lists, paragraphs, code spans, bold and italics get their tags",
   assert.equal(renderInline("snake_case_name stays"), "snake_case_name stays");
   assert.equal(renderInline("`**x**`"), "<code>**x**</code>");
 });
+
+test("renderField: one line stays inline; several lines (fenced code) render as blocks", async () => {
+  const { renderField } = await import("../skill-packs/cross-review/scripts/lib/dashboard/ui/markdown.js");
+  assert.equal(renderField("Uses `x` here"), "Uses <code>x</code> here");
+  const html = renderField("The guard:\n```js\nif (ready) {\n  commit();\n}\n```");
+  assert.match(html, /<pre><code>if \(ready\) \{\n  commit\(\);\n\}<\/code><\/pre>/);
+  assert.ok(!html.includes("``"));
+});

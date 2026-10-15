@@ -85,3 +85,23 @@ test("a dashboard that never comes up: an error after 5 s, nothing opened", asyn
   assert.ok(waited >= 4500 && waited < 8000, `${waited} ms`);
   assert.deepEqual(opened, []);
 });
+
+test("the browser does not open: dashboard_error says so and keeps the link; openBrowser reports a launcher that is missing", async () => {
+  const e = session("echo", "review-plan-20261015-005");
+  fs.rmSync(discoveryFile(), { force: true });
+  const r = await followInDashboard({ sessionDir: e.dir, workingDir: e.ws, idleExitSeconds: 5, openBrowser: async () => ({ ok: false, error: "spawn open ENOENT" }) });
+  spawned.push(JSON.parse(fs.readFileSync(discoveryFile(), "utf8")).pid);
+  assert.match(r.error || "", /^could not open the browser: spawn open ENOENT/);
+  assert.match(r.url || "", /#\/s\/\.\/review-plan-20261015-005$/);
+
+  const { openBrowser } = await import("../skill-packs/cross-review/scripts/lib/dashboard/server.js");
+  const savedPath = process.env.PATH;
+  process.env.PATH = path.join(os.tmpdir(), "no-such-bin-dir");
+  try {
+    const o = await openBrowser("http://127.0.0.1:9/");
+    assert.equal(o.ok, false);
+    assert.ok(o.error);
+  } finally {
+    process.env.PATH = savedPath;
+  }
+});

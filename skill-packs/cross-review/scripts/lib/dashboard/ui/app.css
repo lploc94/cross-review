@@ -98,7 +98,9 @@ aside section + section { margin-top: 28px; }
 .sev { font-weight: 500; font-size: 12px; margin-left: 6px; }
 .sev.high { color: var(--red); } .sev.medium { color: var(--amber); } .sev.low { color: var(--muted); }
 .finding dl { display: grid; grid-template-columns: 90px 1fr; gap: 2px 10px; margin: 6px 0 0; font-size: 13.5px; }
-.finding dt { color: var(--muted); } .finding dd { margin: 0; }
+.finding dt { color: var(--muted); } .finding dd { margin: 0; min-width: 0; }
+.finding dd > :first-child { margin-top: 0; } .finding dd > :last-child { margin-bottom: 0; }
+.finding dd pre { overflow-x: auto; }
 .flash { animation: flash 1.6s; } @keyframes flash { from { background: #fff1b8; } to { background: transparent; } }
 .reply-line { margin: 3px 0; } .reply-line .k { font-weight: 600; margin-right: 6px; }
 .k.fixed { color: var(--green); } .k.disputed { color: var(--plum); }
@@ -141,6 +143,14 @@ details summary { cursor: pointer; color: var(--soft); font-size: 13px; }
 table.gap { margin-top: 12px; }
 th.w-state { width: 170px; }
 th.w-for { width: 90px; }
+/* In progress: one line per field, so a live update never changes a row's height */
+table.fixed { table-layout: fixed; }
+th.w-session { width: 46%; }
+/* History pages: as many rows as fit the window */
+.pager { display: flex; justify-content: flex-end; align-items: center; gap: 14px; margin-top: 10px; font-size: 13px; color: var(--soft); }
+.pager:empty { display: none; }
+.pager a.off { color: var(--muted); pointer-events: none; }
+td.clip, td.clip > div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* empty states use the full-body avatars */
 .empty td { border-bottom: 1px solid var(--rule); padding: 18px 10px 14px; }

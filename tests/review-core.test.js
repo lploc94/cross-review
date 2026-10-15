@@ -686,6 +686,10 @@ test("global effort reaches the reviewer with its source; a requested effort win
     assert.equal(argAfter(codexCalls()[0].args, "--config"), "model_reasoning_effort=low");
     assert.equal(stateOf(b.session_dir).settings_sources.effort, "requested");
     assert.equal(stateOf(b.session_dir).effort, "low");
+    // a reply that names a model and effort records them as requested; the reviewer keeps its source
+    await replySession(a.session_dir, { inputText: inputFor("review-plan", "ge2"), model: "model-invented-2", effort: "medium" });
+    await waitSession(a.session_dir, { maxWaitSeconds: 30 });
+    assert.deepEqual(stateOf(a.session_dir).settings_sources, { reviewer: "default", model: "requested", effort: "requested", open_dashboard: "default" });
     await endSession(a.session_dir);
     await endSession(b.session_dir);
   } finally {

@@ -192,31 +192,53 @@ const ITEM_KINDS = {
  * lines: the event log split on "\n" (only complete lines).
  */
 export function activityItems(lines) {
-  const byId = new Map();
-  let turnCompleted = false;
-  let lastMessageId = null;
-  lines.forEach((rawLine, index) => {
+  return logItems(foldLog(newLogState(), lines));
+}
+
+/**
+ * The event log read in steps, for a reader that only parses appended lines: fold each
+ * batch of complete lines into the state, then read the items (`logItems`) and the turn's
+ * outcome (`logOutcome`, the same fields parseEvents gives from all lines).
+ */
+export function newLogState() {
+  return {
+    count: 0, byId: new Map(), lastMessageId: null,
+    turnCompleted: false, turnFailed: false, failMessage: "", threadId: "", reviewText: "",
+  };
+}
+
+export function foldLog(state, lines) {
+  for (const rawLine of lines) {
+    const index = state.count++;
     const d = parseLine(rawLine);
-    if (!d) return;
-    if (d.type === "turn.completed") turnCompleted = true;
-    if (d.type !== "item.started" && d.type !== "item.updated" && d.type !== "item.completed") return;
+    if (!d) continue;
+    const t = d.type || "";
+    if (t === "thread.started" && typeof d.thread_id === "string" && d.thread_id.trim()) state.threadId = d.thread_id.trim();
+    if (t === "turn.completed") {
+      state.turnCompleted = true;
+    } else if (t === "turn.failed") {
+      state.turnFailed = true;
+      state.failMessage = (d.error && d.error.message) || "unknown error";
+    }
+    if (t !== "item.started" && t !== "item.updated" && t !== "item.completed") continue;
     const item = d.item || {};
+    if (t === "item.completed" && item.type === "agent_message") state.reviewText = item.text || "";
     const kind = ITEM_KINDS[item.type];
-    if (!kind) return;
+    if (!kind) continue;
     const id = typeof item.id === "string" && item.id ? item.id : `line-${index}`;
-    let entry = byId.get(id);
+    let entry = state.byId.get(id);
     if (!entry) {
       entry = { id, line: index, lastLine: index, kind };
-      byId.set(id, entry);
+      state.byId.set(id, entry);
     }
     entry.lastLine = index;
     if (kind === "command") {
       entry.command = item.command || "";
       entry.exitCode = typeof item.exit_code === "number" ? item.exit_code : null;
-      entry.status = item.status || (d.type === "item.completed" ? "completed" : "in_progress");
+      entry.status = item.status || (t === "item.completed" ? "completed" : "in_progress");
     } else if (kind === "message" || kind === "reasoning") {
       entry.text = item.text || "";
-      if (kind === "message") lastMessageId = id;
+      if (kind === "message") state.lastMessageId = id;
     } else if (kind === "tool") {
       entry.tool = item.type === "web_search" ? "web search" : [item.server, item.tool].filter(Boolean).join(".");
       if (item.query) entry.text = item.query;
@@ -225,9 +247,21 @@ export function activityItems(lines) {
       entry.path = (item.changes || []).map(c => c.path).filter(Boolean).join(", ");
       entry.status = item.status || null;
     }
-  });
-  if (turnCompleted && lastMessageId !== null) byId.delete(lastMessageId);
-  return [...byId.values()].sort((a, b) => a.line - b.line);
+  }
+  return state;
+}
+
+/** Copies of the folded items, in log order, without the turn's final message. */
+export function logItems(state) {
+  return [...state.byId.values()]
+    .filter(e => !(state.turnCompleted && e.id === state.lastMessageId))
+    .sort((a, b) => a.line - b.line)
+    .map(e => ({ ...e }));
+}
+
+export function logOutcome(state) {
+  const { turnCompleted, turnFailed, failMessage, reviewText, threadId } = state;
+  return { turnCompleted, turnFailed, failMessage, reviewText, threadId };
 }
 
 /** True when a process command line is a Codex turn this runner may kill. */

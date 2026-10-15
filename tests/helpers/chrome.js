@@ -21,6 +21,9 @@ export function findChrome() {
 export async function launchChrome(bin, userDataDir) {
   const child = spawn(bin, [
     "--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check", "--hide-scrollbars",
+    // never touch the system keychain or password store (tests run with a temporary HOME,
+    // where macOS would ask for a "Chrome" keychain that does not exist)
+    "--use-mock-keychain", "--password-store=basic",
     "--remote-debugging-port=0", `--user-data-dir=${userDataDir}`, "about:blank",
   ], { stdio: ["ignore", "ignore", "pipe"] });
   const wsUrl = await new Promise((resolve, reject) => {

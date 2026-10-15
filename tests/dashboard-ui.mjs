@@ -72,8 +72,11 @@ try {
   assert.equal(dom.active.filter(r => r.warn).length, sessions.active.filter(s => s.warn).length);
   assert.ok(dom.active.some(r => r.warn), "the fixture has a warned session");
 
-  // History: one row per finished session; filters work in the page
-  assert.equal(dom.history, sessions.history.length);
+  // History: the newest finished sessions, a page that fits the window; filters work in the page
+  const pagerText = await page.evaluate(`document.getElementById("h-pager").textContent`);
+  if (dom.history < sessions.history.length) assert.equal(pagerText, `‹ Newer1–${dom.history} of ${sessions.history.length}Older ›`);
+  else assert.equal(pagerText, "");
+  assert.ok(dom.history >= 3);
   assert.equal(dom.demo, false);
   assert.equal(dom.inlineStyle, 0);
   const noReply = sessions.history.filter(s => s.label === "no reply").length;
@@ -82,6 +85,27 @@ try {
     sessions.history.filter(s => s.searchText.includes("model list cached")).length);
   await page.evaluate(`(() => { const q = document.getElementById("f-search"); q.value = ""; q.dispatchEvent(new Event("input")); })()`);
   await page.screenshot(path.join(shots, "sessions-1400.png"));
+
+  // A shorter window: History shows a page that fits, no scrolling; In progress rows keep one line per field
+  const short = await browser.newPage(1400, 1000);
+  await short.goto(`${d.url}#/`);
+  await short.waitFor(`document.querySelectorAll("#history tr[data-go]").length > 0`);
+  const fit = await short.evaluate(`({
+    rows: document.querySelectorAll("#history tr[data-go]").length,
+    pager: document.getElementById("h-pager").textContent,
+    scrolls: document.documentElement.scrollHeight > window.innerHeight + 1, sh: document.documentElement.scrollHeight, ih: window.innerHeight, pagerBottom: document.getElementById("h-pager").getBoundingClientRect().bottom,
+    heights: [...document.querySelectorAll("#active tr")].map(tr => Math.round(tr.getBoundingClientRect().height)),
+    first: document.querySelector("#history tr[data-go]").dataset.go,
+  })`);
+  assert.ok(fit.rows >= 3 && fit.rows < sessions.history.length, JSON.stringify(fit));
+  assert.equal(fit.pager, `‹ Newer1–${fit.rows} of ${sessions.history.length}Older ›`);
+  assert.equal(fit.scrolls, false, `the Sessions page fits the window: ${JSON.stringify(fit)}`);
+  assert.equal(new Set(fit.heights).size, 1, `one height for every In progress row: ${fit.heights}`);
+  await short.evaluate(`document.querySelector('#h-pager a[data-hpage="1"]').click()`);
+  const next = await short.evaluate(`({ first: document.querySelector("#history tr[data-go]").dataset.go, pager: document.getElementById("h-pager").textContent })`);
+  assert.notEqual(next.first, fit.first);
+  assert.match(next.pager, new RegExp(`^‹ Newer${fit.rows + 1}–\\d+ of ${sessions.history.length}Older ›$`));
+  await short.screenshot(path.join(shots, "sessions-1000.png"));
 
   // Routes: a row opens its session with the Sessions tab lit; an unknown hash goes home
   const waitingId = path.basename(fx.sessions.waiting);
@@ -119,9 +143,20 @@ try {
     ledger: document.getElementById("ledger").textContent,
     avatars: [...document.querySelectorAll("#thread .mark img")].every(i => i.complete && i.naturalWidth > 0),
     clock: document.querySelector("#status .next .run-clock")?.textContent,
+    rounds: [...document.querySelectorAll("#thread .round-label")].map(l => l.textContent),
+    liveFirst: document.querySelector("#thread .m.r") !== null && document.querySelectorAll("#thread .m")[1]?.id === "s-live",
+    askInRound1: (() => {
+      const r1 = [...document.querySelectorAll("#thread .round-label")].find(l => l.textContent === "ROUND 1");
+      const us = document.querySelector("#thread .m.us");
+      return Boolean(r1 && us && (r1.compareDocumentPosition(us) & Node.DOCUMENT_POSITION_FOLLOWING));
+    })(),
     inlineStyle: document.querySelectorAll("[style]").length,
   }))()`);
   assert.equal(run.status, "status running");
+  // newest round first; the user's request closes the oldest round at the bottom
+  assert.deepEqual(run.rounds, ["ROUND 3", "ROUND 2", "ROUND 1"]);
+  assert.ok(run.askInRound1, "the user's request sits in round 1, at the bottom");
+  assert.ok(run.liveFirst, "round 3 on top: the agent's reply, then the reviewer working");
   assert.ok(run.spin);
   assert.equal(run.steps.length, 5);
   assert.equal(run.steps[4], "Round 3 in progress");
@@ -141,7 +176,7 @@ try {
   // A new event arrives live; "show 20 earlier" grows the window; a line opens its raw command
   fs.appendFileSync(path.join(fx.sessions.running, "output.jsonl"), JSON.stringify({ type: "item.completed", item: { id: "ui_new", type: "reasoning", text: "Invented live thought." } }) + "\n");
   await page.waitFor(`document.getElementById("act-count").textContent === "latest 20 of 46 events"`);
-  assert.match(await page.evaluate(`[...document.querySelectorAll("#acts .act")].pop().textContent`), /Invented live thought/);
+  assert.match(await page.evaluate(`document.querySelector("#acts .act").textContent`), /Invented live thought/, "the newest line is on top");
   await page.evaluate(`document.getElementById("earlier").click()`);
   await page.waitFor(`document.getElementById("act-count").textContent === "latest 40 of 46 events"`);
   await page.evaluate(`document.querySelector("#acts .act[data-raw]").click()`);
@@ -181,7 +216,7 @@ try {
     h3: document.querySelector("#thread .bubble h3")?.textContent,
     analysis: [...document.querySelectorAll("#thread .m.r .who")].some(w => /independent analysis/.test(w.textContent)),
     ledger: document.getElementById("issues-box").classList.contains("on"),
-    last: [...document.querySelectorAll("#thread .who .st")].pop()?.textContent,
+    last: document.querySelector("#thread .who .st")?.textContent,
   })`);
   assert.equal(think.last, "consensus");
   assert.equal(think.h3, "Position");
@@ -241,6 +276,34 @@ try {
   assert.deepEqual(JSON.parse(fs.readFileSync(wsFile, "utf8")), { effort: "low" });
   await page.screenshot(path.join(shots, "settings-workspace-1400.png"));
 
+  // Switching to a workspace while a global save is in flight: the answer goes to the global
+  // level only, and the workspace form starts from the workspace's own (empty) file
+  await page.evaluate(`location.hash = "#/settings"`);
+  await page.waitFor(`document.getElementById("save").textContent === "Save global"`);
+  await page.evaluate(`(() => {
+    const native = window.fetch;
+    window.fetch = async (...args) => {
+      const res = await native(...args);
+      if (args[0] === "/api/settings" && args[1] && args[1].method === "POST" && !window.held) {
+        window.held = true;
+        await new Promise(r => { window.releaseSave = r; });
+      }
+      return res;
+    };
+    const e = document.getElementById("f-effort-set"); e.value = "medium"; e.dispatchEvent(new Event("change", { bubbles: true }));
+    document.getElementById("save").click();
+  })()`);
+  await page.waitFor(`typeof window.releaseSave === "function"`);
+  await page.evaluate(`location.hash = "#/settings/inkwell"`);
+  await page.evaluate(`window.releaseSave()`);
+  await page.waitFor(`document.getElementById("save").textContent === "Save for inkwell"`);
+  await page.waitFor(`document.getElementById("preview").textContent.trim() === "{}" && document.querySelector("#f-effort-set option").textContent === "Inherit — medium"`);
+  assert.equal(JSON.parse(fs.readFileSync(globalFile, "utf8")).effort, "medium");
+  await page.evaluate(`(() => { const f = document.getElementById("f-follow"); f.value = "off"; f.dispatchEvent(new Event("change", { bubbles: true })); document.getElementById("save").click(); })()`);
+  const inkFile = path.join(fx.workspaces.inkwell, ".cross-review", "config.json");
+  for (let i = 0; i < 50 && !fs.existsSync(inkFile); i++) await new Promise(r => setTimeout(r, 100));
+  assert.deepEqual(JSON.parse(fs.readFileSync(inkFile, "utf8")), { open_dashboard: false });
+
   // An uploaded avatar replaces the default picture in the session thread
   await page.evaluate(`location.hash = "#/settings"`);
   await page.waitFor(`document.getElementById("avatars-block").classList.contains("on") && document.querySelector('#avatars input[data-av="you"]')`);
@@ -273,7 +336,7 @@ try {
     await d2.close();
   }
 
-  console.log(`dashboard-ui: ok (${dom.active.length} in progress, ${dom.history} in history)`);
+  console.log(`dashboard-ui: ok (${dom.active.length} in progress, ${dom.history} of ${sessions.history.length} in history on the first page)`);
   console.log(`screenshots: ${shots}`);
 } finally {
   await browser.close();

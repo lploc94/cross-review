@@ -613,6 +613,12 @@ test("session stream: snapshot first; new items arrive as `add` in order with `t
     assert.deepEqual([u2.json.op, u2.json.item.exitCode, u2.json.item.result], ["update", 1, "failed (exit 1)"]);
     assert.equal(u2.json.total, 50);
 
+    // the watchdog stamps those lines after the dashboard saw them: the time arrives as an update
+    assert.equal(u1.json.item.t, null);
+    fs.appendFileSync(times, `${JSON.stringify([lineCount(log), startedAt + 600])}\n`);
+    const stamped = await s.next(e => e.event === "activity" && e.json.key === "3:cmd_ok");
+    assert.deepEqual([stamped.json.op, stamped.json.item.t], ["update", 600]);
+
     const page = await getJson(d, `/api/activity?${q(fx, "running")}&limit=20`);
     assert.equal(page.total, 50);
     assert.equal(page.items.filter(x => x.key === "3:cmd_ok" || x.key === "3:cmd_bad").length, 2);

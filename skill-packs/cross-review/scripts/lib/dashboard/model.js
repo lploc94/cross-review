@@ -57,11 +57,59 @@ function readText(file) {
   }
 }
 
-function completeLines(text) {
-  if (!text) return [];
-  const lines = text.split("\n");
-  lines.pop(); // the part after the last newline is incomplete (or empty)
-  return lines;
+// Event logs are read incrementally (D5): per file, the bytes already folded into the
+// reviewer's log state and the incomplete tail. A log that shrinks, is replaced (another
+// inode) or rewritten in place (its first bytes differ) is read again from the start.
+const logs = new Map();
+const HEAD = 256;
+
+function readAt(fd, length, position) {
+  const buf = Buffer.alloc(length);
+  let got = 0;
+  while (got < length) {
+    const n = fs.readSync(fd, buf, got, length - got, position + got);
+    if (!n) break;
+    got += n;
+  }
+  return buf.subarray(0, got);
+}
+
+/** The reviewer's folded state of `file` (null: no such file). */
+function readLog(file, reviewer) {
+  let st;
+  try {
+    st = fs.statSync(file);
+  } catch {
+    logs.delete(file);
+    return null;
+  }
+  let fd;
+  try {
+    fd = fs.openSync(file, "r");
+    let c = logs.get(file);
+    const fresh = !c || c.reviewer !== reviewer || c.ino !== st.ino || c.dev !== st.dev || st.size < c.offset
+      || !readAt(fd, c.head.length, 0).equals(c.head);
+    if (fresh) {
+      c = { reviewer, ino: st.ino, dev: st.dev, offset: 0, head: Buffer.alloc(0), tail: Buffer.alloc(0), state: reviewer.newLogState() };
+      logs.set(file, c);
+    }
+    if (st.size > c.offset) {
+      const buf = readAt(fd, st.size - c.offset, c.offset);
+      if (c.head.length < HEAD) c.head = Buffer.from(readAt(fd, Math.min(HEAD, c.offset + buf.length), 0));
+      c.offset += buf.length;
+      const chunk = Buffer.concat([c.tail, buf]);
+      const end = chunk.lastIndexOf(0x0a);
+      // only complete lines; the rest waits for its newline
+      c.tail = Buffer.from(chunk.subarray(end + 1));
+      if (end >= 0) reviewer.foldLog(c.state, chunk.subarray(0, end).toString("utf8").split("\n"));
+    }
+    return c.state;
+  } catch {
+    logs.delete(file);
+    return null;
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
 }
 
 const namesByDir = new Map();
@@ -134,17 +182,13 @@ export function readSession(dir) {
   for (let r = 1; r <= n; r++) {
     const live = r === n;
     const final = readJson(live ? path.join(dir, "final.txt") : path.join(dir, "outputs", `final-round-${pad(r)}.json`));
-    const log = readText(live ? path.join(dir, "output.jsonl") : path.join(dir, "outputs", `output-round-${pad(r)}.jsonl`));
-    const lines = completeLines(log);
+    const log = reviewer ? readLog(live ? path.join(dir, "output.jsonl") : path.join(dir, "outputs", `output-round-${pad(r)}.jsonl`), reviewer) : null;
     const entry = roundEntries.find(e => e.round === r) || {};
-    const items = reviewer ? reviewer.activityItems(lines) : [];
+    const items = log ? reviewer.logItems(log) : [];
     const timed = attachTimes(items, readLineTimes(dir, r), entry.started_at || null)
       .map(it => ({ ...it, ...humanize(it), key: `${r}:${it.id}`, round: r }));
     let outcome = null;
-    if (live && !final && reviewer) {
-      const ev = reviewer.parseEvents(lines, [], 0);
-      outcome = { turnCompleted: ev.turnCompleted, turnFailed: ev.turnFailed, failMessage: ev.failMessage, reviewText: ev.reviewText, threadId: ev.threadId };
-    }
+    if (live && !final && reviewer) outcome = reviewer.logOutcome(log || reviewer.newLogState());
     const lastTime = (() => {
       const rows = readLineTimes(dir, r);
       return rows.length ? rows[rows.length - 1][1] : null;

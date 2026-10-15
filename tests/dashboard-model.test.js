@@ -349,3 +349,56 @@ test("each session's inputs split on the placeholders of its own prompts directo
   assert.equal(ask("review-impl-20261015-096", {}), "Invented request.\n\n## API\nInvented separate parameter.");
   assert.equal(inputValues(raw, "review-impl", custom).API, "Invented separate parameter.");
 });
+
+// ---------- review checkpoint: incremental log reads (D5) ----------
+
+test("readSession reads only the bytes appended to output.jsonl since the last read; a replaced log is read again", () => {
+  const dir = fx.sessions.running;
+  const log = path.join(dir, "output.jsonl");
+  const original = fs.readFileSync(log);
+  const big = JSON.stringify({ type: "item.completed", item: { id: "big-out", type: "command_execution", command: "node --test", status: "completed", exit_code: 0, aggregated_output: "x".repeat(2 * 1024 * 1024) } }) + "\n";
+  fs.appendFileSync(log, big);
+  try {
+    readSession(dir);
+    const realReadFileSync = fs.readFileSync;
+    const realReadSync = fs.readSync;
+    let bytes = 0;
+    fs.readFileSync = function (file, ...rest) {
+      const out = realReadFileSync.call(this, file, ...rest);
+      if (String(file).endsWith(".jsonl") && String(file).includes("output")) bytes += Buffer.byteLength(out);
+      return out;
+    };
+    fs.readSync = function (...args) {
+      const n = realReadSync.apply(this, args);
+      bytes += n;
+      return n;
+    };
+    let s;
+    try {
+      fs.appendFileSync(log, JSON.stringify({ type: "item.completed", item: { id: "tail-r", type: "reasoning", text: "Checking an invented branch." } }) + "\n");
+      // half a line: not an item yet
+      fs.appendFileSync(log, '{"type":"item.completed","item":{"id":"half"');
+      s = readSession(dir);
+    } finally {
+      fs.readFileSync = realReadFileSync;
+      fs.readSync = realReadSync;
+    }
+    assert.ok(bytes < 64 * 1024, `read ${bytes} bytes for a ~150-byte append`);
+    const live = s.rounds[s.rounds.length - 1].items;
+    assert.ok(live.some(i => i.id === "big-out") && live.some(i => i.id === "tail-r"));
+    assert.ok(!live.some(i => i.id === "half"));
+    fs.appendFileSync(log, ',"type":"reasoning","text":"Now complete."}}\n');
+    assert.ok(readSession(dir).rounds.at(-1).items.some(i => i.id === "half" && /Now complete\./.test(i.text)), "the split line completes");
+
+    // replaced by a shorter file: read from the start, old items gone
+    fs.rmSync(log);
+    fs.writeFileSync(log, JSON.stringify({ type: "item.completed", item: { id: "fresh", type: "reasoning", text: "A new log." } }) + "\n");
+    const ids = readSession(dir).rounds.at(-1).items.map(i => i.id);
+    assert.deepEqual(ids, ["fresh"]);
+  } finally {
+    fs.writeFileSync(log, original);
+  }
+  // back to the fixture: same items as a fresh parse
+  const lines = fs.readFileSync(log, "utf8").split("\n").slice(0, -1);
+  assert.deepEqual(readSession(dir).rounds.at(-1).items.map(i => i.id), activityItems(lines).map(i => i.id));
+});

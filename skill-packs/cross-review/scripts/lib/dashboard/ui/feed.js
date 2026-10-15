@@ -47,9 +47,19 @@ export function mergeActivity(feed, event) {
   return did;
 }
 
-/** Apply a page from /api/activity. A page of another round replaces the feed. */
-export function applyPage(feed, page) {
+/**
+ * Apply a page from /api/activity. A page of another round replaces the feed. A `latest`
+ * page (the newest items, loaded after a (re)connect) that starts after every cached item
+ * leaves a gap between them: it replaces the cached items, so "show earlier" continues
+ * from its first item. The reader's window (`shown`) stays.
+ */
+export function applyPage(feed, page, { latest = false } = {}) {
   if (page.round !== feed.round) resetTo(feed, page.round);
+  const newest = feed.order.length ? feed.byKey.get(feed.order[feed.order.length - 1]) : null;
+  if (latest && newest && page.items.length && page.items[0].line > newest.line && !feed.byKey.has(page.items[0].key)) {
+    feed.byKey = new Map();
+    feed.order = [];
+  }
   for (const item of page.items) put(feed, item);
   feed.total = Math.max(feed.total, page.total || 0, feed.order.length);
   feed.hasEarlier = Boolean(page.hasEarlier) || feed.order.length < feed.total;
