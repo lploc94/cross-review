@@ -276,11 +276,11 @@ CLAUDE.md, mục "Core Execution Flow": thêm `inputs/`, `outputs/times-round-NN
 - `getClientVersion()` có thể trả `undefined`; khi đó không ghi gì.
 
 ### Acceptance criteria
-- [ ] AC-1.1: input gốc của từng round được lưu nguyên văn, chỉ khi round khởi động thành công — chứng minh bởi test 1 và 2.
-- [ ] AC-1.2: `end` ghi `ended_at` và `end_outcome`; `reply` thành công thì xoá chúng — chứng minh bởi test 3.
-- [ ] AC-1.3: phiên MCP lưu caller lấy từ `clientInfo`; phiên CLI không có caller — chứng minh bởi test 4.
-- [ ] AC-1.4: mọi dòng của mỗi round đều có giờ, kể cả round xong trước tick đầu tiên, round bị stop và lượt đổi round; watchdog thoát khi reviewer kết thúc — chứng minh bởi test 5, 6, 7 và 8.
-- [ ] AC-1.5: deadline, stall và resume sau timeout không đổi — chứng minh bởi `test-default-timeout.js`, `test-stall-recovery.js`, `test-timeout-resume.js`.
+- [x] AC-1.1: input gốc của từng round được lưu nguyên văn, chỉ khi round khởi động thành công — chứng minh bởi test 1 và 2.
+- [x] AC-1.2: `end` ghi `ended_at` và `end_outcome`; `reply` thành công thì xoá chúng — chứng minh bởi test 3.
+- [x] AC-1.3: phiên MCP lưu caller lấy từ `clientInfo`; phiên CLI không có caller — chứng minh bởi test 4.
+- [x] AC-1.4: mọi dòng của mỗi round đều có giờ, kể cả round xong trước tick đầu tiên, round bị stop và lượt đổi round; watchdog thoát khi reviewer kết thúc — chứng minh bởi test 5, 6, 7 và 8.
+- [x] AC-1.5: deadline, stall và resume sau timeout không đổi — chứng minh bởi `test-default-timeout.js`, `test-stall-recovery.js`, `test-timeout-resume.js`.
 
 ### Focused verification
 ```bash
@@ -430,10 +430,10 @@ Không có. Docs gom ở Phase 5.
 - Bảng nhãn và câu chữ đặt ở một chỗ (hằng số), UI chỉ hiển thị.
 
 ### Acceptance criteria
-- [ ] AC-2.1: phân loại trạng thái theo đúng bảng 1, kể cả các ranh giới và phiên finalize vì hội tụ — chứng minh bởi test 1, 2 và 11.
-- [ ] AC-2.2: tiêu đề, thread và reply của agent dựng đúng cho 4 skill — chứng minh bởi test 3 và 5, cùng các ca thread trong test 4.
-- [ ] AC-2.3: ledger, bước và câu trạng thái khớp câu chuyện của mock — chứng minh bởi test 4.
-- [ ] AC-2.4: activity được diễn đạt, gộp và gắn giờ đúng; mỗi item có danh tính và vị trí ổn định, kể cả item chỉ có `item.completed` — chứng minh bởi test 6, 7, 8, 9 và 10.
+- [x] AC-2.1: phân loại trạng thái theo đúng bảng 1, kể cả các ranh giới và phiên finalize vì hội tụ — chứng minh bởi test 1, 2 và 11.
+- [x] AC-2.2: tiêu đề, thread và reply của agent dựng đúng cho 4 skill — chứng minh bởi test 3 và 5, cùng các ca thread trong test 4.
+- [x] AC-2.3: ledger, bước và câu trạng thái khớp câu chuyện của mock — chứng minh bởi test 4.
+- [x] AC-2.4: activity được diễn đạt, gộp và gắn giờ đúng; mỗi item có danh tính và vị trí ổn định, kể cả item chỉ có `item.completed` — chứng minh bởi test 6, 7, 8, 9 và 10.
 
 ### Focused verification
 ```bash
@@ -571,13 +571,13 @@ Thêm chụp màn hình 1400px của `#/` trên fixture để so với mock (b�
 - Thứ tự cột, chữ, màu và khoảng cách lấy từ mock. Inline style của mock chuyển thành class, vì CSP không cho inline style.
 
 ### Acceptance criteria
-- [ ] AC-3.1: quét đúng phạm vi, sâu 3 cấp — chứng minh bởi test 1.
-- [ ] AC-3.2: API Sessions và SSE danh sách đúng, kể cả chuyển trạng thái chỉ do thời gian và phiên/workspace mới xuất hiện khi trang đang mở — chứng minh bởi test 2, 4, 4b, 4c và 4d.
-- [ ] AC-3.3: token, Host, Origin và đường dẫn đều được kiểm; cổng chọn trong [20000, 30000] và tránh cổng bận — chứng minh bởi test 3, 5 và 6. Test 3 gửi kèm token hợp lệ, nên mỗi lớp được kiểm riêng.
-- [ ] AC-3.7: `dashboard.json`, idle-exit và đăng ký workspace đúng — chứng minh bởi test 7, 8 và 9.
-- [ ] AC-3.4: trang Sessions giống mock — chứng minh bởi DOM check trong `dashboard-ui.mjs`, cùng ảnh chụp 1400px đặt cạnh `mockups/dashboard.html` (inspection ghi vào Progress Log).
-- [ ] AC-3.5: hai lệnh `node review-runner.js dashboard` và `node bin/cross-review.js dashboard` chạy được, không chạy bước cài nào — chứng minh bởi test trong `dashboard-server.test.js` (spawn với `HOME` tạm, kiểm `HOME/.claude` không bị tạo).
-- [ ] AC-3.6: bản cài có UI và LICENSE của Lucide — chứng minh bởi `install-check.mjs`.
+- [x] AC-3.1: quét đúng phạm vi, sâu 3 cấp — chứng minh bởi test 1.
+- [x] AC-3.2: API Sessions và SSE danh sách đúng, kể cả chuyển trạng thái chỉ do thời gian và phiên/workspace mới xuất hiện khi trang đang mở — chứng minh bởi test 2, 4, 4b, 4c và 4d.
+- [x] AC-3.3: token, Host, Origin và đường dẫn đều được kiểm; cổng chọn trong [20000, 30000] và tránh cổng bận — chứng minh bởi test 3, 5 và 6. Test 3 gửi kèm token hợp lệ, nên mỗi lớp được kiểm riêng.
+- [x] AC-3.7: `dashboard.json`, idle-exit và đăng ký workspace đúng — chứng minh bởi test 7, 8 và 9.
+- [x] AC-3.4: trang Sessions giống mock — chứng minh bởi DOM check trong `dashboard-ui.mjs`, cùng ảnh chụp 1400px đặt cạnh `mockups/dashboard.html` (inspection ghi vào Progress Log).
+- [x] AC-3.5: hai lệnh `node review-runner.js dashboard` và `node bin/cross-review.js dashboard` chạy được, không chạy bước cài nào — chứng minh bởi test trong `dashboard-server.test.js` (spawn với `HOME` tạm, kiểm `HOME/.claude` không bị tạo).
+- [x] AC-3.6: bản cài có UI và LICENSE của Lucide — chứng minh bởi `install-check.mjs`.
 
 ### Focused verification
 ```bash
@@ -715,9 +715,9 @@ Không có. Docs gom ở Phase 5.
 - Mỗi tab dùng một `EventSource`, đóng khi rời view.
 
 ### Acceptance criteria
-- [ ] AC-4.1: markdown an toàn và đúng — chứng minh bởi test 1.
-- [ ] AC-4.2: API activity, prompt, reveal và SSE của phiên đúng; mỗi activity có một khoá ổn định, cập nhật tại chỗ, và feed không mất hay lặp dòng và detail được đồng bộ lại khi kết nối lại — chứng minh bởi test 2, 2b và 2c.
-- [ ] AC-4.3: trang chi tiết đủ 5 trạng thái, phiên peer và deep link giống mock — chứng minh bởi test 3, cùng ảnh chụp 1400px từng trạng thái đặt cạnh mock (inspection ghi vào Progress Log).
+- [x] AC-4.1: markdown an toàn và đúng — chứng minh bởi test 1.
+- [x] AC-4.2: API activity, prompt, reveal và SSE của phiên đúng; mỗi activity có một khoá ổn định, cập nhật tại chỗ, và feed không mất hay lặp dòng và detail được đồng bộ lại khi kết nối lại — chứng minh bởi test 2, 2b và 2c.
+- [x] AC-4.3: trang chi tiết đủ 5 trạng thái, phiên peer và deep link giống mock — chứng minh bởi test 3, cùng ảnh chụp 1400px từng trạng thái đặt cạnh mock (inspection ghi vào Progress Log).
 
 ### Focused verification
 ```bash
@@ -886,12 +886,12 @@ README, CLAUDE.md, `core.md`, manifest, như liệt kê ở Files.
 - Catalog chỉ cache trong bộ nhớ của server; "refresh list" gọi lại.
 
 ### Acceptance criteria
-- [ ] AC-5.1: config hợp lệ được resolve đúng thứ tự cho từng khoá; config hỏng chặn `begin` trước khi tạo phiên — chứng minh bởi test 1 và 2.
-- [ ] AC-5.2: API Settings và avatar ghi đúng, từ chối input xấu — chứng minh bởi test 3.
-- [ ] AC-5.3: catalog và model mặc định có đường dự phòng; giá trị đã lưu ngoài danh sách vẫn hiện, được chọn và không bị Save ghi đè — chứng minh bởi test 4, 5 và 6b.
-- [ ] AC-5.4: trang Settings, Follow reviews và Avatars giống mock — chứng minh bởi test 7, cùng ảnh chụp 1400px đặt cạnh mock (inspection ghi vào Progress Log).
-- [ ] AC-5.6: Follow reviews mở đúng phiên, dùng lại dashboard đang chạy hoặc khởi động bản mới, và không bao giờ làm hỏng `begin` — chứng minh bởi test 6.
-- [ ] AC-5.5: luật model/effort trong `core.md` và docs khớp hành vi mới — chứng minh bởi `tests/skill-templates.test.js` và inspection README/CLAUDE.md.
+- [x] AC-5.1: config hợp lệ được resolve đúng thứ tự cho từng khoá; config hỏng chặn `begin` trước khi tạo phiên — chứng minh bởi test 1 và 2.
+- [x] AC-5.2: API Settings và avatar ghi đúng, từ chối input xấu — chứng minh bởi test 3.
+- [x] AC-5.3: catalog và model mặc định có đường dự phòng; giá trị đã lưu ngoài danh sách vẫn hiện, được chọn và không bị Save ghi đè — chứng minh bởi test 4, 5 và 6b.
+- [x] AC-5.4: trang Settings, Follow reviews và Avatars giống mock — chứng minh bởi test 7, cùng ảnh chụp 1400px đặt cạnh mock (inspection ghi vào Progress Log).
+- [x] AC-5.6: Follow reviews mở đúng phiên, dùng lại dashboard đang chạy hoặc khởi động bản mới, và không bao giờ làm hỏng `begin` — chứng minh bởi test 6.
+- [x] AC-5.5: luật model/effort trong `core.md` và docs khớp hành vi mới — chứng minh bởi `tests/skill-templates.test.js` và inspection README/CLAUDE.md.
 
 ### Focused verification
 ```bash
@@ -912,11 +912,11 @@ Checkpoint: `/review-impl` (checkpoint cuối, diff cộng dồn từ trước P
 `feat(dashboard): two-level review settings, follow reviews, model catalog, avatars; docs and pack 10.1.0`
 
 ## Completion Criteria
-- Mọi AC đã được đánh dấu, kèm lệnh hoặc inspection ghi trong Progress Log.
-- Global Gates đều exit 0.
-- Có ảnh chụp 1400px của Sessions, chi tiết (5 trạng thái và peer) và Settings, đặt cạnh mock để user duyệt.
-- Checkpoint cuối `/review-impl` APPROVE, hoặc user duyệt.
-- `mockups/dashboard.html` được commit cùng plan, làm tài liệu tham chiếu.
+- [x] Mọi AC đã được đánh dấu, kèm lệnh hoặc inspection ghi trong Progress Log (25/25).
+- [x] Global Gates đều exit 0 trên HEAD cuối (2026-10-16): `npm ci` 0 vulnerabilities; ba test legacy và `node --test tests/` 183/183; cài vào HOME tạm và `install-check: ok`; `dashboard-ui: ok`.
+- [x] Có ảnh chụp 1400px của Sessions, chi tiết (5 trạng thái và peer) và Settings, đặt cạnh mock (inspection trong Progress Log của Phase 3, 4, 5). Theo yêu cầu riêng tư của user, ảnh chỉ nằm trong thư mục tạm và đã xoá sau khi xem. `node tests/dashboard-ui.mjs` tạo lại ảnh bất cứ lúc nào, đường dẫn in ở dòng cuối.
+- [x] Checkpoint cuối `/review-impl` APPROVE (`review-impl-20261015-013`, round 8, 2026-10-16; ISSUE-1–16 đã sửa, không có tranh chấp).
+- [x] `mockups/dashboard.html` được commit cùng plan, làm tài liệu tham chiếu.
 
 ## Progress Log
 - 2026-10-15: Viết plan. Spike ở `.cross-review/spikes/dashboard/`. Mock được user duyệt, gồm cả Avatars (tải lên, không đóng gói logo) và Follow reviews.
@@ -1005,3 +1005,4 @@ Checkpoint: `/review-impl` (checkpoint cuối, diff cộng dồn từ trước P
   - ISSUE-15, workspace `__proto__` có config hợp lệ vẫn hiện lỗi `[object Object]`: object từ JSON vẫn có prototype, nên khoá không có sẽ đọc phải thuộc tính kế thừa. Thêm helper `own(table, key)` (chỉ đọc khoá của chính bảng) cho lỗi workspace, và cho các bảng tra theo dữ liệu phiên (`CALLER_LETTERS`, `REVIEWER_LETTERS`, `REVIEWERS`). Caller tên `constructor` trước đây ra chữ cái là source của hàm `Object`. Test UI với phiên bịa: caller `constructor` có avatar "I", và Settings của `__proto__` không báo lỗi, preview giữ `effort: low`. Cả hai đỏ trước khi sửa. Cả suite 183/183, ba test legacy pass, `dashboard-ui` ok.
 - 2026-10-16, final checkpoint round 7, REVISE với 1 lỗi (low):
   - ISSUE-16, lưu đè một config hỏng xong vẫn hiện lỗi cũ: Save thành công thì xoá lỗi đã lưu của đúng cấp đó (global, hoặc workspace đã gửi). Test UI: workspace bịa có file `{ broken` hiện lỗi, sau khi Save file thành `{ "effort": "low" }` và dòng lỗi trống; đỏ trước khi sửa. Cả suite 183/183, ba test legacy pass, `dashboard-ui` ok.
+- 2026-10-16, checkpoint cuối APPROVE ở round 8 (`review-impl-20261015-013`), 16 lỗi đã sửa qua 8 round. Global Gates chạy lại trên HEAD cuối đều exit 0 (183/183, `install-check: ok`, `dashboard-ui: ok`). Đánh dấu 25 AC và Completion Criteria. Plan hoàn tất.
