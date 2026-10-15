@@ -311,9 +311,9 @@ function messageHtml(d, x) {
 }
 
 /**
- * The conversation, newest round first (user decision 2026-10-15). A round is the message
- * that opened it (the user's ask, or the agent's reply) and what the reviewer answered;
- * inside a round the messages stay in the order they were written.
+ * The conversation in reverse, newest message on top (user decision 2026-10-15). A round is
+ * the message that opened it (the user's ask, or the agent's reply) and what the reviewer
+ * answered; each round's label sits above its messages, the reviewer's newest first.
  */
 export function roundGroups(thread) {
   const groups = [];
@@ -321,7 +321,7 @@ export function roundGroups(thread) {
     if (x.kind === "ask" || x.kind === "reply" || !groups.length) groups.push({ round: null, items: [] });
     const g = groups[groups.length - 1];
     if (g.round === null && x.round != null && x.who === "rv") g.round = x.round;
-    g.items.push(x);
+    g.items.unshift(x);
   }
   return groups.reverse();
 }

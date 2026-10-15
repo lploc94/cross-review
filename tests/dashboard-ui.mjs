@@ -144,7 +144,9 @@ try {
     avatars: [...document.querySelectorAll("#thread .mark img")].every(i => i.complete && i.naturalWidth > 0),
     clock: document.querySelector("#status .next .run-clock")?.textContent,
     rounds: [...document.querySelectorAll("#thread .round-label")].map(l => l.textContent),
-    liveFirst: document.querySelector("#thread .m.r") !== null && document.querySelectorAll("#thread .m")[1]?.id === "s-live",
+    liveFirst: document.querySelector("#thread .m")?.id === "s-live",
+    firstLabel: document.getElementById("thread").firstElementChild?.textContent,
+    lastIsAsk: [...document.querySelectorAll("#thread .m")].pop()?.classList.contains("us"),
     askInRound1: (() => {
       const r1 = [...document.querySelectorAll("#thread .round-label")].find(l => l.textContent === "ROUND 1");
       const us = document.querySelector("#thread .m.us");
@@ -156,7 +158,9 @@ try {
   // newest round first; the user's request closes the oldest round at the bottom
   assert.deepEqual(run.rounds, ["ROUND 3", "ROUND 2", "ROUND 1"]);
   assert.ok(run.askInRound1, "the user's request sits in round 1, at the bottom");
-  assert.ok(run.liveFirst, "round 3 on top: the agent's reply, then the reviewer working");
+  assert.ok(run.liveFirst, "the reviewer working is the first message");
+  assert.equal(run.firstLabel, "ROUND 3");
+  assert.ok(run.lastIsAsk, "the user's request is the last message");
   assert.ok(run.spin);
   assert.equal(run.steps.length, 5);
   assert.equal(run.steps[4], "Round 3 in progress");
