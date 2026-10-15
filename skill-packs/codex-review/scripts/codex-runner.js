@@ -13,11 +13,12 @@ import path from "node:path";
 import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
 import { parseOutputMarkdown } from "./lib/parse.js";
+import { beginSession, waitSession, replySession, endSession, DEFAULT_MAX_WAIT_S } from "./lib/review-core.js";
 
 const __filename = fileURLToPath(import.meta.url);
 
 // --- Constants ---
-const CODEX_RUNNER_VERSION = 13;
+const CODEX_RUNNER_VERSION = 14;
 
 const EXIT_SUCCESS = 0;
 const EXIT_ERROR = 1;
@@ -1016,6 +1017,11 @@ function cmdInit(argv) {
   const prefix = `${skillName}-${today}-`;
   const sessionsBase = path.join(resolvedWorkingDir, ".codex-review", "sessions");
   fs.mkdirSync(sessionsBase, { recursive: true });
+  // Keep review artifacts out of the user's git history
+  const gitignorePath = path.join(resolvedWorkingDir, ".codex-review", ".gitignore");
+  if (!fs.existsSync(gitignorePath)) {
+    try { fs.writeFileSync(gitignorePath, "*\n", { encoding: "utf8", flag: "wx" }); } catch {}
+  }
 
   let maxN = 0;
   try {
@@ -1201,6 +1207,7 @@ function cmdStart(argv) {
       pgid: codexPgid,
       watchdog_pid: watchdogPid,
       effort,
+      model: values.model || null,
       sandbox,
       timeout,
       started_at: now,
@@ -1433,6 +1440,7 @@ function cmdResume(argv) {
       last_output_at: now,
       stall_recovery_count: newRecoveryCount,
       stall_threshold: effectiveStallThreshold,
+      ...(values.model ? { model: values.model } : {}),
     });
 
     // Append new round to rounds.json
@@ -1965,6 +1973,101 @@ function cmdWatchdog(argv) {
 }
 
 // ============================================================
+// High-level verbs — v14 (begin / wait / reply / end)
+// ============================================================
+
+async function runVerb(fn) {
+  try {
+    jsonOut(await fn());
+    return EXIT_SUCCESS;
+  } catch (e) {
+    jsonError(e.message, e.code || "UNKNOWN_ERROR");
+    return e.code === "CODEX_NOT_FOUND" ? EXIT_CODEX_NOT_FOUND : EXIT_ERROR;
+  }
+}
+
+function cmdBegin(argv) {
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      skill: { type: "string" },
+      mode: { type: "string" },
+      input: { type: "string" },
+      "working-dir": { type: "string" },
+      model: { type: "string" },
+      effort: { type: "string" },
+      timeout: { type: "string" },
+      "skills-dir": { type: "string" },
+    },
+    strict: true,
+  });
+  return runVerb(() => {
+    if (!values.skill || !values.input) {
+      throw Object.assign(new Error("--skill and --input are required (--input - reads stdin)"), { code: "INVALID_INPUT" });
+    }
+    return beginSession({
+      skill: values.skill,
+      mode: values.mode,
+      inputFile: values.input,
+      workingDir: values["working-dir"],
+      model: values.model,
+      effort: values.effort,
+      timeout: values.timeout,
+      skillsDir: values["skills-dir"],
+    });
+  });
+}
+
+function cmdWait(argv) {
+  const { values, positionals } = parseArgs({
+    args: argv,
+    options: { "max-wait": { type: "string" } },
+    allowPositionals: true,
+    strict: true,
+  });
+  return runVerb(() => {
+    const { dir, err } = validateStateDir(positionals[0]);
+    if (err) throw Object.assign(new Error(err), { code: "INVALID_INPUT" });
+    const maxWait = values["max-wait"] ? parseInt(values["max-wait"], 10) : DEFAULT_MAX_WAIT_S;
+    if (isNaN(maxWait) || maxWait < 0) throw Object.assign(new Error("--max-wait must be a non-negative integer"), { code: "INVALID_INPUT" });
+    return waitSession(dir, { maxWaitSeconds: maxWait });
+  });
+}
+
+function cmdReply(argv) {
+  const { values, positionals } = parseArgs({
+    args: argv,
+    options: {
+      input: { type: "string" },
+      model: { type: "string" },
+      effort: { type: "string" },
+    },
+    allowPositionals: true,
+    strict: true,
+  });
+  return runVerb(() => {
+    const { dir, err } = validateStateDir(positionals[0]);
+    if (err) throw Object.assign(new Error(err), { code: "INVALID_INPUT" });
+    if (!values.input) throw Object.assign(new Error("--input is required (--input - reads stdin)"), { code: "INVALID_INPUT" });
+    return replySession(dir, { inputFile: values.input, model: values.model, effort: values.effort });
+  });
+}
+
+function cmdEnd(argv) {
+  const { values, positionals } = parseArgs({
+    args: argv,
+    options: { outcome: { type: "string" } },
+    allowPositionals: true,
+    strict: true,
+  });
+  return runVerb(() => {
+    const { dir, err } = validateStateDir(positionals[0]);
+    if (err) throw Object.assign(new Error(err), { code: "INVALID_INPUT" });
+    return endSession(dir, { outcome: values.outcome });
+  });
+}
+
+// ============================================================
 // CLI
 // ============================================================
 
@@ -2007,10 +2110,23 @@ function main() {
     case "_watchdog":
       exitCode = cmdWatchdog(rest);
       break;
+    case "begin":
+    case "wait":
+    case "reply":
+    case "end": {
+      const verb = { begin: cmdBegin, wait: cmdWait, reply: cmdReply, end: cmdEnd }[command];
+      verb(rest).then(code => process.exit(code));
+      return;
+    }
     default:
       process.stderr.write(
-        "codex-runner.js — Cross-platform runner for Codex CLI (v13)\n\n" +
-        "Usage:\n" +
+        "codex-runner.js — Cross-platform runner for Codex CLI (v14)\n\n" +
+        "Usage (high-level):\n" +
+        "  node codex-runner.js begin --skill <name> [--mode <mode>] --input <file|-> [--working-dir <dir>] [--model <name>] [--effort <level>] [--timeout <s>]\n" +
+        "  node codex-runner.js wait <session_dir> [--max-wait <s>]\n" +
+        "  node codex-runner.js reply <session_dir> --input <file|-> [--model <name>] [--effort <level>]\n" +
+        "  node codex-runner.js end <session_dir> [--outcome consensus|stalemate]\n\n" +
+        "Usage (low-level):\n" +
         "  node codex-runner.js version\n" +
         "  node codex-runner.js init --skill-name <name> --working-dir <dir>\n" +
         "  echo PROMPT | node codex-runner.js start <session_dir> [--model <name>] [--effort <level>] [--timeout <s>] [--sandbox <mode>]\n" +
