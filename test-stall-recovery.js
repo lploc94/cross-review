@@ -14,7 +14,7 @@ import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
-const RUNNER = path.resolve("skill-packs/codex-review/scripts/codex-runner.js");
+const RUNNER = path.resolve("skill-packs/cross-review/scripts/review-runner.js");
 const NODE = process.execPath;
 
 let dummyProcs = [];
@@ -84,9 +84,9 @@ async function main() {
 
   // Step a: Init session
   console.log("Step a: Init session");
-  const initOutput = run("init", ["--skill-name", "codex-think-about", "--working-dir", process.cwd()]);
-  assert(initOutput.startsWith("CODEX_SESSION:"), "init returns CODEX_SESSION prefix");
-  sessionDir = initOutput.replace("CODEX_SESSION:", "");
+  const initOutput = run("init", ["--skill-name", "review-think", "--working-dir", process.cwd()]);
+  assert(initOutput.startsWith("SESSION:"), "init returns SESSION prefix");
+  sessionDir = initOutput.replace("SESSION:", "");
   console.log(`  Session: ${sessionDir}\n`);
 
   // Step b: Start with stall-threshold=5 (low for testing) + dummy process

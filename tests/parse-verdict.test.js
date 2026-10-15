@@ -10,10 +10,10 @@ import {
   normalizeVerdictStatus,
   parseOutputMarkdown,
   parseVerdict,
-} from "../skill-packs/codex-review/scripts/lib/parse.js";
+} from "../skill-packs/cross-review/scripts/lib/parse.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const RUNNER = path.join(ROOT, "skill-packs/codex-review/scripts/codex-runner.js");
+const RUNNER = path.join(ROOT, "skill-packs/cross-review/scripts/review-runner.js");
 
 const ISSUE_BLOCK = `### ISSUE-1: Missing guard
 - Category: correctness
@@ -133,7 +133,7 @@ CONSENSUS
 
 function makeSession(rounds) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "finalize-test-"));
-  fs.writeFileSync(path.join(dir, "state.json"), JSON.stringify({ skill_name: "codex-plan-review", effort: "high" }));
+  fs.writeFileSync(path.join(dir, "state.json"), JSON.stringify({ skill_name: "review-plan", effort: "high" }));
   fs.writeFileSync(path.join(dir, "rounds.json"), JSON.stringify(rounds));
   return dir;
 }

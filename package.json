@@ -1,14 +1,14 @@
 {
-  "name": "codex-skill",
+  "name": "cross-review",
   "version": "5.0.0",
-  "description": "Install codex-review skills for Claude Code",
+  "description": "Cross-model review skills (plan, implementation, commit, PR, reasoning) and loop planning for Claude Code and Codex",
   "license": "MIT",
   "type": "module",
   "engines": {
     "node": ">=22"
   },
   "bin": {
-    "codex-skill": "./bin/codex-skill.js"
+    "cross-review": "./bin/cross-review.js"
   },
   "files": [
     "bin/",

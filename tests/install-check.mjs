@@ -15,17 +15,23 @@ if (!process.argv[2] || !fs.existsSync(home)) {
 }
 const codexHome = process.env.CODEX_HOME || path.join(home, ".codex");
 
-const RUNNER_SKILLS = ["codex-plan-review", "codex-impl-review", "codex-think-about", "codex-commit-review", "codex-pr-review"];
+const RUNNER_SKILLS = ["review-plan", "review-impl", "review-think", "review-commit", "review-pr"];
 const PLAIN_SKILLS = ["loop-plan", "loop-implement"];
 const SKILLS = [...RUNNER_SKILLS, ...PLAIN_SKILLS];
-const REMOVED_SKILLS = ["codex-parallel-review", "codex-codebase-review", "codex-security-review"];
+// The earlier codex-review pack: its runtime, skills and MCP server must be gone after install
+const LEGACY_RUNTIME = "codex-review";
+const LEGACY_SKILLS = [
+  "codex-plan-review", "codex-impl-review", "codex-think-about", "codex-commit-review", "codex-pr-review",
+  "codex-parallel-review", "codex-codebase-review", "codex-security-review",
+];
+const LEGACY_SERVER_SCRIPT = `${LEGACY_RUNTIME}/scripts/mcp-server.js`;
 const TOOLS = ["review_begin", "review_end", "review_reply", "review_wait"];
 
 const claudeRoot = path.join(home, ".claude", "skills");
 const agentsRoot = path.join(home, ".agents", "skills");
 const legacyRoot = path.join(codexHome, "skills");
-const runtime = path.join(claudeRoot, "codex-review");
-const runner = path.join(runtime, "scripts", "codex-runner.js");
+const runtime = path.join(claudeRoot, "cross-review");
+const runner = path.join(runtime, "scripts", "review-runner.js");
 const mcpServer = path.join(runtime, "scripts", "mcp-server.js");
 
 const failures = [];
@@ -39,6 +45,14 @@ function walk(dir, out = []) {
     if (e.isDirectory()) walk(p, out); else out.push(p);
   }
   return out;
+}
+
+/** The directory was installed by this pack or the earlier codex-review pack (not a foreign skill). */
+function isPackCopy(dir, name) {
+  if (name === "cross-review") return fs.existsSync(path.join(dir, "scripts", "review-runner.js"));
+  if (name === LEGACY_RUNTIME) return fs.existsSync(path.join(dir, "scripts", "codex-runner.js"));
+  const skillMd = path.join(dir, "SKILL.md");
+  return fs.existsSync(skillMd) && new RegExp(`^name:\\s*${name}\\s*$`, "m").test(fs.readFileSync(skillMd, "utf8"));
 }
 
 function onPath(cmd) {
@@ -57,15 +71,15 @@ for (const [root, client] of [[claudeRoot, "claude"], [agentsRoot, "codex"]]) {
     check(!text.includes("{{"), `${client}: ${skill} has an unrendered placeholder`);
     if (RUNNER_SKILLS.includes(skill)) check(text.includes(`node "${runner}"`), `${client}: ${skill} does not point at the installed runner`);
   }
-  for (const skill of [...SKILLS, "codex-review"]) {
+  for (const skill of [...SKILLS, "cross-review"]) {
     for (const f of walk(path.join(root, skill))) {
       check(!/^(protocol|flavor-text)\.md$/.test(path.basename(f)), `${client}: stale file ${f}`);
       if (f.endsWith(".md")) check(!/flavor/i.test(fs.readFileSync(f, "utf8")), `${client}: flavor text in ${f}`);
     }
   }
-  for (const skill of REMOVED_SKILLS) check(!fs.existsSync(path.join(root, skill)), `${client}: removed skill ${skill} still installed`);
+  for (const name of [LEGACY_RUNTIME, ...LEGACY_SKILLS]) check(!isPackCopy(path.join(root, name), name), `${client}: old ${name} still installed`);
   for (const name of fs.existsSync(root) ? fs.readdirSync(root) : []) {
-    check(!/^\.codex-staging-|^\..+-backup-/.test(name), `${client}: leftover ${path.join(root, name)}`);
+    check(!/^\.cross-review-staging-|^\..+-backup-/.test(name), `${client}: leftover ${path.join(root, name)}`);
   }
 }
 
@@ -75,21 +89,18 @@ for (const skill of PLAIN_SKILLS) {
   if (!fs.existsSync(file)) continue;
   const text = fs.readFileSync(file, "utf8");
   check(!text.includes("CLAUDE.md"), `codex: ${skill} mentions CLAUDE.md`);
-  check(!/(^|[\s`(])\/(loop|codex)-/.test(text), `codex: ${skill} uses slash commands`);
-  check(text.includes("$codex-") || text.includes("$loop-"), `codex: ${skill} lacks $skill references`);
+  check(!/(^|[\s`(])\/(loop|review)-/.test(text), `codex: ${skill} uses slash commands`);
+  check(text.includes("$review-") || text.includes("$loop-"), `codex: ${skill} lacks $skill references`);
   check(fs.existsSync(path.join(agentsRoot, skill, "agents", "openai.yaml")), `codex: ${skill} lacks agents/openai.yaml`);
 }
 
 // This pack's copies are gone from Codex's deprecated skills root
 const installedReal = new Set([...SKILLS.flatMap(s => [path.join(claudeRoot, s), path.join(agentsRoot, s)]), runtime]
   .filter(p => fs.existsSync(p)).map(p => fs.realpathSync(p)));
-for (const name of ["codex-review", ...SKILLS, ...REMOVED_SKILLS]) {
+for (const name of ["cross-review", LEGACY_RUNTIME, ...SKILLS, ...LEGACY_SKILLS]) {
   const dir = path.join(legacyRoot, name);
   if (!fs.existsSync(dir) || installedReal.has(fs.realpathSync(dir))) continue;
-  const ours = name === "codex-review"
-    ? fs.existsSync(path.join(dir, "scripts", "codex-runner.js"))
-    : new RegExp(`^name:\\s*${name}\\s*$`, "m").test(fs.existsSync(path.join(dir, "SKILL.md")) ? fs.readFileSync(path.join(dir, "SKILL.md"), "utf8") : "");
-  check(!ours, `legacy: pack copy still in ${dir}`);
+  check(!isPackCopy(dir, name), `legacy: pack copy still in ${dir}`);
 }
 
 // Runtime: runner, modules, MCP server, SDK
@@ -98,7 +109,7 @@ for (const p of [runner, mcpServer, path.join(runtime, "scripts", "lib", "review
 }
 try {
   const version = execFileSync(process.execPath, [runner, "version"], { encoding: "utf8" }).trim();
-  check(version === "14", `runtime: runner version ${version}, expected 14`);
+  check(version === "15", `runtime: runner version ${version}, expected 15`);
 } catch (e) {
   failures.push(`runtime: runner version failed: ${e.message}`);
 }
@@ -121,19 +132,21 @@ try {
 if (onPath("claude")) {
   const file = path.join(home, ".claude.json");
   const servers = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")).mcpServers || {} : {};
-  const entry = servers["codex-review"];
-  check(entry && entry.args?.includes(mcpServer), "claude: codex-review MCP server not registered at the installed path");
+  const entry = servers["cross-review"];
+  check(entry && entry.args?.includes(mcpServer), "claude: cross-review MCP server not registered at the installed path");
+  check(!Object.values(servers).some(s => (s.args || []).some(a => String(a).replace(/\\+/g, "/").endsWith(LEGACY_SERVER_SCRIPT))), "claude: the old codex-review MCP server is still registered");
   check(entry?.env?.REVIEW_WAIT_DEFAULT_S === "300", "claude: REVIEW_WAIT_DEFAULT_S is not 300");
   check(Object.values(servers).filter(s => s.args?.includes(mcpServer)).length === 1, "claude: MCP server registered more than once");
 }
 if (onPath("codex")) {
   const file = path.join(codexHome, "config.toml");
   const toml = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
-  check((toml.match(/^\[mcp_servers\.codex-review\]$/gm) || []).length === 1, "codex: [mcp_servers.codex-review] is not present exactly once");
+  check((toml.match(/^\[mcp_servers\.cross-review\]$/gm) || []).length === 1, "codex: [mcp_servers.cross-review] is not present exactly once");
   check(toml.includes(mcpServer), "codex: MCP server path not in config.toml");
+  check(!toml.replace(/\\+/g, "/").includes(LEGACY_SERVER_SCRIPT), "codex: the old codex-review MCP server is still in config.toml");
   check(/REVIEW_WAIT_DEFAULT_S\s*=\s*"50"/.test(toml), "codex: REVIEW_WAIT_DEFAULT_S is not 50");
   for (const tool of TOOLS) {
-    const tables = toml.match(new RegExp(`^\\[mcp_servers\\.codex-review\\.tools\\.${tool}\\]\\napproval_mode = "approve"$`, "gm")) || [];
+    const tables = toml.match(new RegExp(`^\\[mcp_servers\\.cross-review\\.tools\\.${tool}\\]\\napproval_mode = "approve"$`, "gm")) || [];
     check(tables.length === 1, `codex: ${tool} is not pre-approved exactly once (codex exec rejects unapproved MCP calls)`);
   }
 }

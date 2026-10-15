@@ -1,16 +1,16 @@
 // Render an installed SKILL.md from its template in the skill pack.
-// Kept apart from bin/codex-skill.js, which runs the install as soon as it is imported.
+// Kept apart from bin/cross-review.js, which runs the install as soon as it is imported.
 
 import fs from 'node:fs';
 import path from 'node:path';
 
 // Shared protocol section each runner skill receives after the core section
 export const PROTOCOL_VARIANTS = {
-  'codex-plan-review': 'apply-rebut',
-  'codex-impl-review': 'apply-rebut',
-  'codex-commit-review': 'cross-analysis',
-  'codex-pr-review': 'cross-analysis',
-  'codex-think-about': 'cross-analysis',
+  'review-plan': 'apply-rebut',
+  'review-impl': 'apply-rebut',
+  'review-commit': 'cross-analysis',
+  'review-pr': 'cross-analysis',
+  'review-think': 'cross-analysis',
 };
 
 // Values for {{CLIENT_*}} placeholders in skills installed for both Claude Code and Codex

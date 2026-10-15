@@ -14,12 +14,12 @@ import {
   parseReviewInput,
   replySession,
   waitSession,
-} from "../skill-packs/codex-review/scripts/lib/review-core.js";
+} from "../skill-packs/cross-review/scripts/lib/review-core.js";
 import { writeFakeCodex } from "./helpers/fake-codex.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const RUNNER = path.join(ROOT, "skill-packs/codex-review/scripts/codex-runner.js");
-const SKILLS_DIR = path.join(ROOT, "skill-packs/codex-review/skills");
+const RUNNER = path.join(ROOT, "skill-packs/cross-review/scripts/review-runner.js");
+const SKILLS_DIR = path.join(ROOT, "skill-packs/cross-review/skills");
 
 let tmp;
 let workDir;
@@ -61,7 +61,7 @@ function resetLog() {
 function inputFor(skill, tag) {
   const md = fs.readFileSync(path.join(SKILLS_DIR, skill, "references", "prompts.md"), "utf8");
   const names = [...new Set([...md.matchAll(/\{([A-Z][A-Z_0-9]+)\}/g)].map(m => m[1]))]
-    .filter(n => n !== "OUTPUT_FORMAT" && n !== "CLAUDE_ANALYSIS_FORMAT");
+    .filter(n => n !== "OUTPUT_FORMAT" && n !== "ANALYSIS_FORMAT");
   return names.map(n => `## ${n}\n${tag}-${n}\nsecond line\n`).join("\n");
 }
 
@@ -77,9 +77,9 @@ function renderExpected(skill, template, input) {
 
 // ---------- computeNext ----------
 
-const PLAN = { skill_name: "codex-plan-review" };
-const COMMIT = { skill_name: "codex-commit-review" };
-const THINK = { skill_name: "codex-think-about" };
+const PLAN = { skill_name: "review-plan" };
+const COMMIT = { skill_name: "review-commit" };
+const THINK = { skill_name: "review-think" };
 
 test("computeNext: running", () => {
   assert.equal(computeNext({ status: "running" }, PLAN).next, "running");
@@ -138,7 +138,7 @@ test("computeNext: recoverable runner-deadline timeout", () => {
 
 test("computeNext: non-recoverable timeout, failure and stall stop", () => {
   assert.deepEqual(computeNext({ status: "timeout", timeout_reason: "runner_deadline", recoverable: false }, PLAN), { next: "stopped", next_reason: "timeout" });
-  assert.deepEqual(computeNext({ status: "failed", failure_reason: "codex_process_exit" }, PLAN), { next: "stopped", next_reason: "codex_process_exit" });
+  assert.deepEqual(computeNext({ status: "failed", failure_reason: "reviewer_process_exit" }, PLAN), { next: "stopped", next_reason: "reviewer_process_exit" });
   assert.deepEqual(computeNext({ status: "stalled", failure_reason: "stalled" }, PLAN), { next: "stopped", next_reason: "stalled" });
 });
 
@@ -166,13 +166,13 @@ test("parseReviewInput: CRLF input parses like LF", () => {
 
 // ---------- .gitignore ----------
 
-test("init writes .codex-review/.gitignore once and never overwrites it", () => {
+test("init writes .cross-review/.gitignore once and never overwrites it", () => {
   const dir = fs.mkdtempSync(path.join(tmp, "gi-"));
-  execFileSync(process.execPath, [RUNNER, "init", "--skill-name", "codex-plan-review", "--working-dir", dir], { encoding: "utf8" });
-  const gi = path.join(dir, ".codex-review", ".gitignore");
+  execFileSync(process.execPath, [RUNNER, "init", "--skill-name", "review-plan", "--working-dir", dir], { encoding: "utf8" });
+  const gi = path.join(dir, ".cross-review", ".gitignore");
   assert.equal(fs.readFileSync(gi, "utf8"), "*\n");
   fs.writeFileSync(gi, "custom\n");
-  execFileSync(process.execPath, [RUNNER, "init", "--skill-name", "codex-plan-review", "--working-dir", dir], { encoding: "utf8" });
+  execFileSync(process.execPath, [RUNNER, "init", "--skill-name", "review-plan", "--working-dir", dir], { encoding: "utf8" });
   assert.equal(fs.readFileSync(gi, "utf8"), "custom\n");
 });
 
@@ -230,12 +230,12 @@ for (const combo of COMBOS) {
 test("every review skill starts and resumes Codex with full access for verification commands", async () => {
   setCodexOutput("### Key Insights\n- a\n\n### Suggested Status\nCONTINUE\n");
   resetLog();
-  const t = await beginSession({ skill: "codex-think-about", inputText: inputFor("codex-think-about", "sb"), workingDir: workDir });
+  const t = await beginSession({ skill: "review-think", inputText: inputFor("review-think", "sb"), workingDir: workDir });
   await waitSession(t.session_dir, { maxWaitSeconds: 30 });
   setCodexOutput("### ISSUE-1: Something\n- Category: correctness\n- Severity: high\n- Problem: p\n\n### VERDICT\n- Status: REVISE\n");
-  const p = await beginSession({ skill: "codex-plan-review", inputText: inputFor("codex-plan-review", "sb"), workingDir: workDir });
+  const p = await beginSession({ skill: "review-plan", inputText: inputFor("review-plan", "sb"), workingDir: workDir });
   await waitSession(p.session_dir, { maxWaitSeconds: 30 });
-  await replySession(p.session_dir, { inputText: inputFor("codex-plan-review", "sb2") });
+  await replySession(p.session_dir, { inputText: inputFor("review-plan", "sb2") });
   await waitSession(p.session_dir, { maxWaitSeconds: 30 });
   const calls = codexCalls();
   assert.equal(calls.length, 3);
@@ -251,9 +251,9 @@ test("every review skill starts and resumes Codex with full access for verificat
 
 test("the session remembers its reviewer; codex is the default", async () => {
   setCodexOutput("### VERDICT\n- Status: REVISE\n");
-  const input = inputFor("codex-plan-review", "rv");
-  const named = await beginSession({ skill: "codex-plan-review", inputText: input, workingDir: workDir, reviewer: "codex" });
-  const unnamed = await beginSession({ skill: "codex-plan-review", inputText: input, workingDir: workDir });
+  const input = inputFor("review-plan", "rv");
+  const named = await beginSession({ skill: "review-plan", inputText: input, workingDir: workDir, reviewer: "codex" });
+  const unnamed = await beginSession({ skill: "review-plan", inputText: input, workingDir: workDir });
   for (const s of [named, unnamed]) {
     await waitSession(s.session_dir, { maxWaitSeconds: 30 });
     assert.equal(JSON.parse(fs.readFileSync(path.join(s.session_dir, "state.json"), "utf8")).reviewer, "codex");
@@ -262,10 +262,10 @@ test("the session remembers its reviewer; codex is the default", async () => {
 });
 
 test("an unknown reviewer is rejected before any session is created", async () => {
-  const sessions = path.join(workDir, ".codex-review", "sessions");
+  const sessions = path.join(workDir, ".cross-review", "sessions");
   const before = fs.existsSync(sessions) ? fs.readdirSync(sessions).length : 0;
   await assert.rejects(
-    beginSession({ skill: "codex-plan-review", inputText: inputFor("codex-plan-review", "x"), workingDir: workDir, reviewer: "nope" }),
+    beginSession({ skill: "review-plan", inputText: inputFor("review-plan", "x"), workingDir: workDir, reviewer: "nope" }),
     e => e.code === "UNKNOWN_REVIEWER" && /Available: codex/.test(e.message),
   );
   assert.equal(fs.existsSync(sessions) ? fs.readdirSync(sessions).length : 0, before);
@@ -274,8 +274,8 @@ test("an unknown reviewer is rejected before any session is created", async () =
 test("a session whose state predates the reviewer field still resumes with codex", async () => {
   resetLog();
   setCodexOutput("### VERDICT\n- Status: REVISE\n");
-  const input = inputFor("codex-plan-review", "old");
-  const begun = await beginSession({ skill: "codex-plan-review", inputText: input, workingDir: workDir });
+  const input = inputFor("review-plan", "old");
+  const begun = await beginSession({ skill: "review-plan", inputText: input, workingDir: workDir });
   await waitSession(begun.session_dir, { maxWaitSeconds: 30 });
   const stateFile = path.join(begun.session_dir, "state.json");
   const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
@@ -291,8 +291,8 @@ test("a session whose state predates the reviewer field still resumes with codex
 test("reply with a new model updates the stored model", async () => {
   resetLog();
   setCodexOutput("### VERDICT\n- Status: REVISE\n");
-  const input = inputFor("codex-plan-review", "m");
-  const begun = await beginSession({ skill: "codex-plan-review", inputText: input, workingDir: workDir });
+  const input = inputFor("review-plan", "m");
+  const begun = await beginSession({ skill: "review-plan", inputText: input, workingDir: workDir });
   await waitSession(begun.session_dir, { maxWaitSeconds: 30 });
   const first = codexCalls()[0];
   assert.ok(!first.args.includes("--model"), "no model given → Codex default");
@@ -307,12 +307,12 @@ test("reply with a new model updates the stored model", async () => {
 
 test("a relative skillsDir is stored absolute, so reply works from another cwd", async () => {
   setCodexOutput("### VERDICT\n- Status: REVISE\n");
-  const input = inputFor("codex-plan-review", "rel");
+  const input = inputFor("review-plan", "rel");
   const cwd = process.cwd();
   process.chdir(ROOT);
   let begun;
   try {
-    begun = await beginSession({ skill: "codex-plan-review", inputText: input, workingDir: workDir, skillsDir: "skill-packs/codex-review/skills" });
+    begun = await beginSession({ skill: "review-plan", inputText: input, workingDir: workDir, skillsDir: "skill-packs/cross-review/skills" });
   } finally {
     process.chdir(cwd);
   }
@@ -332,7 +332,7 @@ test("wait returns activities from polls made before its deadline", async () => 
   setCodexOutput("### VERDICT\n- Status: APPROVE\n");
   process.env.FAKE_CODEX_SLOW_MS = "4000";
   try {
-    const begun = await beginSession({ skill: "codex-plan-review", inputText: inputFor("codex-plan-review", "act"), workingDir: workDir });
+    const begun = await beginSession({ skill: "review-plan", inputText: inputFor("review-plan", "act"), workingDir: workDir });
     await new Promise(r => setTimeout(r, 500));
     const w1 = await waitSession(begun.session_dir, { maxWaitSeconds: 1 });
     assert.equal(w1.status, "running");
@@ -350,7 +350,7 @@ test("wait returns activities from polls made before its deadline", async () => 
 
 test("end after APPROVE finalizes a plan review with the last round's verdict", async () => {
   setCodexOutput("### VERDICT\n- Status: APPROVE\n- Reason: ok\n");
-  const begun = await beginSession({ skill: "codex-plan-review", inputText: inputFor("codex-plan-review", "e"), workingDir: workDir });
+  const begun = await beginSession({ skill: "review-plan", inputText: inputFor("review-plan", "e"), workingDir: workDir });
   const w = await waitSession(begun.session_dir, { maxWaitSeconds: 30 });
   assert.equal(w.next, "done");
   const ended = await endSession(begun.session_dir);
@@ -362,7 +362,7 @@ test("end after APPROVE finalizes a plan review with the last round's verdict", 
 
 test("end while a plan review still needs a response only stops", async () => {
   setCodexOutput("### ISSUE-1: x\n- Severity: high\n\n### VERDICT\n- Status: REVISE\n");
-  const begun = await beginSession({ skill: "codex-plan-review", inputText: inputFor("codex-plan-review", "e"), workingDir: workDir });
+  const begun = await beginSession({ skill: "review-plan", inputText: inputFor("review-plan", "e"), workingDir: workDir });
   await waitSession(begun.session_dir, { maxWaitSeconds: 30 });
   const ended = await endSession(begun.session_dir);
   assert.equal(ended.finalized, false);
@@ -371,14 +371,14 @@ test("end while a plan review still needs a response only stops", async () => {
 
 test("peer end with outcome consensus finalizes as CONSENSUS; without outcome only stops", async () => {
   setCodexOutput("### ISSUE-1: x\n- Severity: low\n\n### Overall Assessment\n- Code quality: ok\n\n### VERDICT\n- Status: CONSENSUS\n");
-  const input = inputFor("codex-commit-review", "p");
-  const a = await beginSession({ skill: "codex-commit-review", mode: "staged", inputText: input, workingDir: workDir });
+  const input = inputFor("review-commit", "p");
+  const a = await beginSession({ skill: "review-commit", mode: "staged", inputText: input, workingDir: workDir });
   await waitSession(a.session_dir, { maxWaitSeconds: 30 });
   const endedA = await endSession(a.session_dir, { outcome: "consensus" });
   assert.equal(endedA.finalized, true);
   assert.equal(endedA.verdict, "CONSENSUS");
 
-  const b = await beginSession({ skill: "codex-commit-review", mode: "staged", inputText: input, workingDir: workDir });
+  const b = await beginSession({ skill: "review-commit", mode: "staged", inputText: input, workingDir: workDir });
   await waitSession(b.session_dir, { maxWaitSeconds: 30 });
   const endedB = await endSession(b.session_dir);
   assert.equal(endedB.finalized, false);
@@ -387,7 +387,7 @@ test("peer end with outcome consensus finalizes as CONSENSUS; without outcome on
 
 test("CLI end exits non-zero when finalize fails", async () => {
   setCodexOutput("### VERDICT\n- Status: APPROVE\n");
-  const begun = await beginSession({ skill: "codex-plan-review", inputText: inputFor("codex-plan-review", "ef"), workingDir: workDir });
+  const begun = await beginSession({ skill: "review-plan", inputText: inputFor("review-plan", "ef"), workingDir: workDir });
   await waitSession(begun.session_dir, { maxWaitSeconds: 30 });
   fs.mkdirSync(path.join(begun.session_dir, "meta.json", "blocker"), { recursive: true });
   let failed = null;
@@ -404,22 +404,22 @@ test("CLI end exits non-zero when finalize fails", async () => {
 
 test("begin rejects a missing or unknown mode", async () => {
   await assert.rejects(
-    beginSession({ skill: "codex-impl-review", inputText: "", workingDir: workDir }),
+    beginSession({ skill: "review-impl", inputText: "", workingDir: workDir }),
     e => e.code === "INVALID_INPUT",
   );
   await assert.rejects(
-    beginSession({ skill: "codex-nope", inputText: "", workingDir: workDir }),
+    beginSession({ skill: "review-nope", inputText: "", workingDir: workDir }),
     e => e.code === "UNKNOWN_SKILL",
   );
 });
 
 // ---------- CLI ----------
 
-test("CLI begin/wait/end round-trip with --input - and version 14", () => {
-  assert.equal(execFileSync(process.execPath, [RUNNER, "version"], { encoding: "utf8" }).trim(), "14");
+test("CLI begin/wait/end round-trip with --input - and version 15", () => {
+  assert.equal(execFileSync(process.execPath, [RUNNER, "version"], { encoding: "utf8" }).trim(), "15");
   setCodexOutput("### VERDICT\n- Status: APPROVE\n");
-  const begun = JSON.parse(execFileSync(process.execPath, [RUNNER, "begin", "--skill", "codex-plan-review", "--input", "-", "--working-dir", workDir], {
-    input: inputFor("codex-plan-review", "cli"),
+  const begun = JSON.parse(execFileSync(process.execPath, [RUNNER, "begin", "--skill", "review-plan", "--input", "-", "--working-dir", workDir], {
+    input: inputFor("review-plan", "cli"),
     encoding: "utf8",
   }));
   assert.equal(begun.status, "running");

@@ -9,9 +9,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-const RUNNER = process.env.CODEX_RUNNER
-  ? path.resolve(process.env.CODEX_RUNNER)
-  : path.resolve("skill-packs/codex-review/scripts/codex-runner.js");
+const RUNNER = process.env.REVIEW_RUNNER
+  ? path.resolve(process.env.REVIEW_RUNNER)
+  : path.resolve("skill-packs/cross-review/scripts/review-runner.js");
 const NODE = process.execPath;
 const EXPECTED_TIMEOUT_SECONDS = 5 * 60 * 60;
 
@@ -87,11 +87,11 @@ setInterval(() => {}, 1 << 30);
 
 function initSession(workDir, env) {
   const initOutput = run("init", [
-    "--skill-name", "codex-impl-review",
+    "--skill-name", "review-impl",
     "--working-dir", workDir,
   ], "", env);
-  assert(initOutput.startsWith("CODEX_SESSION:"), "init returns CODEX_SESSION prefix");
-  const sessionDir = initOutput.slice("CODEX_SESSION:".length);
+  assert(initOutput.startsWith("SESSION:"), "init returns SESSION prefix");
+  const sessionDir = initOutput.slice("SESSION:".length);
   sessions.push(sessionDir);
   return sessionDir;
 }
@@ -113,9 +113,9 @@ function startSession(workDir, env, prompt = "timeout resume test") {
 function testUserAuthorityInjection(env) {
   console.log("Step 0: absolute user authority is injected into rendered prompts");
   const rendered = run("render", [
-    "--skill", "codex-impl-review",
+    "--skill", "review-impl",
     "--template", "working-tree-round1",
-    "--skills-dir", path.resolve("skill-packs/codex-review/skills"),
+    "--skills-dir", path.resolve("skill-packs/cross-review/skills"),
   ], "{}", env);
   const authorityHeading = "## ABSOLUTE USER AUTHORITY";
   assert(rendered.startsWith(authorityHeading), "rendered prompt starts with absolute user authority");
@@ -237,13 +237,13 @@ function testProcessFailure(workDir, env) {
   wait(100);
   const poll = runJson("poll", [sessionDir, "--min-interval", "0"], "", env);
   assert(poll.status === "failed", "process exit is failed");
-  assert(poll.failure_reason === "codex_process_exit", "process exit has codex_process_exit reason");
+  assert(poll.failure_reason === "reviewer_process_exit", "process exit has reviewer_process_exit reason");
   assert(poll.recoverable === false, "process exit is non-recoverable");
   assert(poll.timeout_reason === undefined, "process exit is not a runner deadline");
 }
 
 try {
-  tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "codex-runner-timeout-resume-"));
+  tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "review-runner-timeout-resume-"));
   const fakeBin = path.join(tempRoot, "bin");
   const workDir = path.join(tempRoot, "workspace");
   const logPath = path.join(tempRoot, "codex-args.log");

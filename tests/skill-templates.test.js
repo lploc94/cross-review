@@ -6,12 +6,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { PROTOCOL_VARIANTS, renderSkillTemplate } from "../bin/lib/render-skill.js";
-import { SKILL_TEMPLATES } from "../skill-packs/codex-review/scripts/lib/review-core.js";
+import { SKILL_TEMPLATES } from "../skill-packs/cross-review/scripts/lib/review-core.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const PACK = path.join(ROOT, "skill-packs/codex-review");
+const PACK = path.join(ROOT, "skill-packs/cross-review");
 const RUNNER_SKILLS = Object.keys(PROTOCOL_VARIANTS);
-const OPTS = { runnerPath: "/home/u/.claude/skills/codex-review/scripts/codex-runner.js", skillsDir: "/home/u/.claude/skills" };
+const OPTS = { runnerPath: "/home/u/.claude/skills/cross-review/scripts/review-runner.js", skillsDir: "/home/u/.claude/skills" };
 
 const CORE_MARK = "## Running the review";
 const VARIANT_MARK = {
@@ -40,7 +40,7 @@ test("rendered skills have no placeholders, flavor text, protocol files or bash 
     assert.ok(!/flavor/i.test(text), `${skill}: no flavor`);
     assert.ok(!text.includes("protocol.md"), `${skill}: no protocol.md`);
     assert.ok(!text.includes("json_esc"), `${skill}: no json_esc`);
-    assert.ok(!text.includes("claude-analysis-template.md"), `${skill}: analysis template comes via analysis_prompt`);
+    assert.ok(!text.includes("analysis-template.md"), `${skill}: analysis template comes via analysis_prompt`);
   }
 });
 
@@ -61,13 +61,13 @@ test("placeholders a skill tells the model to supply exist in its prompt templat
 test("rendering fails loudly when a template lacks the protocol placeholders", () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "render-test-"));
   try {
-    fs.mkdirSync(path.join(tmp, "skills", "codex-plan-review"), { recursive: true });
+    fs.mkdirSync(path.join(tmp, "skills", "review-plan"), { recursive: true });
     fs.mkdirSync(path.join(tmp, "shared"));
     fs.cpSync(path.join(PACK, "shared", "protocol"), path.join(tmp, "shared", "protocol"), { recursive: true });
-    fs.writeFileSync(path.join(tmp, "skills", "codex-plan-review", "SKILL.md"), "# x\n{{PROTOCOL_CORE}}\n");
-    assert.throws(() => renderSkillTemplate(tmp, "codex-plan-review", OPTS), /PROTOCOL_VARIANT/);
-    fs.writeFileSync(path.join(tmp, "skills", "codex-plan-review", "SKILL.md"), "# x\n{{PROTOCOL_CORE}}\n{{PROTOCOL_VARIANT}}\n{{UNKNOWN_THING}}\n");
-    assert.throws(() => renderSkillTemplate(tmp, "codex-plan-review", OPTS), /UNKNOWN_THING/);
+    fs.writeFileSync(path.join(tmp, "skills", "review-plan", "SKILL.md"), "# x\n{{PROTOCOL_CORE}}\n");
+    assert.throws(() => renderSkillTemplate(tmp, "review-plan", OPTS), /PROTOCOL_VARIANT/);
+    fs.writeFileSync(path.join(tmp, "skills", "review-plan", "SKILL.md"), "# x\n{{PROTOCOL_CORE}}\n{{PROTOCOL_VARIANT}}\n{{UNKNOWN_THING}}\n");
+    assert.throws(() => renderSkillTemplate(tmp, "review-plan", OPTS), /UNKNOWN_THING/);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
@@ -87,7 +87,7 @@ test("rendering rejects every leftover or malformed placeholder", () => {
 });
 
 test("think-about file guard snapshots contents and ignores runner artifacts", () => {
-  const text = fs.readFileSync(path.join(PACK, "skills", "codex-think-about", "SKILL.md"), "utf8");
+  const text = fs.readFileSync(path.join(PACK, "skills", "review-think", "SKILL.md"), "utf8");
   assert.ok(text.includes("git write-tree"), "content snapshot");
   assert.ok(!text.includes("git status --porcelain"), "status-based comparison removed");
 });

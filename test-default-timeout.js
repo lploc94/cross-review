@@ -10,9 +10,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-const RUNNER = process.env.CODEX_RUNNER
-  ? path.resolve(process.env.CODEX_RUNNER)
-  : path.resolve("skill-packs/codex-review/scripts/codex-runner.js");
+const RUNNER = process.env.REVIEW_RUNNER
+  ? path.resolve(process.env.REVIEW_RUNNER)
+  : path.resolve("skill-packs/cross-review/scripts/review-runner.js");
 const NODE = process.execPath;
 const EXPECTED_TIMEOUT_SECONDS = 5 * 60 * 60;
 
@@ -44,7 +44,7 @@ function assert(condition, message) {
 }
 
 try {
-  tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "codex-runner-default-timeout-"));
+  tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "review-runner-default-timeout-"));
   const fakeBin = path.join(tempRoot, "bin");
   const workDir = path.join(tempRoot, "workspace");
   fs.mkdirSync(fakeBin);
@@ -61,11 +61,11 @@ try {
   };
 
   const initOutput = run("init", [
-    "--skill-name", "codex-impl-review",
+    "--skill-name", "review-impl",
     "--working-dir", workDir,
   ], "", env);
-  assert(initOutput.startsWith("CODEX_SESSION:"), "init returns CODEX_SESSION prefix");
-  sessionDir = initOutput.slice("CODEX_SESSION:".length);
+  assert(initOutput.startsWith("SESSION:"), "init returns SESSION prefix");
+  sessionDir = initOutput.slice("SESSION:".length);
 
   const start = JSON.parse(run("start", [sessionDir], "default timeout test", env));
   assert(start.status === "started", `start status = ${start.status}`);

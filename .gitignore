@@ -1,15 +1,15 @@
 # Claude Code local settings (per-machine, should not be shared)
 .claude/settings.local.json
 
-# Codex review runtime artifacts
-.codex-review/
+# Review session artifacts
+.cross-review/
 
 # Node
 node_modules/
 *.tgz
 
 # Install manifest
-.codex-skill-install.json
+.cross-review-install.json
 
 # macOS
 .DS_Store
