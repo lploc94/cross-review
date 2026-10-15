@@ -215,3 +215,17 @@ test("an answer wrapped entirely in one fence is parsed as its content", () => {
   assert.equal(parseOutputMarkdown(wrappedReview).verdict.status, "REVISE");
   assert.equal(parseVerdict(wrappedReview).status, "REVISE");
 });
+
+test("fences close only with a matching fence of at least the opening length", () => {
+  const evidence = "- Evidence:\n```js\nconst x = 1;\n```\n";
+  const four = `\`\`\`\`markdown\n${ISSUE_BLOCK}\n${evidence}\n### VERDICT\n- Status: REVISE\n\`\`\`\`\n`;
+  const parsed = parseOutputMarkdown(four);
+  assert.equal(parsed.format, "review");
+  assert.equal(parsed.verdict.status, "REVISE");
+  assert.deepEqual(parsed.blocks.map(b => b.id), [1]);
+  assert.equal(parseOutputMarkdown("````\n### VERDICT\n- Status: APPROVE\n````").verdict.status, "APPROVE");
+
+  // Inside a four-backtick example, a triple-backtick line does not end the example
+  const example = `${ISSUE_BLOCK}\n### VERDICT\n- Status: REVISE\n- Reason: expected shape\n\`\`\`\`\n\`\`\`\n### VERDICT\n- Status: APPROVE\n\`\`\`\`\n`;
+  assert.equal(parseVerdict(example).status, "REVISE");
+});

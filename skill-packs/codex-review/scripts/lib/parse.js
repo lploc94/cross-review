@@ -70,26 +70,54 @@ const VERDICT_STATUSES = ["APPROVE", "REVISE", "CONSENSUS", "CONTINUE", "STALEMA
  * markers quoted inside evidence or examples are not mistaken for real ones.
  */
 /**
- * Codex sometimes wraps its whole answer in one ```markdown fence. Return the inner text
- * when the output is exactly one fenced block, else the output unchanged.
+ * Line-by-line fence tracker (CommonMark rule): a fence opens with 3+ backticks or tildes
+ * and closes only with the same character, at least as long, and nothing after it.
+ * Returns "open", "inside", "close" or "outside" for each line in order.
+ */
+function fenceTracker() {
+  let open = null;
+  return (line) => {
+    const t = line.trim();
+    const m = t.match(/^(`{3,}|~{3,})/);
+    if (open) {
+      if (m && m[1][0] === open[0] && m[1].length >= open.length && t.slice(m[1].length).trim() === "") {
+        open = null;
+        return "close";
+      }
+      return "inside";
+    }
+    if (m) {
+      open = m[1];
+      return "open";
+    }
+    return "outside";
+  };
+}
+
+/**
+ * Codex sometimes wraps its whole answer in one fence (```markdown or ````markdown when the
+ * answer itself quotes code). Return the inner text when the outer fence spans the whole
+ * output, else the output unchanged.
  */
 function unwrapWholeFence(md) {
   const lines = md.trim().split("\n");
-  const fences = lines.filter(l => l.trim().startsWith("```")).length;
-  if (fences === 2 && lines.length > 2 && lines[0].trim().startsWith("```") && lines[lines.length - 1].trim() === "```") {
-    return lines.slice(1, -1).join("\n");
+  if (lines.length < 3) return md;
+  const track = fenceTracker();
+  for (let i = 0; i < lines.length; i++) {
+    const kind = track(lines[i]);
+    if (i === 0 && kind !== "open") return md;
+    if (kind === "close") return i === lines.length - 1 ? lines.slice(1, -1).join("\n") : md;
   }
   return md;
 }
 
+/**
+ * Blank out fenced code blocks (fence lines included) while keeping every offset, so
+ * markers quoted inside evidence or examples are not mistaken for real ones.
+ */
 function maskFences(md) {
-  let inFence = false;
-  return md.split("\n").map(line => {
-    const fence = line.trim().startsWith("```");
-    const masked = inFence || fence;
-    if (fence) inFence = !inFence;
-    return masked ? " ".repeat(line.length) : line;
-  }).join("\n");
+  const track = fenceTracker();
+  return md.split("\n").map(line => (track(line) === "outside" ? line : " ".repeat(line.length))).join("\n");
 }
 
 /**
@@ -269,11 +297,9 @@ function parseThinkAboutMarkdown(md) {
  */
 function findBlockEnd(md, start) {
   let offset = start;
-  let inFence = false;
+  const track = fenceTracker();
   for (const line of md.slice(start).split("\n")) {
-    if (line.trim().startsWith("```")) {
-      inFence = !inFence;
-    } else if (!inFence && offset > start && /^(?:#{1,3} |\*\*VERDICT\*\*|VERDICT[ \t]*:)/i.test(line)) {
+    if (track(line) === "outside" && offset > start && /^(?:#{1,3} |\*\*VERDICT\*\*|VERDICT[ \t]*:)/i.test(line)) {
       return offset;
     }
     offset += line.length + 1;
