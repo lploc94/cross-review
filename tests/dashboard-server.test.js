@@ -734,13 +734,38 @@ test("settings: GET lists both levels and the catalog; POST writes the workspace
     // A broken file is reported, not hidden
     fs.writeFileSync(wsFile, "{ broken");
     s = await getJson(d, "/api/settings");
-    assert.match(s.errors["harbor-app"], /not valid JSON/);
+    assert.match(s.errors.workspaces["harbor-app"], /not valid JSON/);
+    assert.equal(s.errors.global, undefined);
     const models = await getJson(d, "/api/models?refresh=1");
     assert.equal(models.models.length, 1);
     assert.equal(typeof models.fetchedAt, "number");
   } finally {
     fs.rmSync(wsFile, { force: true });
     fs.rmSync(path.join(process.env.HOME, ".cross-review", "config.json"), { force: true });
+    await d.close();
+  }
+});
+
+test("settings: workspaces named __proto__ and global are listed; a broken workspace file is not reported as the global one", async () => {
+  const root = mk("odd-names");
+  for (const ws of ["__proto__", "global"]) {
+    writeSession(path.join(root, ws, ".cross-review", "sessions"), "review-impl-20261016-001", {
+      skill: "review-impl", mode: "branch", created: nowS() - 60, meta: "APPROVE",
+      inputs: ["## USER_REQUEST\nInvented request.\n"],
+      rounds: [{ status: "completed", started: nowS() - 60, elapsed: 1, review: "### VERDICT\n- Status: APPROVE\n- Reason: Invented approval.\n" }],
+    });
+  }
+  fs.writeFileSync(path.join(root, "__proto__", ".cross-review", "config.json"), JSON.stringify({ effort: "low" }));
+  fs.writeFileSync(path.join(root, "global", ".cross-review", "config.json"), "{ broken");
+  const d = await startDashboard({ root, port: 0, open: false, discoveryFile: null, catalog: CATALOG });
+  try {
+    const s = await getJson(d, "/api/settings");
+    assert.deepEqual(Object.keys(s.workspaces).sort(), ["__proto__", "global"]);
+    assert.deepEqual(Object.keys(s.paths).sort(), ["__proto__", "global"]);
+    assert.deepEqual(s.workspaces.__proto__, { effort: "low" });
+    assert.equal(s.errors.global, undefined);
+    assert.match(s.errors.workspaces.global, /not valid JSON/);
+  } finally {
     await d.close();
   }
 });

@@ -453,19 +453,20 @@ export async function startDashboard({
   };
 
   async function settingsPayload() {
-    const errors = {};
-    const load = (key, file) => {
+    // Keyed by workspace path: no prototype, so a workspace named __proto__ is a plain key
+    const errors = { global: undefined, workspaces: Object.create(null) };
+    const load = (file, onError) => {
       try {
         return readConfig(file);
       } catch (e) {
-        errors[key] = e.message;
+        onError(e.message);
         return {};
       }
     };
-    const workspacesCfg = {};
-    const paths = {};
+    const workspacesCfg = Object.create(null);
+    const paths = Object.create(null);
     for (const [ws, abs] of watcher.workspaceMap()) {
-      workspacesCfg[ws] = load(ws, workspaceConfigPath(abs));
+      workspacesCfg[ws] = load(workspaceConfigPath(abs), m => { errors.workspaces[ws] = m; });
       paths[ws] = tildePath(workspaceConfigPath(abs));
     }
     const m = await models(false);
@@ -474,7 +475,7 @@ export async function startDashboard({
       codexDefault = catalog.defaultModel();
     } catch {}
     return {
-      global: load("global", globalConfigPath()),
+      global: load(globalConfigPath(), m => { errors.global = m; }),
       globalPath: tildePath(globalConfigPath()),
       workspaces: workspacesCfg,
       paths,

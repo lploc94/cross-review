@@ -709,7 +709,7 @@ function renderSettings() {
   $("#explain").innerHTML = workspace
     ? `<span class="path">${esc(settings.paths[ws])}</span><br>Used only in <b>${esc(name)}</b>. Fields left on Inherit take the global value. The file sits next to this workspace's sessions, so git ignores it.`
     : `<span class="path">${esc(settings.globalPath)}</span><br>Used by every workspace unless the workspace sets its own value. Anything you tell the agent in chat still comes first.`;
-  $("#settings-error").textContent = (workspace ? settings.errors[ws] : settings.errors.global) || "";
+  $("#settings-error").textContent = (workspace ? settings.errors.workspaces[ws] : settings.errors.global) || "";
 
   // Defaults
   const reviewerOpts = workspace ? [{ value: "", label: "Inherit — Codex", selected: !d.reviewer }, { value: "codex", label: "Codex", selected: d.reviewer === "codex" }]
