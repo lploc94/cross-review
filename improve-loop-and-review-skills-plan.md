@@ -816,3 +816,6 @@ Checkpoint cuối: `/codex-impl-review` trên diff cộng dồn từ `51d4351`.
   - Model và effort lưu ở khoá `model`/`effort` trong `state.json` (`start` luôn ghi; `resume` ghi khi có `--model`). Skill, mode và `skills_dir` do `begin` ghi.
   - `wait` poll theo nhịp 120 giây như `poll` mặc định, vì runner tính một tick stall cho mỗi lần poll không có output mới. Khi tiến trình Codex đã thoát thì poll ngay. Mặc định `--max-wait` là 110 giây, vừa với timeout 120 giây mặc định của lệnh Bash.
   - AC-2.5: chạy 1 vòng thật impl-review (working-tree, effort low) trên repo tạm có diff nhỏ. `begin → wait → end` cho `completed`, `next: done`, verdict APPROVE (format `review`, không có block), `end` finalize với APPROVE, `.codex-review/.gitignore` = `*`.
+- 2026-10-15 Checkpoint sau Phase 2: `/codex-impl-review` (branch, base `51371a3`, effort high), chạy bằng chính `begin/wait/reply/end` mới, session `codex-impl-review-20261015-001`. APPROVE sau 2 vòng.
+  - Vòng 1: 4 issue, đều ACCEPT và đã sửa ở `c923f13`: `wait` mất activities, input CRLF, block ISSUE nuốt `## VERDICT`, `skillsDir` tương đối. Mỗi issue có test hồi quy; cả 4 test đỏ trên code cũ.
+  - Codex nhận định việc lõi gọi runner qua tiến trình con là "acceptable adaptation".
