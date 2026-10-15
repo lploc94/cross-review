@@ -111,6 +111,25 @@ test("tool errors come back as isError results and the server keeps serving", as
   }
 });
 
+test("review_end reports a failed finalize as isError and still stops the session", async () => {
+  fs.writeFileSync(outputPath, "### VERDICT\n- Status: APPROVE\n");
+  const { client } = await connect();
+  try {
+    const begun = await call(client, "review_begin", { skill: "codex-plan-review", input: PLAN_INPUT, working_dir: workDir });
+    await call(client, "review_wait", { session_dir: begun.body.session_dir, max_wait_seconds: 30 });
+    // A non-empty directory where meta.json goes makes finalize fail
+    fs.mkdirSync(path.join(begun.body.session_dir, "meta.json", "blocker"), { recursive: true });
+    const ended = await call(client, "review_end", { session_dir: begun.body.session_dir });
+    assert.equal(ended.isError, true);
+    assert.equal(ended.body.finalized, false);
+    assert.ok(ended.body.error);
+    const rounds = JSON.parse(fs.readFileSync(path.join(begun.body.session_dir, "rounds.json"), "utf8"));
+    assert.notEqual(rounds.at(-1).status, "running");
+  } finally {
+    await client.close();
+  }
+});
+
 test("a review survives the server being killed; a new server continues it", async () => {
   fs.writeFileSync(outputPath, "### VERDICT\n- Status: APPROVE\n");
   const first = await connect({ FAKE_CODEX_SLOW_MS: "3000" });

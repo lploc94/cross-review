@@ -1978,8 +1978,10 @@ function cmdWatchdog(argv) {
 
 async function runVerb(fn) {
   try {
-    jsonOut(await fn());
-    return EXIT_SUCCESS;
+    const result = await fn();
+    jsonOut(result);
+    // `end` reports a failed finalize in `error` after still stopping the session
+    return result && result.error ? EXIT_ERROR : EXIT_SUCCESS;
   } catch (e) {
     jsonError(e.message, e.code || "UNKNOWN_ERROR");
     return e.code === "CODEX_NOT_FOUND" ? EXIT_CODEX_NOT_FOUND : EXIT_ERROR;

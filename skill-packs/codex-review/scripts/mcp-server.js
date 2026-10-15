@@ -38,7 +38,10 @@ function fail(error) {
 function tool(handler) {
   return async (args) => {
     try {
-      return ok(await handler(args));
+      const result = await handler(args);
+      // review_end reports a failed finalize in `error` after still stopping the session
+      if (result && result.error) return { ...ok(result), isError: true };
+      return ok(result);
     } catch (e) {
       return fail(e);
     }

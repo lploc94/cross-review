@@ -318,6 +318,23 @@ test("peer end with outcome consensus finalizes as CONSENSUS; without outcome on
   assert.ok(!fs.existsSync(path.join(b.session_dir, "meta.json")));
 });
 
+test("CLI end exits non-zero when finalize fails", async () => {
+  setCodexOutput("### VERDICT\n- Status: APPROVE\n");
+  const begun = await beginSession({ skill: "codex-plan-review", inputText: inputFor("codex-plan-review", "ef"), workingDir: workDir });
+  await waitSession(begun.session_dir, { maxWaitSeconds: 30 });
+  fs.mkdirSync(path.join(begun.session_dir, "meta.json", "blocker"), { recursive: true });
+  let failed = null;
+  try {
+    execFileSync(process.execPath, [RUNNER, "end", begun.session_dir], { encoding: "utf8" });
+  } catch (e) {
+    failed = e;
+  }
+  assert.ok(failed, "end must exit non-zero");
+  const out = JSON.parse(failed.stdout);
+  assert.equal(out.finalized, false);
+  assert.ok(out.error);
+});
+
 test("begin rejects a missing or unknown mode", async () => {
   await assert.rejects(
     beginSession({ skill: "codex-impl-review", inputText: "", workingDir: workDir }),
