@@ -427,12 +427,13 @@ try {
     await d3.close();
   }
 
-  // A caller whose name and title are blank: its letters fall back to "AG"; the thread and
-  // the avatar table still render
+  // Odd names from session data: a caller with a blank name and title falls back to "AG"; a
+  // caller named "constructor" and a workspace named "__proto__" are plain keys, not
+  // properties every object inherits
   const blankRoot = path.join(tmp, "blank");
-  writeSession(path.join(blankRoot, "quill", ".cross-review", "sessions"), "review-impl-20261015-500", {
+  for (const [ws, id, caller] of [["quill", "review-impl-20261015-500", { name: "  ", title: "   ", version: "1.0.0" }], ["__proto__", "review-impl-20261015-501", { name: "constructor", title: "Invented Agent", version: "1.0.0" }]]) writeSession(path.join(blankRoot, ws, ".cross-review", "sessions"), id, {
     skill: "review-impl", mode: "branch", created: manyNow - 600, meta: "APPROVE",
-    state: { caller: { name: "  ", title: "   ", version: "1.0.0" } },
+    state: { caller },
     inputs: ["## USER_REQUEST\nInvented request with a blank caller.\n", "## FIXED_ITEMS\nISSUE-1: Invented defect — fixed in src/a.js:1\n\n## DISPUTED_ITEMS\nNone — all issues addressed\n"],
     rounds: [
       { status: "completed", started: manyNow - 600, elapsed: 1, review: "### ISSUE-1: Invented defect\n- Category: bug\n- Severity: low\n- Location: `src/a.js:1`\n- Problem: Invented.\n- Suggested fix: Invented.\n\n### VERDICT\n- Status: REVISE\n- Reason: Invented.\n" },
@@ -445,9 +446,16 @@ try {
     await blank.goto(`${d4.url}#/s/quill/review-impl-20261015-500`);
     await blank.waitFor(`document.querySelectorAll("#thread .m").length > 0 && document.querySelector("#thread .mark.ag")`);
     assert.equal(await blank.evaluate(`document.querySelector("#thread .mark.ag img").alt`), "AG");
+    await blank.evaluate(`location.hash = "#/s/__proto__/review-impl-20261015-501"`);
+    await blank.waitFor(`document.querySelector("#thread .mark.ag img")?.alt === "I"`);
     await blank.evaluate(`location.hash = "#/settings"`);
-    await blank.waitFor(`document.querySelectorAll("#avatars tr").length === 3`);
-    assert.equal(await blank.evaluate(`document.querySelectorAll("#avatars tr")[2].querySelector("img").alt`), "AG");
+    await blank.waitFor(`document.querySelectorAll("#avatars tr").length === 4`);
+    assert.deepEqual(await blank.evaluate(`[...document.querySelectorAll("#avatars tr")].slice(2).map(tr => tr.querySelector("img").alt).sort()`), ["AG", "I"]);
+    fs.writeFileSync(path.join(blankRoot, "__proto__", ".cross-review", "config.json"), JSON.stringify({ effort: "low" }));
+    await blank.evaluate(`location.hash = "#/settings/__proto__"`);
+    await blank.waitFor(`document.getElementById("save").textContent === "Save for __proto__"`);
+    assert.equal(await blank.evaluate(`document.getElementById("settings-error").textContent`), "");
+    assert.match(await blank.evaluate(`document.getElementById("preview").textContent`), /"effort": "low"/);
   } finally {
     await d4.close();
   }

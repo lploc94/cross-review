@@ -127,7 +127,7 @@ function when(epoch) {
   return `${d.getDate()} ${MONTHS[d.getMonth()]}${d.getFullYear() === today.getFullYear() ? "" : ` ${d.getFullYear()}`}`;
 }
 
-const modelOf = s => s.model || `${REVIEWERS[s.reviewer] || s.reviewer} default`;
+const modelOf = s => s.model || `${own(REVIEWERS, s.reviewer) || s.reviewer} default`;
 
 function activeRow(s) {
   const where = `${s.wsName} · ${s.skill} · round ${s.round}${s.state === "waiting" ? " returned" : ""}`;
@@ -224,16 +224,18 @@ const AVATAR = { rv: "avatars/reviewer.png", ag: "avatars/agent.png", us: "avata
 const NAME = { rv: "Reviewer", ag: "Agent", us: "You" };
 const REVIEWER_LETTERS = { codex: "CX" };
 const CALLER_LETTERS = { "claude-code": "CC", "codex-mcp-client": "CX" };
+/** table[key] for the table's own keys only: names from session data can be "constructor" or "__proto__". */
+const own = (table, key) => (Object.hasOwn(table, key) ? table[key] : undefined);
 
 /** Letters (the image's alt and fallback) and tooltip of each side. */
 function party(who, d) {
   if (who === "us") return { letters: "Y", tip: "You" };
   if (who === "rv") {
     const r = d.facts.reviewer;
-    return { letters: REVIEWER_LETTERS[r] || r.slice(0, 2).toUpperCase(), tip: REVIEWERS[r] || r };
+    return { letters: own(REVIEWER_LETTERS, r) || r.slice(0, 2).toUpperCase(), tip: own(REVIEWERS, r) || r };
   }
   const c = d.facts.caller || {};
-  return { letters: CALLER_LETTERS[c.name] || initial(c.title), tip: (c.title || "").trim() || "Agent" };
+  return { letters: own(CALLER_LETTERS, c.name) || initial(c.title), tip: (c.title || "").trim() || "Agent" };
 }
 
 /** An agent's letter: the first character of its title, else "AG" (no title, or a blank one). */
@@ -360,7 +362,7 @@ function started(epoch) {
 
 function renderFacts(d) {
   const f = d.facts;
-  const reviewer = REVIEWERS[f.reviewer] || f.reviewer;
+  const reviewer = own(REVIEWERS, f.reviewer) || f.reviewer;
   $("#f-reviewer").textContent = reviewer;
   const fallback = catalogInfo.codexDefault ? `${modelName(catalogInfo.codexDefault, catalogInfo.models)} · ${reviewer} default` : `${reviewer} default`;
   $("#f-model").textContent = f.model ? modelName(f.model, catalogInfo.models) : fallback;
@@ -709,7 +711,7 @@ function renderSettings() {
   $("#explain").innerHTML = workspace
     ? `<span class="path">${esc(settings.paths[ws])}</span><br>Used only in <b>${esc(name)}</b>. Fields left on Inherit take the global value. The file sits next to this workspace's sessions, so git ignores it.`
     : `<span class="path">${esc(settings.globalPath)}</span><br>Used by every workspace unless the workspace sets its own value. Anything you tell the agent in chat still comes first.`;
-  $("#settings-error").textContent = (workspace ? settings.errors.workspaces[ws] : settings.errors.global) || "";
+  $("#settings-error").textContent = (workspace ? own(settings.errors.workspaces, ws) : settings.errors.global) || "";
 
   // Defaults
   const reviewerOpts = workspace ? [{ value: "", label: "Inherit — Codex", selected: !d.reviewer }, { value: "codex", label: "Codex", selected: d.reviewer === "codex" }]
@@ -776,7 +778,7 @@ const avatarSrc = (who, key) => (avatars.keys.includes(key) ? `avatars/${encodeU
 function renderAvatarTable() {
   $("#avatars").innerHTML = avatars.parties.map(p => {
     const has = avatars.keys.includes(p.key);
-    const letters = p.who === "us" ? "Y" : p.who === "rv" ? "CX" : p.name ? CALLER_LETTERS[p.name] || initial(p.label.split(" · ")[1]) : "AG";
+    const letters = p.who === "us" ? "Y" : p.who === "rv" ? "CX" : p.name ? own(CALLER_LETTERS, p.name) || initial(p.label.split(" · ")[1]) : "AG";
     return `<tr><td><div class="mark ${p.who}"><img src="${avatarSrc(p.who, p.key)}" alt="${esc(letters)}"></div>${esc(p.label)}</td>
       <td class="soft">${esc(p.seenIn)}</td>
       <td class="right"><label><a>${has ? "Change" : "Upload image"}</a><input type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-av="${esc(p.key)}" hidden></label>${has ? ` · <a data-av-clear="${esc(p.key)}">remove</a>` : ""}</td></tr>`;
