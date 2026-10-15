@@ -120,7 +120,7 @@ test("computeNext: think-about suggested_status STALEMATE ends the review", () =
 });
 
 test("computeNext: RESPONSE-only round of a plan review is answered", () => {
-  const r = computeNext({ status: "completed", review: { format: "codebase-validation", blocks: [{ id: 1, prefix: "RESPONSE" }], verdict: { status: "REVISE" } } }, PLAN);
+  const r = computeNext({ status: "completed", review: { format: "response", blocks: [{ id: 1, prefix: "RESPONSE" }], verdict: { status: "REVISE" } } }, PLAN);
   assert.equal(r.next, "respond");
 });
 
@@ -221,16 +221,24 @@ for (const combo of COMBOS) {
   });
 }
 
-test("think-about starts Codex with network sandbox; review skills stay read-only", async () => {
+test("every review skill starts and resumes Codex with full access for verification commands", async () => {
   setCodexOutput("### Key Insights\n- a\n\n### Suggested Status\nCONTINUE\n");
   resetLog();
   const t = await beginSession({ skill: "codex-think-about", inputText: inputFor("codex-think-about", "sb"), workingDir: workDir });
   await waitSession(t.session_dir, { maxWaitSeconds: 30 });
+  setCodexOutput("### ISSUE-1: Something\n- Category: correctness\n- Severity: high\n- Problem: p\n\n### VERDICT\n- Status: REVISE\n");
   const p = await beginSession({ skill: "codex-plan-review", inputText: inputFor("codex-plan-review", "sb"), workingDir: workDir });
   await waitSession(p.session_dir, { maxWaitSeconds: 30 });
-  const [thinkCall, planCall] = codexCalls();
-  assert.equal(thinkCall.args[thinkCall.args.indexOf("--sandbox") + 1], "danger-full-access");
-  assert.equal(planCall.args[planCall.args.indexOf("--sandbox") + 1], "read-only");
+  await replySession(p.session_dir, { inputText: inputFor("codex-plan-review", "sb2") });
+  await waitSession(p.session_dir, { maxWaitSeconds: 30 });
+  const calls = codexCalls();
+  assert.equal(calls.length, 3);
+  const [thinkStart, planStart, planResume] = calls;
+  for (const call of [thinkStart, planStart]) {
+    assert.equal(call.args[call.args.indexOf("--sandbox") + 1], "danger-full-access", call.args.join(" "));
+  }
+  assert.ok(planResume.args.includes("resume"), "third call resumes the plan review");
+  assert.ok(planResume.args.includes('sandbox_mode="danger-full-access"'), planResume.args.join(" "));
   await endSession(t.session_dir);
   await endSession(p.session_dir);
 });

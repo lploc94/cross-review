@@ -72,7 +72,7 @@ Read the plan file directly at: {PLAN_PATH}
 ## Output Instructions
 1. Read the plan file at the path above directly and thoroughly.
 2. Review against the criteria above, anchored to the acceptance criteria in Session Context.
-3. Do NOT propose code changes — review only the plan.
+3. Do NOT propose code changes — review only the plan. You may run commands to verify claims (tests, builds, `curl`, `npm view`, `git fetch`). Do not modify, stage, or commit project files; put any scratch files in a fresh `mktemp -d` directory outside the repository.
 4. Output each finding as ISSUE-{N} using the EXACT format below.
 5. End with a VERDICT block. Do not skip it.
 6. Keep ISSUE-{N} IDs stable — do not renumber in later rounds.

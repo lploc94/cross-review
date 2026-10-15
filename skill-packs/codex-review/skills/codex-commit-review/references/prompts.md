@@ -70,6 +70,7 @@ Run `{DIFF_CONTEXT}` to read the staged diff. Review the actual code changes for
 4. Commit message quality is secondary — only flag if egregiously bad.
 5. Provide a suggested fix description (NOT a patch) for each issue.
 6. Use EXACT output format below.
+7. You may run commands to verify claims (tests, builds, `curl`, `npm view`, `git fetch`). Do not modify, stage, or commit project files; put any scratch files in a fresh `mktemp -d` directory outside the repository.
 
 ## Required Output Format
 {OUTPUT_FORMAT}
@@ -108,6 +109,7 @@ You are Codex acting as an equal peer reviewer of code changes. Another reviewer
 5. In Evidence field, always reference the specific commit SHA and subject.
 6. Provide a suggested fix description (NOT a patch) for each issue.
 7. Use EXACT output format below.
+8. You may run commands to verify claims (tests, builds, `curl`, `npm view`, `git fetch`). Do not modify, stage, or commit project files; put any scratch files in a fresh `mktemp -d` directory outside the repository.
 
 ## Required Output Format
 {OUTPUT_FORMAT}

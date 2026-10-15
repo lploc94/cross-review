@@ -69,7 +69,7 @@ You are Codex acting as an equal peer reviewer of a pull request. Another review
 1. Review code: correctness, regressions, edge cases, security, performance, maintainability.
 2. Review PR-level: description accuracy, commit hygiene, scope appropriateness.
 3. Do NOT suggest fixes — focus on identifying problems and their impact.
-4. Never edit files or run git add/commit/rebase/reset — use read-only inspection commands only.
+4. Never run git add/commit/rebase/reset. You may run commands to verify claims (tests, builds, `curl`, `npm view`, `git fetch`). Do not modify, stage, or commit project files; put any scratch files in a fresh `mktemp -d` directory outside the repository.
 5. In File field, use specific file path and line range for code findings, or "PR-level" for non-code findings.
 6. In Evidence field, reference specific diff hunks, code snippets, or PR metadata.
 7. Use EXACT output format below.
@@ -144,7 +144,7 @@ You are reviewing a pull request independently. Codex is reviewing the same PR s
 1. Re-read the branch diff: `git diff {BASE_BRANCH}...HEAD`. For specific commits: `git show <SHA>`.
 2. Address disagreements with evidence from the diff and code.
 3. Do NOT suggest fixes — focus on whether the problem exists and its severity.
-4. Never edit files or run git add/commit/rebase/reset — use read-only inspection commands only.
+4. Never run git add/commit/rebase/reset. You may run commands to verify claims (tests, builds, `curl`, `npm view`, `git fetch`). Do not modify, stage, or commit project files; put any scratch files in a fresh `mktemp -d` directory outside the repository.
 5. Keep ISSUE-{N} numbering stable. New findings use the next available number.
 6. Use EXACT output format. You MUST include a VERDICT block.
 7. Respond with RESPONSE-{N} blocks. End with VERDICT: `CONSENSUS` only if all disagreements resolved. `CONTINUE` if any point still disputed. `STALEMATE` only if you have no new evidence to add. Claude will send another round if you return CONTINUE.

@@ -18,6 +18,10 @@ const RUNNER = path.join(SCRIPTS_DIR, "codex-runner.js");
 export const POLL_INTERVAL_S = 120;
 export const DEFAULT_MAX_WAIT_S = 110;
 const CHECK_INTERVAL_MS = 2000;
+// Reviewers run tests, builds and network commands (curl, npm view, git fetch) to verify
+// claims; the prompts forbid changing project files. The low-level `start` keeps its
+// read-only default.
+export const REVIEWER_SANDBOX = "danger-full-access";
 
 /**
  * Template names per skill and mode. `round1` starts the session, `reply` renders
@@ -37,8 +41,6 @@ export const SKILL_TEMPLATES = {
   },
   "codex-think-about": {
     peer: true,
-    // Web research needs network access; the skill guards against file changes
-    sandbox: "danger-full-access",
     modes: { default: { round1: "round1", reply: "round2+", analysis: "claude-analysis" } },
   },
   "codex-commit-review": {
@@ -71,7 +73,7 @@ function resolveTemplates(skill, mode) {
   if (!key || !entry.modes[key]) {
     throw new ReviewError(`Skill ${skill} needs --mode, one of: ${modeNames.join(", ")}`, "INVALID_INPUT");
   }
-  return { peer: entry.peer, mode: key, templates: entry.modes[key], sandbox: entry.sandbox || null };
+  return { peer: entry.peer, mode: key, templates: entry.modes[key], sandbox: entry.sandbox || REVIEWER_SANDBOX };
 }
 
 export function isPeerSkill(skill) {

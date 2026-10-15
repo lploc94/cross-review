@@ -102,9 +102,12 @@ function launchCodex(stateDir, workingDir, timeoutS, threadId, effort, model, sa
   let cwd;
 
   if (threadId) {
+    // `exec resume` has no --sandbox flag; without the override a resumed turn falls back
+    // to the config default (seen in real rollouts: danger-full-access → workspace-write)
     args = [
       ...prependArgs, "exec", "--skip-git-repo-check", "--json",
       "--config", `model_reasoning_effort=${effort}`,
+      "--config", `sandbox_mode="${sandbox}"`,
       "resume", ...modelArgs, threadId, "-",
     ];
     cwd = workingDir;
@@ -1418,6 +1421,7 @@ function cmdResume(argv) {
   try {
     const { pid: codexPid, pgid } = launchCodex(
       resolvedSessionDir, resolvedWorkingDir, timeout, threadId, effort, values.model,
+      prevState.sandbox || "read-only",
     );
     codexPgid = pgid;
 
