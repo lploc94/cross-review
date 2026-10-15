@@ -402,3 +402,33 @@ test("readSession reads only the bytes appended to output.jsonl since the last r
   const lines = fs.readFileSync(log, "utf8").split("\n").slice(0, -1);
   assert.deepEqual(readSession(dir).rounds.at(-1).items.map(i => i.id), activityItems(lines).map(i => i.id));
 });
+
+test("a resumed round that rewrites output.jsonl in place with the same first bytes is read as the new round", () => {
+  const dir = path.join(tmp, "resume-ws", ".cross-review", "sessions", "review-impl-20261015-301");
+  fs.mkdirSync(path.join(dir, "outputs"), { recursive: true });
+  const line = v => `${JSON.stringify(v)}\n`;
+  const prefix = line({ type: "thread.started", thread_id: "invented-thread" }) + line({ type: "turn.started" })
+    + line({ type: "item.completed", item: { id: "item_0", type: "command_execution", command: "git status --short", status: "completed", exit_code: 0, aggregated_output: "Invented status. ".repeat(20) } });
+  const r1 = prefix + line({ type: "item.completed", item: { id: "item_1", type: "agent_message", text: "### VERDICT\n- Status: APPROVE\n- Reason: Invented.\n" } }) + line({ type: "turn.completed" });
+  const log = path.join(dir, "output.jsonl");
+  const state = { skill_name: "review-impl", reviewer: "codex", mode: "branch", round: 1, created_at: 100, thread_id: "invented-thread" };
+  const rounds = [{ round: 1, status: "running", started_at: 100 }];
+  const save = () => {
+    fs.writeFileSync(path.join(dir, "state.json"), JSON.stringify(state));
+    fs.writeFileSync(path.join(dir, "rounds.json"), JSON.stringify(rounds));
+  };
+  fs.writeFileSync(log, r1);
+  save();
+  assert.equal(readSession(dir).rounds[0].outcome.turnCompleted, true);
+  // round 2 resumes the same thread into the same file: same first bytes, longer, not finished
+  fs.copyFileSync(log, path.join(dir, "outputs", "output-round-001.jsonl"));
+  state.round = 2;
+  rounds[0].status = "completed";
+  rounds.push({ round: 2, status: "running", started_at: 201 });
+  save();
+  fs.writeFileSync(log, prefix + line({ type: "item.completed", item: { id: "item_1", type: "reasoning", text: "Invented new round. ".repeat(100) } }));
+  const live = readSession(dir).rounds.at(-1);
+  assert.equal(live.round, 2);
+  assert.equal(live.outcome.turnCompleted, false);
+  assert.deepEqual(live.items.map(i => [i.id, i.kind]), [["item_0", "run"], ["item_1", "think"]]);
+});

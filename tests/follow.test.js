@@ -105,3 +105,39 @@ test("the browser does not open: dashboard_error says so and keeps the link; ope
     process.env.PATH = savedPath;
   }
 });
+
+test("CLI begin with Follow reviews on waits for the browser launcher and prints its JSON", async () => {
+  const { writeFakeCodex } = await import("./helpers/fake-codex.js");
+  const { placeholderNames, endSession } = await import("../skill-packs/cross-review/scripts/lib/review-core.js");
+  const repo = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+  const bin = path.join(tmp, "cli-bin");
+  fs.mkdirSync(bin, { recursive: true });
+  writeFakeCodex(bin);
+  // a launcher that succeeds a little later, like `open` handing the URL to a browser
+  fs.writeFileSync(path.join(bin, "open"), "#!/bin/sh\n/bin/sleep 0.25\nexit 0\n", { mode: 0o755 });
+  fs.writeFileSync(path.join(bin, "xdg-open"), "#!/bin/sh\n/bin/sleep 0.25\nexit 0\n", { mode: 0o755 });
+  const ws = path.join(tmp, "cli-ws");
+  fs.mkdirSync(ws, { recursive: true });
+  fs.mkdirSync(path.join(process.env.HOME, ".cross-review"), { recursive: true });
+  fs.writeFileSync(path.join(process.env.HOME, ".cross-review", "config.json"), JSON.stringify({ open_dashboard: true }));
+  fs.writeFileSync(path.join(tmp, "out.md"), "### VERDICT\n- Status: REVISE\n- Reason: Invented pending review.\n");
+  const skillsDir = path.join(repo, "skill-packs", "cross-review", "skills");
+  const input = [...placeholderNames(skillsDir, "review-plan")].filter(n => !["OUTPUT_FORMAT", "ANALYSIS_FORMAT"].includes(n))
+    .map(n => `## ${n}\nInvented ${n}.\n`).join("\n");
+  fs.rmSync(discoveryFile(), { force: true });
+  const r = spawnSync(process.execPath, [path.join(repo, "skill-packs", "cross-review", "scripts", "review-runner.js"), "begin", "--skill", "review-plan", "--working-dir", ws, "--input", "-"], {
+    input, encoding: "utf8", timeout: 30000,
+    env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, FAKE_CODEX_LOG: path.join(tmp, "calls.jsonl"), FAKE_CODEX_OUTPUT: path.join(tmp, "out.md") },
+  });
+  try {
+    if (fs.existsSync(discoveryFile())) spawned.push(JSON.parse(fs.readFileSync(discoveryFile(), "utf8")).pid);
+    assert.equal(r.status, 0, r.stderr);
+    const out = JSON.parse(r.stdout);
+    assert.ok(out.session_dir, r.stdout);
+    assert.match(out.dashboard_url || "", /^http:\/\/127\.0\.0\.1:\d+\/\?t=[0-9a-f]{64}#\/s\//, r.stdout);
+  } finally {
+    const sessions = path.join(ws, ".cross-review", "sessions");
+    if (fs.existsSync(sessions)) for (const id of fs.readdirSync(sessions)) await endSession(path.join(sessions, id));
+    fs.rmSync(path.join(process.env.HOME, ".cross-review", "config.json"), { force: true });
+  }
+});

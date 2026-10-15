@@ -58,8 +58,9 @@ function readText(file) {
 }
 
 // Event logs are read incrementally (D5): per file, the bytes already folded into the
-// reviewer's log state and the incomplete tail. A log that shrinks, is replaced (another
-// inode) or rewritten in place (its first bytes differ) is read again from the start.
+// reviewer's log state and the incomplete tail. A log of another round, one that shrinks,
+// is replaced (another inode) or rewritten in place (its first bytes differ) is read again
+// from the start.
 const logs = new Map();
 const HEAD = 256;
 
@@ -74,8 +75,11 @@ function readAt(fd, length, position) {
   return buf.subarray(0, got);
 }
 
-/** The reviewer's folded state of `file` (null: no such file). */
-function readLog(file, reviewer) {
+/**
+ * The reviewer's folded state of `file` (null: no such file). `round` is the round the file
+ * holds: a resumed round rewrites output.jsonl, so a new round always starts from 0.
+ */
+function readLog(file, reviewer, round) {
   let st;
   try {
     st = fs.statSync(file);
@@ -87,10 +91,10 @@ function readLog(file, reviewer) {
   try {
     fd = fs.openSync(file, "r");
     let c = logs.get(file);
-    const fresh = !c || c.reviewer !== reviewer || c.ino !== st.ino || c.dev !== st.dev || st.size < c.offset
+    const fresh = !c || c.reviewer !== reviewer || c.round !== round || c.ino !== st.ino || c.dev !== st.dev || st.size < c.offset
       || !readAt(fd, c.head.length, 0).equals(c.head);
     if (fresh) {
-      c = { reviewer, ino: st.ino, dev: st.dev, offset: 0, head: Buffer.alloc(0), tail: Buffer.alloc(0), state: reviewer.newLogState() };
+      c = { reviewer, round, ino: st.ino, dev: st.dev, offset: 0, head: Buffer.alloc(0), tail: Buffer.alloc(0), state: reviewer.newLogState() };
       logs.set(file, c);
     }
     if (st.size > c.offset) {
@@ -182,7 +186,7 @@ export function readSession(dir) {
   for (let r = 1; r <= n; r++) {
     const live = r === n;
     const final = readJson(live ? path.join(dir, "final.txt") : path.join(dir, "outputs", `final-round-${pad(r)}.json`));
-    const log = reviewer ? readLog(live ? path.join(dir, "output.jsonl") : path.join(dir, "outputs", `output-round-${pad(r)}.jsonl`), reviewer) : null;
+    const log = reviewer ? readLog(live ? path.join(dir, "output.jsonl") : path.join(dir, "outputs", `output-round-${pad(r)}.jsonl`), reviewer, r) : null;
     const entry = roundEntries.find(e => e.round === r) || {};
     const items = log ? reviewer.logItems(log) : [];
     const timed = attachTimes(items, readLineTimes(dir, r), entry.started_at || null)

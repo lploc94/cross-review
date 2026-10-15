@@ -10,7 +10,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { buildFixture } from "./helpers/dashboard-fixture.js";
+import { buildFixture, writeSession } from "./helpers/dashboard-fixture.js";
 import { findChrome, launchChrome } from "./helpers/chrome.js";
 import { startDashboard } from "../skill-packs/cross-review/scripts/lib/dashboard/server.js";
 
@@ -239,7 +239,9 @@ try {
     help: document.getElementById("reviewer-help").textContent,
     explain: document.getElementById("explain").textContent,
     inlineStyle: document.querySelectorAll("[style]").length,
+    gutter: getComputedStyle(document.documentElement).scrollbarGutter,
   })`);
+  assert.equal(set.gutter, "stable", "Sessions and Settings keep the same width");
   assert.ok(set.follow);
   assert.equal(set.save, "Save global");
   assert.equal(set.avatars, true);
@@ -279,6 +281,34 @@ try {
   for (let i = 0; i < 50 && !fs.existsSync(wsFile); i++) await new Promise(r => setTimeout(r, 100));
   assert.deepEqual(JSON.parse(fs.readFileSync(wsFile, "utf8")), { effort: "low" });
   await page.screenshot(path.join(shots, "settings-workspace-1400.png"));
+
+  // One save at a time: a second Save while the first is in flight does nothing, and an
+  // edit made meanwhile stays in the form for the next Save
+  await page.evaluate(`location.hash = "#/settings"`);
+  await page.waitFor(`document.getElementById("save").textContent === "Save global"`);
+  await page.evaluate(`(() => {
+    const native = window.fetch;
+    window.fetch = async (...args) => {
+      const res = await native(...args);
+      if (args[0] === "/api/settings" && args[1] && args[1].method === "POST" && !window.held2) {
+        window.held2 = true;
+        await new Promise(r => { window.releaseSave2 = r; });
+      }
+      return res;
+    };
+    const e = document.getElementById("f-effort-set"); e.value = "low"; e.dispatchEvent(new Event("change", { bubbles: true }));
+    document.getElementById("save").click();
+  })()`);
+  await page.waitFor(`typeof window.releaseSave2 === "function"`);
+  assert.equal(await page.evaluate(`document.getElementById("save").disabled`), true);
+  await page.evaluate(`(() => { const e = document.getElementById("f-effort-set"); e.value = "xhigh"; e.dispatchEvent(new Event("change", { bubbles: true })); document.getElementById("save").click(); })()`);
+  await page.evaluate(`window.releaseSave2()`);
+  await page.waitFor(`!document.getElementById("save").disabled`);
+  assert.equal(JSON.parse(fs.readFileSync(globalFile, "utf8")).effort, "low", "only the first save was sent");
+  assert.match(await page.evaluate(`document.getElementById("preview").textContent`), /"effort": "xhigh"/, "the later edit is kept");
+  await page.evaluate(`document.getElementById("save").click()`);
+  for (let i = 0; i < 50 && JSON.parse(fs.readFileSync(globalFile, "utf8")).effort !== "xhigh"; i++) await new Promise(r => setTimeout(r, 100));
+  assert.equal(JSON.parse(fs.readFileSync(globalFile, "utf8")).effort, "xhigh");
 
   // Switching to a workspace while a global save is in flight: the answer goes to the global
   // level only, and the workspace form starts from the workspace's own (empty) file
@@ -325,6 +355,47 @@ try {
   await page.waitFor(`document.querySelector("#thread .m.us .mark img")`);
   assert.match(await page.evaluate(`document.querySelector("#thread .m.us .mark img").getAttribute("src")`), /^avatars\/you\?v=\d+$/);
   assert.match(await page.evaluate(`document.querySelector("#thread .mark.rv img").getAttribute("src")`), /^avatars\/reviewer\.png$/);
+
+  // Many finished sessions whose titles wrap differently: every page fits the window, Older
+  // always moves forward, Newer comes back to the same rows
+  const manyRoot = path.join(tmp, "many");
+  const manyNow = Math.floor(Date.now() / 1000);
+  for (let i = 0; i < 40; i++) {
+    const long = i % 3 === 0 ? " Then explain how the invented workspace settings interact with the invented global defaults across every skill." : "";
+    writeSession(path.join(manyRoot, "atlas", ".cross-review", "sessions"), `review-impl-20261015-${String(400 + i).padStart(3, "0")}`, {
+      skill: "review-impl", mode: "branch", created: manyNow - 1000 - i * 60, meta: "APPROVE",
+      inputs: [`## USER_REQUEST\nInvented request number ${i}.${long}\n`],
+      rounds: [{ status: "completed", started: manyNow - 1000 - i * 60, elapsed: 1, review: "### VERDICT\n- Status: APPROVE\n- Reason: Invented approval.\n" }],
+    });
+  }
+  const d3 = await startDashboard({ root: manyRoot, port: 0, open: false, discoveryFile: null, catalog });
+  const many = await browser.newPage(1400, 1200);
+  try {
+    await many.goto(`${d3.url}#/`);
+    await many.waitFor(`/ of 40/.test(document.getElementById("h-pager").textContent)`);
+    const pageOf = () => many.evaluate(`({
+      range: document.getElementById("h-pager").querySelector("span").textContent,
+      scrolls: document.documentElement.scrollHeight > window.innerHeight + 1,
+      older: !document.querySelector('#h-pager a[data-hpage="1"]').classList.contains("off"),
+    })`);
+    const seen = [];
+    for (let guard = 0; guard < 40; guard++) {
+      const p = await pageOf();
+      assert.equal(p.scrolls, false, `page ${p.range} fits the window`);
+      const [from, to] = p.range.replace(/ of 40$/, "").split("–").map(Number);
+      assert.equal(from, seen.length ? seen[seen.length - 1][1] + 1 : 1, `pages continue: ${JSON.stringify(seen)} then ${p.range}`);
+      seen.push([from, to]);
+      if (!p.older) break;
+      await many.evaluate(`document.querySelector('#h-pager a[data-hpage="1"]').click()`);
+    }
+    assert.equal(seen[seen.length - 1][1], 40);
+    assert.ok(seen.length >= 3, JSON.stringify(seen));
+    await many.evaluate(`document.querySelector('#h-pager a[data-hpage="-1"]').click()`);
+    const back = await pageOf();
+    assert.equal(back.range, `${seen[seen.length - 2][0]}–${seen[seen.length - 2][1]} of 40`);
+  } finally {
+    await d3.close();
+  }
 
   // Nothing in progress: the empty state with the full-body avatars
   const empty = await browser.newPage(1400, 900);

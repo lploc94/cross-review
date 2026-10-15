@@ -7,6 +7,9 @@
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
 * { box-sizing: border-box; }
+/* the scrollbar's room is always kept, so a page without one (Sessions) and a long one
+   (Settings) have the same width and switching tabs does not shift the layout */
+html { scrollbar-gutter: stable; }
 body { margin: 0; background: var(--paper); color: var(--ink); font: 14px/1.55 var(--sans); }
 a { color: var(--blue); text-decoration: none; cursor: pointer; } a:hover { text-decoration: underline; }
 .mono { font-family: var(--mono); font-size: 12.5px; }

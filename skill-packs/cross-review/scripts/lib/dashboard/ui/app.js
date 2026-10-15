@@ -155,47 +155,56 @@ function renderFilters() {
   sel.value = data.workspaces.some(w => w.ws === keep) ? keep : "";
 }
 
-// History pages (user decision 2026-10-15): as many rows as fit below the table's top, so
-// the Sessions page does not scroll; at least HISTORY_MIN_ROWS
+// History pages (user decision 2026-10-15): from `offset`, as many rows as fit in the window
+// with the pager under them, so the Sessions page does not scroll; at least HISTORY_MIN_ROWS.
+// Rows wrap differently, so the page is measured on the rows it shows. "Older" moves the
+// offset past the rows shown; "Newer" goes back to the offset before.
 const HISTORY_MIN_ROWS = 3;
-const hist = { page: 0, rowHeight: 0, below: 0 };
+const HISTORY_MAX_ROWS = 100; // more rows than any window holds; bounds the rows laid out to measure
+const hist = { offset: 0, back: [] };
 
-function historyPerPage() {
-  const body = $("#history");
-  // rows wrap differently: size the page by the tallest one seen
-  for (const row of body.querySelectorAll("tr[data-go]")) hist.rowHeight = Math.max(hist.rowHeight, row.getBoundingClientRect().height);
-  const rowHeight = hist.rowHeight || 50;
-  const pager = 40; // the pager line and its margin
-  const room = window.innerHeight - (body.getBoundingClientRect().top + window.scrollY) - pager - (hist.below || 48);
-  return Math.max(HISTORY_MIN_ROWS, Math.floor(room / rowHeight));
-}
-
-/** The space under the History block (main's padding, body's margin): measured after a render. */
-function measureBelow() {
-  const pager = $("#h-pager");
-  const last = pager.innerHTML ? pager : $("#history").closest("table");
-  const main = last.closest("main");
-  const gap = main.getBoundingClientRect().bottom - last.getBoundingClientRect().bottom;
-  if (gap >= 0 && last.getBoundingClientRect().height) hist.below = gap + (parseFloat(getComputedStyle(document.body).marginBottom) || 0);
-}
-
-function renderHistory() {
+function filteredHistory() {
   const ws = $("#f-ws").value;
   const skill = $("#f-skill").value;
   const result = $("#f-result").value;
   const q = $("#f-search").value.trim().toLowerCase();
-  const rows = data.history.filter(s => (!ws || s.ws === ws) && (!skill || s.skill === skill) && (!result || s.label === result)
+  return data.history.filter(s => (!ws || s.ws === ws) && (!skill || s.skill === skill) && (!result || s.label === result)
     && (!q || s.searchText.includes(q) || s.wsName.toLowerCase().includes(q) || s.id.includes(q)));
-  const per = historyPerPage();
-  const pages = Math.max(1, Math.ceil(rows.length / per));
-  hist.page = Math.min(hist.page, pages - 1);
-  const shown = rows.slice(hist.page * per, (hist.page + 1) * per);
+}
+
+function paintHistory(rows, count, pager) {
+  const shown = rows.slice(hist.offset, hist.offset + count);
   $("#history").innerHTML = shown.length ? shown.map(historyRow).join("")
     : `<tr class="empty"><td colspan="7" class="soft">${data.history.length ? "No session matches." : "No finished sessions yet."}</td></tr>`;
-  $("#h-pager").innerHTML = rows.length > per
-    ? `<a data-hpage="-1"${hist.page === 0 ? ' class="off"' : ""}>‹ Newer</a><span>${hist.page * per + 1}–${hist.page * per + shown.length} of ${rows.length}</span><a data-hpage="1"${hist.page >= pages - 1 ? ' class="off"' : ""}>Older ›</a>`
+  $("#h-pager").innerHTML = pager
+    ? `<a data-hpage="-1"${hist.offset === 0 ? ' class="off"' : ""}>‹ Newer</a><span>${hist.offset + 1}–${hist.offset + shown.length} of ${rows.length}</span><a data-hpage="1"${hist.offset + shown.length >= rows.length ? ' class="off"' : ""}>Older ›</a>`
     : "";
-  measureBelow();
+  hist.shown = shown.length;
+}
+
+function renderHistory() {
+  const rows = filteredHistory();
+  hist.offset = Math.max(0, Math.min(hist.offset, rows.length - 1));
+  const left = rows.length - hist.offset;
+  if (!$("#sessions").classList.contains("on")) {
+    // hidden: nothing to measure; the route renders again when it shows
+    paintHistory(rows, Math.min(left, 10), rows.length > 10);
+    return;
+  }
+  // Lay out the candidates with the pager, then keep the rows that end above the pager's place
+  paintHistory(rows, Math.min(left, HISTORY_MAX_ROWS), true);
+  const pager = $("#h-pager");
+  const main = pager.closest("main");
+  const budget = window.innerHeight - (parseFloat(getComputedStyle(main).paddingBottom) || 0)
+    - pager.getBoundingClientRect().height - (parseFloat(getComputedStyle(pager).marginTop) || 0);
+  let fit = 0;
+  for (const row of $("#history").querySelectorAll("tr[data-go]")) {
+    if (row.getBoundingClientRect().bottom + window.scrollY > budget) break;
+    fit++;
+  }
+  fit = Math.max(Math.min(HISTORY_MIN_ROWS, left), fit);
+  // everything from the first row fits: no pager
+  paintHistory(rows, fit, !(hist.offset === 0 && fit >= left));
 }
 
 function renderSessions() {
@@ -863,26 +872,34 @@ async function onSettingsClick(e) {
     sv.touched = new Set(ALL_PATHS);
     renderSettings();
   } else if (t.id === "save") {
-    // The reader may switch scope while this saves: the answer updates the level it was
-    // sent for, and the form only when it still shows that level
+    // One save at a time: answers cannot arrive out of order
+    if (pendingSave) return;
+    // The reader may switch scope or keep editing while this saves: the answer updates the
+    // level it was sent for, and resets the form only when it still shows exactly what was sent
     const scope = sv.scope;
     const ws = sv.ws;
     const draft = sv.draft;
+    const sent = JSON.stringify(draft);
     const config = mergeForm(savedConfig(), draft, sv.touched);
     const body = scope === "global" ? { scope: "global", config } : { scope: "workspace", ws, config };
+    $("#save").disabled = true;
     pendingSave = fetch("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-    const res = await pendingSave.catch(() => null);
-    pendingSave = null;
-    const same = sv.scope === scope && sv.ws === ws && sv.draft === draft;
-    if (!res || !res.ok) {
-      const msg = res ? (await res.json().catch(() => ({}))).error : null;
-      if (same) $("#save-error").textContent = msg || "The settings could not be saved.";
-      return;
+    try {
+      const res = await pendingSave.catch(() => null);
+      const same = sv.scope === scope && sv.ws === ws && sv.draft === draft;
+      if (!res || !res.ok) {
+        const msg = res ? (await res.json().catch(() => ({}))).error : null;
+        if (same) $("#save-error").textContent = msg || "The settings could not be saved.";
+        return;
+      }
+      const saved = (await res.json()).config;
+      if (scope === "global") settings.global = saved; else settings.workspaces[ws] = saved;
+      if (same && JSON.stringify(sv.draft) === sent) resetDraft();
+      renderSettings();
+    } finally {
+      pendingSave = null;
+      $("#save").disabled = false;
     }
-    const saved = (await res.json()).config;
-    if (scope === "global") settings.global = saved; else settings.workspaces[ws] = saved;
-    if (sv.scope === scope && sv.ws === ws && sv.draft === draft) resetDraft();
-    renderSettings();
   }
 }
 
@@ -898,7 +915,8 @@ function apply(payload) {
 async function start() {
   document.querySelectorAll("[data-i]").forEach(el => el.insertAdjacentHTML("afterbegin", ic(el.dataset.i)));
   const refilter = () => {
-    hist.page = 0;
+    hist.offset = 0;
+    hist.back = [];
     if (data) renderHistory();
   };
   for (const id of ["#f-ws", "#f-skill", "#f-result"]) $(id).addEventListener("change", refilter);
@@ -906,7 +924,12 @@ async function start() {
   $("#h-pager").addEventListener("click", e => {
     const a = e.target.closest("a[data-hpage]");
     if (!a || !data) return;
-    hist.page = Math.max(0, hist.page + Number(a.dataset.hpage));
+    if (Number(a.dataset.hpage) > 0) {
+      hist.back.push(hist.offset);
+      hist.offset += hist.shown;
+    } else {
+      hist.offset = hist.back.length ? hist.back.pop() : 0;
+    }
     renderHistory();
   });
   window.addEventListener("resize", () => data && $("#sessions").classList.contains("on") && renderHistory());

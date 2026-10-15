@@ -331,8 +331,9 @@ export function openBrowser(url) {
       child.on("error", e => done({ ok: false, error: e.message }));
       child.on("exit", code => done(code === 0 ? { ok: true } : { ok: false, error: `${cmd} exited with ${code}` }));
       child.unref();
+      // the timer stays referenced: a caller that awaits this (CLI `begin`) must not exit
+      // before the launcher answers; it is cleared as soon as it does
       timer = setTimeout(() => done({ ok: true }), 5000);
-      timer.unref();
     } catch (e) {
       done({ ok: false, error: e.message });
     }
