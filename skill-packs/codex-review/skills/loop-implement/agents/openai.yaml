@@ -1,0 +1,4 @@
+interface:
+  display_name: "Loop Implement"
+  short_description: "Execute an approved phased plan"
+  default_prompt: "Use $loop-implement to execute the approved loop-plan in this repository."

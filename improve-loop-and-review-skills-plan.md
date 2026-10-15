@@ -869,3 +869,25 @@ Checkpoint cuối: `/codex-impl-review` trên diff cộng dồn từ `51d4351`.
     | 3 điểm dừng, mẫu 5 phần | Mục Talking with the user |
 
   - AC-5.3: không có Impact map, Failure modes, bảng State and lifecycle, luật chạy gate ở baseline hay cấm thu hẹp suite, checklist bẫy, hay bắt buộc test đột biến. Phần tự kiểm chỉ còn 2 ý mà Behavioral contract cho phép.
+- 2026-10-15 Phase 6 xong. Full gate: ba test cũ pass, `node --test tests/` 70/70. `tests/loop-skills.test.js` 8/8; trên SKILL.md cũ có 2 test loop-implement đỏ (thiếu `/codex-impl-review`, còn `in_progress`). loop-implement dài 50 dòng (giới hạn 59), có 16 bước đánh số, bản cũ có 18. `agents/openai.yaml` chép từ `~/.codex/skills/loop-implement`. Bản Codex dùng `$codex-impl-review`, vì Phase 7 cài review skill vào `~/.codex/skills`.
+  - AC-6.2, đối chiếu mục 15 và các dòng `implement` ở mục 21.3:
+
+    | Nguồn | Câu trong SKILL.md |
+    |---|---|
+    | 15: Admission rút gọn, sửa sau approve thì hỏi | Admission bước 2 |
+    | 15: ghi sổ một lần lúc commit, bỏ `in_progress` và commit riêng cho plan | Per-phase bước 6; Finalization bước 6 |
+    | 15: xử lý finding chỉ ở review skill | Per-phase bước 7 |
+    | 15: gộp xem diff thành một bước trước commit | Per-phase bước 5 |
+    | 15: phase gate nhẹ, smoke chỉ khi plan yêu cầu | Per-phase bước 4 |
+    | 15: Finalization dùng lại bằng chứng AC, chỉ kiểm phần xuyên phase | Finalization bước 2 |
+    | 15: full suite một lần cùng review cuối, sửa theo thang test | Finalization bước 1, 4, 5 |
+    | 15: đọc lại phase, chỉ kiểm path/symbol sắp đụng | Per-phase bước 1 |
+    | 15: thấy test đỏ, ghi một dòng | Per-phase bước 2 |
+    | 21.3: APPROVE phải có nguồn | Admission bước 2 |
+    | 21.3: review tại checkpoint, kèm model | Per-phase bước 7; Finalization bước 4 |
+    | 21.3: thang test | Per-phase bước 4; Finalization bước 5 |
+    | 21.3: chính sách giới hạn | Per-phase bước 3 (giới hạn đi kèm cách xử lý mềm); Plan changes (không tự thêm giới hạn) |
+    | 21.3: kỷ luật gate, so với baseline | Gate discipline, ý 1–2 |
+    | 21.3: đề xuất đổi plan theo mẫu 5 phần, user đồng ý thì ghi kèm ngày, không chạy lại plan-review | Plan changes |
+    | 21.3: AC dở thì báo `not done` | Gate discipline, ý 3; Stop conditions and reporting |
+    | 21.3: giữ tự audit tích hợp | Finalization bước 3 |
