@@ -12,6 +12,7 @@
 
 import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 const RUNNER = path.resolve("skill-packs/cross-review/scripts/review-runner.js");
@@ -20,6 +21,12 @@ const NODE = process.execPath;
 let dummyProcs = [];
 let sessionDir = null;
 
+// A stand-in for the codex CLI that only stays alive: the test kills it right after start and
+// never needs a real reviewer (none is installed in CI, and a real one would start a paid turn).
+const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), "stall-fake-codex-"));
+fs.writeFileSync(path.join(fakeBin, "codex"), "#!/usr/bin/env node\nsetInterval(() => {}, 1 << 30);\n", { mode: 0o755 });
+const ENV = { ...process.env, PATH: `${fakeBin}${path.delimiter}${process.env.PATH || ""}` };
+
 function cleanup() {
   for (const p of dummyProcs) {
     try { process.kill(p.pid, "SIGKILL"); } catch {}
@@ -27,12 +34,14 @@ function cleanup() {
   if (sessionDir && fs.existsSync(sessionDir)) {
     fs.rmSync(sessionDir, { recursive: true, force: true });
   }
+  fs.rmSync(fakeBin, { recursive: true, force: true });
 }
 
 function run(cmd, args, stdin = "") {
   const result = execFileSync(NODE, [RUNNER, cmd, ...args], {
     input: stdin,
     encoding: "utf8",
+    env: ENV,
     timeout: 15000,
   });
   return result.trim();

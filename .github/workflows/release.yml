@@ -1,0 +1,50 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  id-token: write # npm trusted publishing (OIDC) and provenance
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # Node 24 ships npm 11, which trusted publishing requires. No dependency cache in release builds.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+      - name: Check the tag matches both versions
+        run: |
+          version="$(node -p 'require("./package.json").version')"
+          manifest="$(node -p 'require("./skill-packs/cross-review/manifest.json").version')"
+          test "v${version}" = "${GITHUB_REF_NAME}" || { echo "tag ${GITHUB_REF_NAME} != package.json v${version}"; exit 1; }
+          test "${version}" = "${manifest}" || { echo "package.json ${version} != manifest.json ${manifest}"; exit 1; }
+      - name: Install the runtime dependencies
+        run: npm ci --prefix skill-packs/cross-review
+      - name: Test
+        run: node test-default-timeout.js && node test-stall-recovery.js && node test-timeout-resume.js && node --test "tests/*.test.js"
+      # The installer under a temporary HOME, as in CLAUDE.md; never the runner's real HOME.
+      - name: Install check
+        run: |
+          H="$(mktemp -d)"
+          HOME="$H" CODEX_HOME="$H/.codex" node bin/cross-review.js
+          node tests/install-check.mjs "$H"
+      - name: Pack
+        run: npm pack --ignore-scripts
+      - name: Publish to npm
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if npm view "@tlelabs/cross-review@${version}" version >/dev/null 2>&1; then
+            echo "@tlelabs/cross-review@${version} is already on npm; skipping publish"
+          else
+            npm publish "tlelabs-cross-review-${version}.tgz" --access public --provenance
+          fi
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" tlelabs-cross-review-*.tgz --title "$GITHUB_REF_NAME" --generate-notes --verify-tag

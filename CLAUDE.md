@@ -31,7 +31,7 @@ The project was called `codex-review` (repo `lploc94/codex_skill`, skills `codex
 
 ```bash
 npm ci --prefix skill-packs/cross-review                          # MCP SDK for tests and the MCP server
-node test-default-timeout.js && node test-stall-recovery.js && node test-timeout-resume.js && node --test tests/
+node test-default-timeout.js && node test-stall-recovery.js && node test-timeout-resume.js && node --test "tests/*.test.js"
 H=$(mktemp -d) && HOME="$H" CODEX_HOME="$H/.codex" node bin/cross-review.js && node tests/install-check.mjs "$H"
 node skill-packs/cross-review/scripts/review-runner.js version     # runner version
 node tests/dashboard-ui.mjs                                         # dashboard in headless Chrome (CHROME=<path>)
@@ -204,6 +204,15 @@ Besides the prompts and outputs, a session keeps what the dashboard needs to ret
 1. Development Commands above: both gates exit 0
 2. `node skill-packs/cross-review/scripts/review-runner.js version` prints `15`
 3. Invoke a review skill from a temporary install in Claude Code (`/review-impl`) and Codex (`$review-impl`)
+
+## Releasing
+
+`.github/workflows/release.yml` publishes `@tlelabs/cross-review` to npm when a `v<version>` tag is pushed: it checks that the tag, `package.json` and `manifest.json` carry the same version, runs the tests and a temp-HOME install check, packs, publishes with npm trusted publishing (OIDC, provenance; no token) unless that version is already on npm, and creates a GitHub release with the tarball.
+
+1. Bump `version` in `package.json` and `skill-packs/cross-review/manifest.json` together; add a Breaking Changes entry when behavior changes.
+2. Commit and push `main`, then `git tag vX.Y.Z && git push origin vX.Y.Z`, and watch the Release workflow.
+
+First-time setup (done once): `npm login`; create the package with a placeholder: in a temp copy (`git archive HEAD | tar -x -C "$T"`), set `version` to `0.0.0-bootstrap.0`, `npm pack`, `npm publish <tgz> --access public --tag bootstrap`. On npmjs.com → `@tlelabs/cross-review` → Settings → Trusted Publisher → GitHub Actions: user `lploc94`, repository `cross-review`, workflow `release.yml`, allow `npm publish`. Push the first real tag within 2 days (npm expires a trusted publisher that no OIDC publish has used). Then `npm unpublish @tlelabs/cross-review@0.0.0-bootstrap.0` (allowed within 72 hours; later, `npm deprecate` it) and `npm dist-tag rm @tlelabs/cross-review bootstrap`.
 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
