@@ -7,9 +7,10 @@
 // checkSelection({model, effort}) → {ok: true} | {ok: false, message} (run before begin and
 // reply launch anything; a failure is INVALID_SELECTION).
 
+import * as claude from "./claude.js";
 import * as codex from "./codex.js";
 
-const REVIEWERS = { codex };
+const REVIEWERS = { codex, claude };
 
 export const DEFAULT_REVIEWER = "codex";
 export const REVIEWER_NAMES = Object.keys(REVIEWERS);

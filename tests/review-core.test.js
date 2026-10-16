@@ -18,6 +18,7 @@ import {
 } from "../skill-packs/cross-review/scripts/lib/review-core.js";
 import { followInDashboard } from "../skill-packs/cross-review/scripts/lib/dashboard/follow.js";
 import { writeFakeCodex } from "./helpers/fake-codex.js";
+import { writeFakeClaude } from "./helpers/fake-claude.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const RUNNER = path.join(ROOT, "skill-packs/cross-review/scripts/review-runner.js");
@@ -37,6 +38,7 @@ before(() => {
   const bin = path.join(tmp, "bin");
   fs.mkdirSync(bin);
   writeFakeCodex(bin);
+  writeFakeClaude(bin);
   workDir = path.join(tmp, "work");
   fs.mkdirSync(workDir);
   logPath = path.join(tmp, "codex-log.jsonl");
@@ -44,6 +46,8 @@ before(() => {
   process.env.PATH = `${bin}${path.delimiter}${process.env.PATH}`;
   process.env.FAKE_CODEX_LOG = logPath;
   process.env.FAKE_CODEX_OUTPUT = outputPath;
+  process.env.FAKE_CLAUDE_LOG = path.join(tmp, "claude-log.jsonl");
+  process.env.FAKE_CLAUDE_OUTPUT = path.join(tmp, "claude-output.md");
 });
 
 after(() => {
@@ -805,4 +809,95 @@ test("the reviewer process gets CROSS_REVIEW_REVIEWER and Codex stdin stays the 
   assert.equal(fs.existsSync(path.join(begun.session_dir, "prompt.stdin")), false);
   assert.equal(process.env.CROSS_REVIEW_REVIEWER, undefined, "only the reviewer's environment carries it");
   await endSession(begun.session_dir);
+});
+
+// ---------- Claude Code as the reviewer ----------
+
+function claudeCalls() {
+  const f = process.env.FAKE_CLAUDE_LOG;
+  if (!fs.existsSync(f)) return [];
+  return fs.readFileSync(f, "utf8").trim().split("\n").filter(Boolean).map(l => JSON.parse(l));
+}
+
+test("claude reviewer round trip: begin → wait → reply resumes the same session → end", async () => {
+  fs.rmSync(process.env.FAKE_CLAUDE_LOG, { force: true });
+  resetLog();
+  fs.writeFileSync(process.env.FAKE_CLAUDE_OUTPUT, "### ISSUE-1: Something\n- Category: correctness\n- Severity: high\n- Problem: p\n\n### VERDICT\n- Status: REVISE\n- Reason: r\n");
+  const input1 = inputFor("review-impl", "c1");
+  const begun = await beginSession({ skill: "review-impl", mode: "working-tree", inputText: input1, workingDir: workDir, reviewer: "claude", effort: "max" });
+  const w1 = await waitSession(begun.session_dir, { maxWaitSeconds: 30 });
+  assert.equal(w1.status, "completed");
+  assert.equal(w1.next, "respond");
+  assert.equal(w1.thread_id, "session-fake-1");
+  assert.equal(w1.review.blocks.length, 1);
+  const st = stateOf(begun.session_dir);
+  assert.deepEqual([st.reviewer, st.sandbox, st.effort], ["claude", "danger-full-access", "max"]);
+
+  fs.writeFileSync(process.env.FAKE_CLAUDE_OUTPUT, "### VERDICT\n- Status: APPROVE\n- Reason: ok\n");
+  const input2 = inputFor("review-impl", "c2");
+  await replySession(begun.session_dir, { inputText: input2 });
+  const w2 = await waitSession(begun.session_dir, { maxWaitSeconds: 30 });
+  assert.equal(w2.next, "done");
+
+  const calls = claudeCalls();
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].prompt, renderExpected("review-impl", "working-tree-round1", input1));
+  assert.equal(calls[1].prompt, renderExpected("review-impl", "rebuttal-working-tree", input2));
+  assert.ok(!calls[0].args.includes("--resume"));
+  assert.equal(argAfter(calls[1].args, "--resume"), "session-fake-1");
+  assert.equal(argAfter(calls[1].args, "--effort"), "max");
+  assert.ok(calls.every(c => c.args.includes("--dangerously-skip-permissions") && c.reviewerEnv === "claude"));
+  assert.equal(codexCalls().length, 0, "Codex is not started for a Claude review");
+  const end = await endSession(begun.session_dir);
+  assert.equal(end.finalized, true);
+});
+
+test("claude rejects an unknown effort before any session exists", async () => {
+  const ws = fs.mkdtempSync(path.join(tmp, "claude-effort-"));
+  fs.rmSync(process.env.FAKE_CLAUDE_LOG, { force: true });
+  await assert.rejects(
+    beginSession({ skill: "review-plan", inputText: inputFor("review-plan", "e"), workingDir: ws, reviewer: "claude", effort: "huge" }),
+    e => e.code === "INVALID_SELECTION" && /low, medium, high, xhigh, max/.test(e.message),
+  );
+  assert.equal(sessionCount(ws), 0);
+  assert.equal(claudeCalls().length, 0);
+});
+
+test("claude reply rejects an unknown effort and leaves the session as it was", async () => {
+  fs.rmSync(process.env.FAKE_CLAUDE_LOG, { force: true });
+  fs.writeFileSync(process.env.FAKE_CLAUDE_OUTPUT, "### ISSUE-1: Something\n- Category: correctness\n- Severity: high\n- Problem: p\n\n### VERDICT\n- Status: REVISE\n");
+  const begun = await beginSession({ skill: "review-plan", inputText: inputFor("review-plan", "r1"), workingDir: workDir, reviewer: "claude" });
+  await waitSession(begun.session_dir, { maxWaitSeconds: 30 });
+  const files = ["state.json", "rounds.json"].map(f => path.join(begun.session_dir, f));
+  const before = files.map(f => fs.readFileSync(f, "utf8"));
+  await assert.rejects(
+    replySession(begun.session_dir, { inputText: inputFor("review-plan", "r2"), effort: "huge" }),
+    e => e.code === "INVALID_SELECTION",
+  );
+  assert.deepEqual(files.map(f => fs.readFileSync(f, "utf8")), before);
+  assert.equal(claudeCalls().length, 1);
+  assert.equal(fs.existsSync(path.join(begun.session_dir, "inputs", "round-002.md")), false);
+
+  await replySession(begun.session_dir, { inputText: inputFor("review-plan", "r2"), effort: "max" });
+  await waitSession(begun.session_dir, { maxWaitSeconds: 30 });
+  const calls = claudeCalls();
+  assert.equal(calls.length, 2);
+  assert.equal(argAfter(calls[1].args, "--effort"), "max");
+  assert.equal(argAfter(calls[1].args, "--resume"), "session-fake-1");
+  await endSession(begun.session_dir);
+});
+
+test("a failed Claude turn (is_error) stops the round with its message", async () => {
+  fs.writeFileSync(process.env.FAKE_CLAUDE_OUTPUT, "unused");
+  process.env.FAKE_CLAUDE_ERROR = "There's an issue with the selected model (gpt-x).";
+  try {
+    const begun = await beginSession({ skill: "review-plan", inputText: inputFor("review-plan", "f"), workingDir: workDir, reviewer: "claude" });
+    const w = await waitSession(begun.session_dir, { maxWaitSeconds: 30 });
+    assert.equal(w.next, "stopped");
+    assert.match(w.error, /Claude Code turn failed: There's an issue with the selected model/);
+    assert.equal(w.thread_id, "session-fake-1");
+    await endSession(begun.session_dir);
+  } finally {
+    delete process.env.FAKE_CLAUDE_ERROR;
+  }
 });
