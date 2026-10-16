@@ -768,3 +768,41 @@ test("open_dashboard: a dashboard that cannot start only adds dashboard_error; u
     hooks.follow = saved;
   }
 });
+
+// ---------- reviewer environment and nested reviews ----------
+
+function sessionCount(ws) {
+  const dir = path.join(ws, ".cross-review", "sessions");
+  return fs.existsSync(dir) ? fs.readdirSync(dir).length : 0;
+}
+
+test("begin refuses inside a reviewer (CROSS_REVIEW_REVIEWER) before creating a session", async () => {
+  const ws = fs.mkdtempSync(path.join(tmp, "nested-"));
+  resetLog();
+  process.env.CROSS_REVIEW_REVIEWER = "claude";
+  try {
+    await assert.rejects(
+      beginSession({ skill: "review-plan", inputText: inputFor("review-plan", "n"), workingDir: ws }),
+      e => e.code === "NESTED_REVIEW" && /CROSS_REVIEW_REVIEWER=claude/.test(e.message),
+    );
+  } finally {
+    delete process.env.CROSS_REVIEW_REVIEWER;
+  }
+  assert.equal(sessionCount(ws), 0);
+  assert.equal(fs.existsSync(path.join(ws, ".cross-review")), false);
+  assert.equal(codexCalls().length, 0);
+});
+
+test("the reviewer process gets CROSS_REVIEW_REVIEWER and Codex stdin stays the raw prompt", async () => {
+  resetLog();
+  setCodexOutput("### VERDICT\n- Status: APPROVE\n- Reason: ok\n");
+  const input = inputFor("review-plan", "env");
+  const begun = await beginSession({ skill: "review-plan", inputText: input, workingDir: workDir });
+  await waitSession(begun.session_dir, { maxWaitSeconds: 30 });
+  const [call] = codexCalls();
+  assert.equal(call.reviewerEnv, "codex");
+  assert.equal(call.prompt, fs.readFileSync(path.join(begun.session_dir, "prompts", "round-001.txt"), "utf8"));
+  assert.equal(fs.existsSync(path.join(begun.session_dir, "prompt.stdin")), false);
+  assert.equal(process.env.CROSS_REVIEW_REVIEWER, undefined, "only the reviewer's environment carries it");
+  await endSession(begun.session_dir);
+});

@@ -1,4 +1,4 @@
-// Fake `codex` executable for tests: logs its args and stdin prompt to FAKE_CODEX_LOG,
+// Fake `codex` executable for tests: logs its args, stdin prompt and CROSS_REVIEW_REVIEWER to FAKE_CODEX_LOG,
 // then prints a JSONL turn whose agent message is the content of FAKE_CODEX_OUTPUT.
 // FAKE_CODEX_SLOW_MS keeps it running (after some progress events) for that long.
 // FAKE_CODEX_FAIL fails the turn after the thread started, with that message (e.g. a usage limit).
@@ -13,7 +13,7 @@ export function writeFakeCodex(binDir) {
 const fs = require("node:fs");
 let prompt = "";
 try { prompt = fs.readFileSync(0, "utf8"); } catch {}
-fs.appendFileSync(process.env.FAKE_CODEX_LOG, JSON.stringify({ args: process.argv.slice(2), prompt }) + "\\n");
+fs.appendFileSync(process.env.FAKE_CODEX_LOG, JSON.stringify({ args: process.argv.slice(2), prompt, reviewerEnv: process.env.CROSS_REVIEW_REVIEWER ?? null }) + "\\n");
 const text = fs.readFileSync(process.env.FAKE_CODEX_OUTPUT, "utf8");
 if (process.env.FAKE_CODEX_FAIL) {
   const failed = [

@@ -56,7 +56,14 @@ function launchReviewer(reviewer, stateDir, workingDir, threadId, effort, model,
 
   const { cmd, args, cwd } = reviewer.buildCommand({ threadId, workingDir, model, effort, sandbox });
 
-  const fin = fs.openSync(promptFile, "r");
+  // A reviewer that reads its prompt in its own format gets that on stdin; prompt.txt stays the text
+  let stdinFile = promptFile;
+  if (reviewer.encodePrompt) {
+    stdinFile = path.join(stateDir, "prompt.stdin");
+    fs.writeFileSync(stdinFile, reviewer.encodePrompt(fs.readFileSync(promptFile, "utf8")), "utf8");
+  }
+
+  const fin = fs.openSync(stdinFile, "r");
   const fout = fs.openSync(jsonlFile, "w");
   const ferr = fs.openSync(errFile, "w");
 
@@ -64,6 +71,8 @@ function launchReviewer(reviewer, stateDir, workingDir, threadId, effort, model,
     stdio: [fin, fout, ferr],
     detached: true,
     cwd,
+    // begin refuses to run inside a reviewer, so a reviewer cannot open reviews of its own
+    env: { ...process.env, CROSS_REVIEW_REVIEWER: reviewer.name },
   };
 
   if (IS_WIN) {

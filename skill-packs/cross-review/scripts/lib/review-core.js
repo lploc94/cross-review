@@ -224,6 +224,13 @@ function sessionSettings(skill, workingDir, explicit) {
   }
 }
 
+/** The reviewer's own check of a model and effort (e.g. an effort the model lacks); INVALID_SELECTION when it fails. */
+function checkSelection(reviewerModule, model, effort) {
+  if (!reviewerModule.checkSelection) return;
+  const r = reviewerModule.checkSelection({ model: model || null, effort });
+  if (r && r.ok === false) throw new ReviewError(r.message, "INVALID_SELECTION");
+}
+
 /** Follow reviews: open the session in the dashboard. Failures only become dashboard_error. */
 async function follow(sessionDir) {
   try {
@@ -244,9 +251,14 @@ async function follow(sessionDir) {
  * `caller` ({name, title?, version?}, from the MCP client) is stored for the dashboard.
  */
 export async function beginSession({ skill, mode, inputText, inputFile, workingDir, model, effort, timeout, reviewer, skillsDir, caller }) {
+  // The runner sets this for every reviewer it starts: a reviewer must not open reviews of its own
+  if (process.env.CROSS_REVIEW_REVIEWER) {
+    throw new ReviewError(`A review cannot start inside a reviewer (CROSS_REVIEW_REVIEWER=${process.env.CROSS_REVIEW_REVIEWER})`, "NESTED_REVIEW");
+  }
   const resolved = resolveTemplates(skill, mode);
   const settings = sessionSettings(skill, workingDir || process.cwd(), { reviewer, model, effort });
   const reviewerModule = getReviewer(settings.reviewer);
+  checkSelection(reviewerModule, settings.model, settings.effort);
   // Absolute, so later replies from another working directory find the same prompts
   const dir = path.resolve(skillsDir || defaultSkillsDir(skill));
   const raw = readInput({ inputText, inputFile });
@@ -367,14 +379,17 @@ export async function replySession(sessionDir, { inputText, inputFile, model, ef
   const state = readState(sessionDir);
   const skill = state.skill_name;
   const resolved = resolveTemplates(skill, state.mode);
+  // `start`/`resume` record effort and model in state.json
+  const useEffort = effort || state.effort || "high";
+  const useModel = model || state.model || null;
+  // before anything is rendered or launched, so a refused reply leaves the session as it was
+  checkSelection(getReviewer(state.reviewer), useModel, useEffort);
+
   const dir = state.skills_dir || defaultSkillsDir(skill);
   const raw = readInput({ inputText, inputFile });
   const values = parseReviewInput(raw, placeholderNames(dir, skill));
   const prompt = await render(skill, resolved.templates.reply, dir, values);
 
-  // `start`/`resume` record effort and model in state.json
-  const useEffort = effort || state.effort || "high";
-  const useModel = model || state.model || null;
   const args = ["resume", sessionDir, "--effort", useEffort];
   if (useModel) args.push("--model", useModel);
   if (state.timeout) args.push("--timeout", String(state.timeout));
