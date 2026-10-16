@@ -26,3 +26,6 @@ docs/superpowers/
 # Promo video: fetched fonts and rendered output (video/build.mjs)
 video/.cache/
 video/out/
+
+# Dashboard demo: built output (demo/build.mjs)
+demo/out/

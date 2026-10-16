@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // The landing page's promo video, built end to end (script: video/script.md):
 //   text cards (cards.html) that explain each step, each followed by what it looks like:
-//   a terminal scene (terminal.html) and the real dashboard following an invented session
-//   that the script writes round by round.
+//   a terminal scene (terminal.html) and the dashboard demo (demo/build.mjs: the real dashboard
+//   UI on recorded, invented sessions) playing the same review's last round to its approval.
 // Text is drawn with OFL fonts (fetched by hash into video/.cache); every name and file in
 // the story is invented. Needs Chrome (CHROME=<path>) and ffmpeg; no npm dependencies.
 //
@@ -12,6 +12,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
+import http from "node:http";
 import { spawn, execFileSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -22,6 +23,8 @@ const OUT = path.join(HERE, "out");
 const WORK = path.join(OUT, "work");
 const PAPER = "#f8f7f3";
 const FADE = 0.4;
+/** The dashboard demo plays at this share of its landing-page step times. */
+const DEMO_SPEED = 0.45;
 
 // ---------- fonts (SIL Open Font License 1.1), pinned to one google/fonts commit ----------
 
@@ -224,52 +227,23 @@ function chain(out, clips) {
   ffmpeg(...clips.flatMap(c => ["-i", c]), "-filter_complex", filter, "-map", "[v]", ...ENC, "-movflags", "+faststart", out);
 }
 
-// ---------- the invented session ----------
+// ---------- the dashboard demo ----------
 
-const sh = command => ({ kind: "command", command: `/bin/zsh -lc '${command.replace(/'/g, "'\\''")}'`, exit: 0, output: "" });
-const R1_ACTS = [sh("git diff --stat"), sh("sed -n '1,80p' src/upload/retry.js"), sh("cat tests/upload/retry.test.js"), sh("npm test -- upload"), sh("rg -n 'Retry-After' src")];
-const R2_ACTS = [sh("git diff src/upload/retry.js"), sh("sed -n '30,60p' src/upload/retry.js"), sh("nl -ba src/upload/client.js | sed -n '80,95p'"), sh("npm test -- upload")];
-const R1 = [
-  "### ISSUE-1: Retries never stop on a 4xx",
-  "- Category: correctness", "- Severity: high", "- Location: src/upload/retry.js:42",
-  "- Problem: `retryUpload()` retries every failed request, including 400 and 413, so a bad upload loops until the attempt limit.",
-  "- Suggested fix: Retry only network errors, 429 and 5xx.", "",
-  "### ISSUE-2: Backoff ignores Retry-After",
-  "- Category: correctness", "- Severity: medium", "- Location: src/upload/retry.js:57",
-  "- Problem: The delay doubles from one second even when the server sends `Retry-After`.", "",
-  "### VERDICT", "- Status: REVISE", "- Reason: Two defects; the backoff itself is sound.", "",
-].join("\n");
-const R2 = "### VERDICT\n- Status: APPROVE\n- Reason: ISSUE-1 holds: 4xx responses now fail at once. ISSUE-2 withdrawn: client.js:88 passes Retry-After as the minimum delay. All tests pass.\n";
-const IN1 = "## USER_REQUEST\nRetry failed uploads with backoff.\n\n## SESSION_CONTEXT\nInvented context.\n";
-const IN2 = "## FIXED_ITEMS\nISSUE-1: Retries never stop on a 4xx — fixed in src/upload/retry.js:42, retries only network errors, 429 and 5xx; test tests/upload/retry.test.js:31\n\n## DISPUTED_ITEMS\nISSUE-2: Backoff ignores Retry-After — src/upload/client.js:88 reads Retry-After and passes it as the minimum delay; test tests/upload/client.test.js:54\n";
-
-// Round 2's event log with fixed item ids: each write only appends lines to the previous one,
-// as a real reviewer's log grows (the dashboard reads appended lines only).
-function round2Log(r2Acts, approved) {
-  const lines = [{ type: "thread.started", thread_id: "thread-orchard-api" }, { type: "turn.started" }];
-  R2_ACTS.slice(0, approved ? R2_ACTS.length : r2Acts).forEach((a, i) => {
-    const item = { id: `r2_${i}`, type: "command_execution", command: a.command, aggregated_output: "" };
-    lines.push({ type: "item.started", item: { ...item, exit_code: null, status: "in_progress" } });
-    if (approved || i < r2Acts - 1) lines.push({ type: "item.completed", item: { ...item, exit_code: 0, status: "completed" } });
+/** Serve a built demo folder at /demo/ on 127.0.0.1; resolves to { url, close }. */
+async function serveDemo(dir) {
+  const types = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".json": "application/json", ".png": "image/png", ".txt": "text/plain" };
+  const server = http.createServer((req, res) => {
+    const p = decodeURIComponent(new URL(req.url, "http://x").pathname);
+    const file = path.join(dir, p.replace(/^\/demo\//, "") || "index.html");
+    if (!p.startsWith("/demo/") || !file.startsWith(dir) || !fs.existsSync(file) || !fs.statSync(file).isFile()) {
+      res.writeHead(404);
+      return res.end();
+    }
+    res.writeHead(200, { "Content-Type": types[path.extname(file)] || "application/octet-stream" });
+    fs.createReadStream(file).pipe(res);
   });
-  if (approved) lines.push({ type: "item.completed", item: { id: "r2_review", type: "agent_message", text: R2 } }, { type: "turn.completed", usage: {} });
-  return lines.map(l => JSON.stringify(l)).join("\n") + "\n";
-}
-
-function writeStory(writeSession, sessionsDir, id, { r2Start, r2Acts, approved }) {
-  const now = Math.floor(Date.now() / 1000);
-  writeSession(sessionsDir, id, {
-    skill: "review-impl", mode: "working-tree", created: r2Start - 420, inputs: [IN1, IN2],
-    threadId: "thread-orchard-api",
-    state: { pid: process.pid, pgid: process.pid, caller: { name: "agent" } },
-    rounds: [
-      { status: "completed", started: r2Start - 420, elapsed: 214, review: R1, acts: R1_ACTS },
-      approved
-        ? { status: "completed", started: r2Start, elapsed: now - r2Start, review: R2, acts: R2_ACTS }
-        : { status: "running", started: r2Start, elapsed: 0, acts: R2_ACTS.slice(0, r2Acts), openLast: true },
-    ],
-  });
-  fs.writeFileSync(path.join(sessionsDir, id, "output.jsonl"), round2Log(r2Acts, approved));
+  await new Promise(r => server.listen(0, "127.0.0.1", r));
+  return { url: `http://127.0.0.1:${server.address().port}/demo/`, close: () => server.close() };
 }
 
 // ---------- build ----------
@@ -285,17 +259,13 @@ async function main() {
   const css = await fontCss();
 
   const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "promo-")));
-  process.env.HOME = path.join(tmp, "home");
-  const root = path.join(process.env.HOME, "projects");
-  const sessionsDir = path.join(root, "orchard-api", ".cross-review", "sessions");
-  fs.mkdirSync(sessionsDir, { recursive: true });
-  const { writeSession } = await import(pathToFileURL(path.join(REPO, "tests/helpers/dashboard-fixture.js")).href);
-  const { startDashboard } = await import(pathToFileURL(path.join(REPO, "skill-packs/cross-review/scripts/lib/dashboard/server.js")).href);
-  const day = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-  const id = `review-impl-${day}-004`;
-  const r2Start = Math.floor(Date.now() / 1000) - 5;
-  writeStory(writeSession, sessionsDir, id, { r2Start, r2Acts: 1, approved: false });
-  const dashboard = await startDashboard({ root, port: 0, open: false, discoveryFile: null, latestVersion: async () => null });
+  // the dashboard demo, as the landing page shows it, played faster: the video shows its review
+  const demoDir = path.join(WORK, "demo");
+  execFileSync(process.execPath, [path.join(REPO, "demo/build.mjs"), demoDir], { stdio: "inherit" });
+  const demoData = JSON.parse(fs.readFileSync(path.join(demoDir, "data.json"), "utf8"));
+  for (const step of demoData.steps) step.ms = Math.round(step.ms * DEMO_SPEED);
+  fs.writeFileSync(path.join(demoDir, "data.json"), JSON.stringify(demoData));
+  const demo = await serveDemo(demoDir);
   const browser = await launchChrome(path.join(tmp, "profile"));
   try {
     // cards
@@ -321,25 +291,24 @@ async function main() {
       await shot(`kind=caption&label=${encodeURIComponent(label)}&text=${encodeURIComponent(text)}`, png(`cap-${key}`), "1920:140");
     }
 
-    // terminal scene, cut into the three steps it shows (times follow terminal.html)
+    // terminal scene, cut into the three steps it shows (times follow terminal.html's SCRIPT)
     const term = await browser.newPage({ width: 1280, height: 627, scale: 1.5, css });
     await term.goto(pathToFileURL(path.join(HERE, "terminal.html")).href, `typeof window.play === "function"`);
     const termClip = await term.record("terminal", () => term.evaluate("window.play()"));
-    const termAsk = captioned("t-ask", cut("t1", termClip, 0, 2.7), [{ png: png("cap-ask"), from: 0, to: 99 }]);
-    const termCheck = captioned("t-check", cut("t2", termClip, 2.7, 8.5), [{ png: png("cap-check"), from: 0, to: 99 }]);
-    const termAnswer = captioned("t-answer", cut("t3", termClip, 8.5, 99), [{ png: png("cap-answer"), from: 0, to: 99 }]);
+    const termAsk = captioned("t-ask", cut("t1", termClip, 0, 3.3), [{ png: png("cap-ask"), from: 0, to: 99 }]);
+    const termCheck = captioned("t-check", cut("t2", termClip, 3.3, 13.3), [{ png: png("cap-check"), from: 0, to: 99 }]);
+    const termAnswer = captioned("t-answer", cut("t3", termClip, 13.3, 99), [{ png: png("cap-answer"), from: 0, to: 99 }]);
 
-    // dashboard scene: the same session, round 2 running, then approved
+    // dashboard scene: the same review in the demo, round 3 streaming in, then approved
     const dash = await browser.newPage({ width: 1100, height: 539, scale: 1920 / 1100, css });
-    await dash.goto(`${dashboard.url}#/s/orchard-api/${id}`, `document.querySelector("#status .what") && document.querySelectorAll("#thread .m").length > 1`);
+    await dash.goto(`${demo.url}?paused#/`, `document.querySelectorAll("#active tr").length > 1`);
+    await dash.evaluate(`window.postMessage({ demo: "view", view: "session" }, location.origin)`);
+    await dash.waitFor(`document.querySelector("#status .what") && document.querySelectorAll("#acts > *").length > 3`);
+    await sleep(600);
     const dashClip = await dash.record("dashboard", async () => {
-      await sleep(1500);
-      for (const n of [2, 3, 4]) {
-        writeStory(writeSession, sessionsDir, id, { r2Start, r2Acts: n, approved: false });
-        await sleep(1300);
-      }
-      writeStory(writeSession, sessionsDir, id, { r2Start, r2Acts: 4, approved: true });
-      await dash.waitFor(`/approve/i.test(document.querySelector("#thread")?.textContent || "")`);
+      await sleep(1200);
+      await dash.evaluate(`window.postMessage({ demo: "play" }, location.origin)`);
+      await dash.waitFor(`/Approved/.test(document.querySelector("#status .what")?.textContent || "")`, 60000);
       await sleep(4500);
     });
     const dashScene = captioned("dashboard", dashClip, [{ png: png("cap-watch"), from: 0, to: 99 }]);
@@ -363,7 +332,7 @@ async function main() {
     }
   } finally {
     browser.close();
-    await dashboard.close();
+    demo.close();
     fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 }

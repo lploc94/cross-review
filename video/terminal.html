@@ -16,8 +16,10 @@
   .bar { height: 38px; display: flex; align-items: center; gap: 8px; padding: 0 16px; border-bottom: 1px solid #2c2a26; }
   .dot { width: 12px; height: 12px; border-radius: 50%; background: #45423c; }
   .bar .t { flex: 1; text-align: center; margin-right: 52px; font: 13px var(--mono); color: var(--muted); }
-  .screen { flex: 1; padding: 22px 28px; font: 16.5px/1.62 var(--mono); color: var(--text); white-space: pre; overflow: hidden; }
-  .line { min-height: 1.62em; }
+  /* new lines push old ones up once the screen is full, as in a real terminal */
+  .screen { flex: 1; padding: 18px 26px; font: 14.5px/1.6 var(--mono); color: var(--text); white-space: pre; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; }
+  #lines { margin-bottom: auto; }
+  .line { min-height: 1.6em; }
   .muted { color: var(--muted); }
   .rust { color: var(--rust); }
   .green { color: var(--green); }
@@ -34,33 +36,52 @@
   .done::before { content: ""; position: absolute; left: 0.2em; top: 0.08em; width: 0.28em; height: 0.6em; border: solid var(--green); border-width: 0 2px 2px 0; transform: rotate(45deg); }
 </style>
 <div class="win">
-  <div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="t">~/orchard-api — agent</span></div>
-  <div class="screen" id="screen"></div>
+  <div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="t">~/projects/harbor-app — agent</span></div>
+  <div class="screen"><div id="lines"></div></div>
 </div>
 <script>
-  const screen = document.getElementById("screen");
+  const screen = document.getElementById("lines");
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const add = html => { const d = document.createElement("div"); d.className = "line"; d.innerHTML = html; screen.append(d); return d; };
 
   // Lines: [time in seconds, html]. A line whose html starts with "~" marks a running step:
   // it shows a spinner until the next running step (or the end) replaces it with a tick.
+  const R = '<span class="muted">reviewer</span>';
   const SCRIPT = [
-    [1.7, '<span class="b">●</span> review-impl <span class="muted">· working tree · 3 files changed</span>'],
-    [2.3, '  <span class="muted">A second model (Codex) reviews the change.</span>'],
-    [3.0, '~  <span class="muted">reviewer</span>  reading src/upload/retry.js'],
-    [3.8, '~  <span class="muted">reviewer</span>  running npm test -- upload'],
-    [4.7, '~  <span class="muted">reviewer</span>  reading src/upload/client.js'],
-    [5.7, ''],
-    [5.8, '  Round 1 · <span class="rust b">REVISE</span> · 2 issues'],
-    [6.3, '    ISSUE-1  <span class="rust">high  </span>  Retries never stop on a 4xx     <span class="muted">src/upload/retry.js:42</span>'],
-    [6.8, '    ISSUE-2  <span class="rust">medium</span>  Backoff ignores Retry-After     <span class="muted">src/upload/retry.js:57</span>'],
-    [8.6, ''],
-    [8.7, '<span class="b">●</span> agent <span class="muted">· answering 2 issues</span>'],
-    [9.0, '  <span class="green">Fixed</span>     ISSUE-1  stop on 4xx · <span class="muted">src/upload/retry.js:42</span> · tests pass'],
-    [10.0, '  <span class="violet">Disputed</span>  ISSUE-2  Retry-After is read in <span class="muted">src/upload/client.js:88</span>'],
-    [11.2, '~  Round 2 · reviewer checking the fixes'],
+    [2.0, '<span class="b">●</span> review-impl <span class="muted">· branch since 4f2c9e1 · 9 files changed, +412 −37</span>'],
+    [2.5, '  <span class="muted">A second model (Codex) reviews phase 3 of export-formats-plan.md. Dashboard: 127.0.0.1:24817</span>'],
+    [3.4, `~  ${R}  git diff --stat 4f2c9e1...HEAD`],
+    [3.9, `~  ${R}  read the plan: Phase 3, AC-3.1 to AC-3.5`],
+    [4.5, `~  ${R}  read src/export/stream.ts, src/export/pager.ts`],
+    [5.1, `~  ${R}  node --test test/stream.test.js test/pager.test.js <span class="muted">· 31 passed</span>`],
+    [5.8, `~  ${R}  scratch dir: 2 000 rows, one timestamp → export | wc -l <span class="muted">· 2003</span>`],
+    [6.5, `~  ${R}  scratch dir: cancel after 2 s <span class="muted">· t.csv left behind, 3.1 MB</span>`],
+    [7.2, `~  ${R}  npm run bench:export -- --rows 1000000 --format json <span class="muted">· 94 s</span>`],
+    [7.9, `~  ${R}  npm test <span class="muted">· 471 passed</span>`],
+    [8.7, ''],
+    [8.8, '  Round 1 · <span class="rust b">REVISE</span> · 5 issues <span class="muted">· 4:16</span>'],
+    [9.2, '    ISSUE-1  <span class="rust">high  </span>  A cancelled export leaves a partial file behind   <span class="muted">src/export/stream.ts:88</span>'],
+    [9.6, '    ISSUE-2  <span class="rust">high  </span>  Rows on a page boundary are written twice         <span class="muted">src/export/pager.ts:41</span>'],
+    [10.0, '    ISSUE-3  <span class="rust">medium</span>  JSON writer awaits every row                      <span class="muted">src/export/json-writer.ts:27</span>'],
+    [10.4, '    ISSUE-4  <span class="rust">medium</span>  Toolbar counter counts pages, not rows            <span class="muted">src/ui/ExportButton.tsx:63</span>'],
+    [10.8, '    ISSUE-5  <span class="muted">low   </span>  Memory test passes without streaming              <span class="muted">test/stream.test.js:52</span>'],
+    [13.4, ''],
+    [13.5, '<span class="b">●</span> agent <span class="muted">· answering 5 issues</span>'],
+    [14.0, '~  edit src/export/stream.ts <span class="muted">· write &lt;out&gt;.partial, rename on finish, unlink on abort</span>'],
+    [14.6, '~  edit src/export/pager.ts <span class="muted">· cursor (updated_at, id)</span>'],
+    [15.2, '~  edit src/ui/ExportButton.tsx, test/stream.test.js <span class="muted">· rows, not pages; rss sampled</span>'],
+    [15.9, '~  node --test test/stream.test.js test/pager.test.js test/toolbar.test.js <span class="muted">· 36 passed</span>'],
+    [16.6, '~  npm run bench:export -- --rows 1000000 <span class="muted">· JSON 23.8 s, CSV 21.2 s</span>'],
+    [17.4, '  <span class="green">Fixed</span>     ISSUE-1, ISSUE-2, ISSUE-4, ISSUE-5 <span class="muted">· each with a regression test</span>'],
+    [18.1, '  <span class="violet">Disputed</span>  ISSUE-3 <span class="muted">· bench: 23.8 s JSON vs 21.2 s CSV; the 94 s was a debug build</span>'],
+    [19.0, '~  Round 2 · reviewer checking the answers'],
+    [21.0, '  Round 2 · <span class="rust b">REVISE</span> · ISSUE-3 withdrawn · 2 new'],
+    [21.4, '    ISSUE-6  <span class="rust">medium</span>  Two exports to the same path share one .partial file   <span class="muted">src/export/stream.ts:84</span>'],
+    [21.8, '    ISSUE-7  <span class="muted">low   </span>  Cancel leaves the page request running                 <span class="muted">src/export/pager.ts:52</span>'],
+    [22.7, '  <span class="green">Fixed</span>     ISSUE-6, ISSUE-7 <span class="muted">· node --test · 38 passed</span>'],
+    [23.4, '~  Round 3 · reviewer checking'],
   ];
-  const END = 13.4;
+  const END = 25.4;
 
   window.play = async () => {
     const t0 = performance.now();
@@ -68,8 +89,8 @@
     const prompt = add('<span class="blue">›</span> <span id="typed"></span><span class="caret"></span>');
     await at(0.5);
     const typed = prompt.querySelector("#typed");
-    for (const ch of "/review-impl") { typed.textContent += ch; await sleep(70); }
-    await at(1.4);
+    for (const ch of "/review-impl phase 3 of export-formats-plan.md") { typed.textContent += ch; await sleep(28); }
+    await at(1.9);
     prompt.querySelector(".caret").remove();
     let running = null;
     for (const [s, html] of SCRIPT) {
@@ -78,7 +99,8 @@
         if (running) running.firstElementChild.className = "done";
         running = add(`  <span class="spin"></span>${html.slice(1)}`);
       } else {
-        if (running && html.includes("Round 1")) { running.firstElementChild.className = "done"; running = null; }
+        // a plain line closes the running step above it
+        if (running && html) { running.firstElementChild.className = "done"; running = null; }
         add(html);
       }
     }
