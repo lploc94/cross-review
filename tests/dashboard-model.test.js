@@ -44,20 +44,45 @@ test("each row of the status table classifies its fixture session", () => {
   }
 });
 
-test("time alone moves a session: warn at 20 minutes, history after 24 hours (same parsed data)", () => {
+test("time alone moves a session: warn at 20 minutes, history after 1 hour (same parsed data)", () => {
   const parsed = readSession(fx.sessions.warn);
   const completed = parsed.rounds[0].entry.completed_at;
   const c = now => classify(parsed, { now, isAlive }).summary;
   assert.equal(c(completed + 1199).warn, null);
   assert.equal(c(completed + 1201).warn, TEXT.warn);
-  assert.equal(c(completed + 86399).group, "active");
-  const late = c(completed + 86401);
+  assert.equal(c(completed + 3599).group, "active");
+  const late = c(completed + 3601);
   assert.deepEqual([late.group, late.label], ["history", LABELS.noReply]);
+  assert.equal(classify(parsed, { now: completed + 3601, isAlive }).detail.status.next, "No reply for over an hour.");
 
   const stopped = readSession(fx.sessions.stopped);
   const end = stopped.rounds.at(-1).entry.completed_at;
-  assert.equal(classify(stopped, { now: end + 86399, isAlive }).summary.group, "active");
-  assert.equal(classify(stopped, { now: end + 86401, isAlive }).summary.group, "history");
+  assert.equal(classify(stopped, { now: end + 3599, isAlive }).summary.group, "active");
+  const old = classify(stopped, { now: end + 3601, isAlive });
+  assert.deepEqual([old.summary.group, old.summary.label], ["history", LABELS.stopped]);
+  // Out of the list, but the thread is kept: the page still says it can be resumed.
+  assert.match(old.detail.status.next, /stopped for over an hour\. Ask the agent to resume it/);
+});
+
+test("a session in history comes back to In progress when the agent resumes it", () => {
+  for (const key of ["noReply", "stoppedOld"]) {
+    const dir = path.join(tmp, `resumed-${key}`, ".cross-review", "sessions", path.basename(fx.sessions[key]));
+    fs.cpSync(fx.sessions[key], dir, { recursive: true });
+    assert.equal(classify(readSession(dir), { now: fx.now, isAlive }).summary.group, "history", key);
+    // review_reply: the runner archives the round's files and starts a new round with a live reviewer
+    const state = JSON.parse(fs.readFileSync(path.join(dir, "state.json"), "utf8"));
+    const rounds = JSON.parse(fs.readFileSync(path.join(dir, "rounds.json"), "utf8"));
+    const n = String(rounds.length).padStart(3, "0");
+    for (const [live, archived] of [["final.txt", `final-round-${n}.json`], ["output.jsonl", `output-round-${n}.jsonl`], ["review.md", `review-round-${n}.md`]]) {
+      if (fs.existsSync(path.join(dir, live))) fs.renameSync(path.join(dir, live), path.join(dir, "outputs", archived));
+    }
+    rounds.push({ round: rounds.length + 1, status: "running", started_at: fx.now - 30 });
+    Object.assign(state, { round: rounds.length, pid: LIVE, thread_id: state.thread_id || "invented-thread" });
+    fs.writeFileSync(path.join(dir, "rounds.json"), JSON.stringify(rounds));
+    fs.writeFileSync(path.join(dir, "state.json"), JSON.stringify(state));
+    const { summary } = classify(readSession(dir), { now: fx.now, isAlive });
+    assert.deepEqual([summary.group, summary.label], ["active", LABELS.running], key);
+  }
 });
 
 test("a running round whose reviewer died unpolled is read from its event log", () => {

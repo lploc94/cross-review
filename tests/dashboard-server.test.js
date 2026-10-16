@@ -263,7 +263,7 @@ test("list stream: a new event line changes Now; final.txt moves the session to 
 
 // ---------- 4b ----------
 
-test("watcher: warn after 1200 s, no reply after 24 h, stopped leaves after 24 h — no file changes", async () => {
+test("watcher: warn after 1200 s, no reply after 1 h, stopped leaves after 1 h — no file changes", async () => {
   const root = mk("clock");
   const base = 1_800_000_000;
   const fx = buildFixture(root, { now: base, livePid: process.pid });
@@ -294,12 +294,12 @@ test("watcher: warn after 1200 s, no reply after 24 h, stopped leaves after 24 h
     const p1 = await latest(p => find(p, waitingId).warn);
     assert.ok(got.length > count);
     assert.equal(find(p1, waitingId).group, "active");
-    now = since + 86401;
+    now = since + 3601;
     const p2 = await latest(p => find(p, waitingId).group === "history");
     assert.equal(find(p2, waitingId).label, "no reply");
-    now = stoppedSince + 86399;
+    now = stoppedSince + 3599;
     await latest(p => find(p, stoppedId).group === "active");
-    now = stoppedSince + 86401;
+    now = stoppedSince + 3601;
     const p3 = await latest(p => find(p, stoppedId).group === "history");
     assert.equal(find(p3, stoppedId).label, "stopped");
   } finally {

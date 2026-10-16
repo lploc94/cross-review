@@ -115,7 +115,7 @@ const sessionFiles = dir => signatureParts(dir).filter(p => !ACTIVITY_FILE.test(
 /**
  * Sessions of every followed workspace, grouped and sorted. Each tick re-reads the session
  * folders, re-parses a session only when its files changed, and re-classifies everything
- * with now(), since warn, "no reply" and the 24-hour window change with the clock alone.
+ * with now(), since warn, "no reply" and the one-hour window change with the clock alone.
  * Subscribers get the full list on subscribe and again whenever it differs from what they
  * were last sent.
  */

@@ -16,7 +16,7 @@ import { readLineTimes } from "../line-times.js";
 import { attachTimes, humanize } from "./activity.js";
 
 export const WARN_AFTER_S = 1200;
-export const ACTIVE_WINDOW_S = 86400;
+export const ACTIVE_WINDOW_S = 3600;
 export const TITLE_MAX = 120;
 
 export const LABELS = {
@@ -485,7 +485,7 @@ function statusSentences(cls, ctx) {
     if (peer) {
       return {
         what: `The reviewer's position for round ${R} is in. The agent has to compare it with its own and reply.`,
-        next: cls.noReply ? "No reply for over a day." : `Waiting ${mins} min.`,
+        next: cls.noReply ? "No reply for over an hour." : `Waiting ${mins} min.`,
       };
     }
     const k = openIds.length;
@@ -495,7 +495,7 @@ function statusSentences(cls, ctx) {
     const fresh = R > 1 ? (story.filter(x => x.who === "rv" && x.round === R)[0]?.did || {}) : {};
     const newIds = Object.entries(fresh).filter(([, d]) => d === "raised").map(([id]) => `ISSUE-${id}`);
     const origin = newIds.length ? `${newIds.join(", ")} came from the round-${R - 1} fix. ` : "";
-    return { what, next: cls.noReply ? `${origin}No reply for over a day.` : `${origin}Waiting ${mins} min.` };
+    return { what, next: cls.noReply ? `${origin}No reply for over an hour.` : `${origin}Waiting ${mins} min.` };
   }
   // stopped
   if (cls.ended) return { what: `Ended in round ${R} without a final verdict.`, next: "The agent ended the session while the reviewer's findings were open." };
@@ -506,7 +506,7 @@ function statusSentences(cls, ctx) {
     next: hasThread
       ? (cls.resumable
         ? "The reviewer's thread is kept. Ask the agent to resume this session; there is no need to start over."
-        : "The reviewer's thread was kept, but the session has been stopped for over a day.")
+        : "The reviewer's thread is kept, but the session has been stopped for over an hour. Ask the agent to resume it if you still want this review.")
       : "The reviewer had not started; start a new review.",
   };
 }

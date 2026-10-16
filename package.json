@@ -1,6 +1,6 @@
 {
   "name": "@tlelabs/cross-review",
-  "version": "10.3.0",
+  "version": "10.3.1",
   "description": "Cross-model review skills (plan, implementation, commit, PR, reasoning) and loop planning for Claude Code and Codex",
   "keywords": [
     "claude-code",
