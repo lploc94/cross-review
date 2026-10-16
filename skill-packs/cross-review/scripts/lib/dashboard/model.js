@@ -222,7 +222,7 @@ export function readSession(dir) {
 
 // ---------- classification ----------
 
-export function verdictOf(final) {
+function verdictOf(final) {
   const review = final && final.review;
   if (final && final.convergence && final.convergence.stalemate) return "STALEMATE";
   return (review && ((review.verdict && review.verdict.status) || review.suggested_status)) || null;
@@ -594,6 +594,7 @@ export function classify(parsed, { now = Math.floor(Date.now() / 1000), isAlive 
   }
 
   const reviewerSeconds = rounds.reduce((t, r) => t + (r.running ? 0 : r.secs || 0), 0);
+  const lastVerdict = [...rounds].reverse().find(r => verdictOf(r.final));
   const summary = {
     id: parsed.id,
     skill: parsed.skill,
@@ -607,6 +608,8 @@ export function classify(parsed, { now = Math.floor(Date.now() / 1000), isAlive 
     now: nowText,
     round: last ? last.round : 0,
     rounds: rounds.length,
+    // the latest round's verdict, a reviewer that finished unpolled included
+    verdict: lastVerdict ? verdictOf(lastVerdict.final) : null,
     issues: issuesColumn(ledger, peer),
     model: state.model || null,
     reviewer: state.reviewer || "codex",

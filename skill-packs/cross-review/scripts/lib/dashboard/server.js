@@ -16,7 +16,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-import { classify, inputValues, readSession, roundActivity, verdictOf } from "./model.js";
+import { classify, inputValues, readSession, roundActivity } from "./model.js";
 import { findWorkspaces, isWorkspace, listSessions, sessionsDir, SCAN_DEPTH, SESSION_ID_RE } from "./scan.js";
 import { discoveryFile, removeDiscoveryIfOwn, writeDiscovery } from "./discovery.js";
 import { AvatarError, avatarFile, listAvatars, removeAvatar, saveAvatar, AVATAR_MAX_BYTES } from "./avatars.js";
@@ -250,7 +250,7 @@ export function createListWatcher({ root, now = () => Math.floor(Date.now() / 10
         const sig = JSON.stringify([
           entry.fileSig, tracked, state,
           reviewSession ? `${review.id}:${review.round}:${review.status}` : null,
-          named.map(x => `${x.summary.id}:${x.summary.label}:${x.summary.round}`),
+          named.map(x => `${x.summary.id}:${x.summary.label}:${x.summary.round}:${x.summary.verdict}`),
           filled ? filled.phases.map(p => p.commit.sha) : null,
         ]);
         const item = {
@@ -390,10 +390,7 @@ export function createListWatcher({ root, now = () => Math.floor(Date.now() / 10
       if (item.format !== "loop-plan") return { ...base, title: item.title, sections: parsed.sections };
       return {
         ...base, ...parsed, title: item.title, progress: planProgress(parsed), state: item.state, reviewSession: item.reviewSession,
-        sessions: named.map(({ parsed: p, summary }) => {
-          const last = [...p.rounds].reverse().find(r => verdictOf(r.final));
-          return { id: summary.id, skill: summary.skill, state: summary.state, verdict: last ? verdictOf(last.final) : null, href: `#/s/${encodeURIComponent(ws)}/${summary.id}` };
-        }),
+        sessions: named.map(({ summary }) => ({ id: summary.id, skill: summary.skill, state: summary.state, verdict: summary.verdict, href: `#/s/${encodeURIComponent(ws)}/${summary.id}` })),
       };
     },
     /** Forget a workspace's git facts (after its .gitignore changed). */

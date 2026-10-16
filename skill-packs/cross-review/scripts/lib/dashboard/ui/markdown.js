@@ -41,19 +41,29 @@ const listItem = x => {
 };
 
 const TABLE_DIVIDER = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
-/** The cells of a `| a | b |` line; a pipe inside a code span does not split. */
+/** The cells of a `| a | b |` line; a pipe inside a code span or escaped as `\|` does not split. */
 function tableCells(line) {
   const cells = [];
   let cur = "";
   let code = false;
-  for (const c of line.trim().replace(/^\|/, "").replace(/\|$/, "")) {
-    if (c === "`") code = !code;
-    if (c === "|" && !code) {
+  let closed = false; // the line ended on an unescaped pipe
+  const text = line.trim().replace(/^\|/, "");
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    closed = false;
+    if (c === "\\" && text[i + 1] === "|") {
+      cur += "|";
+      i++;
+    } else if (c === "|" && !code) {
       cells.push(cur.trim());
       cur = "";
-    } else cur += c;
+      closed = true;
+    } else {
+      if (c === "`") code = !code;
+      cur += c;
+    }
   }
-  cells.push(cur.trim());
+  if (!closed) cells.push(cur.trim());
   return cells;
 }
 

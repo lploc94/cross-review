@@ -56,6 +56,12 @@ test("tables: header, divider, body; cells escaped and inline; ragged rows padde
   assert.match(renderMarkdown("| A | B |\n|---|---|\n| `x|y` | z |"), /<td><code>x\|y<\/code><\/td><td>z<\/td>/);
 });
 
+test("tables: an escaped pipe stays in its cell and keeps the cells after it", () => {
+  const html = renderMarkdown("| Choice | Meaning |\n|---|---|\n| left\\|right | keep both |\n| `a\\|b` | ends on \\| |");
+  assert.match(html, /<tr><td>left\|right<\/td><td>keep both<\/td><\/tr>/);
+  assert.match(html, /<tr><td><code>a\|b<\/code><\/td><td>ends on \|<\/td><\/tr>/);
+});
+
 test("task lists: - [ ] and - [x] become li.task with a box icon; other items stay plain", () => {
   const html = renderMarkdown("- [ ] AC-1.1: open `a<b>`\n- [x] AC-1.2: done\n- [X] AC-1.3: done too\n- plain");
   const items = html.match(/<li[^>]*>.*?<\/li>/g);

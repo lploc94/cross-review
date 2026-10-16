@@ -11,7 +11,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { buildFixture, buildPlans, writePlan, writeSession } from "./helpers/dashboard-fixture.js";
+import { buildFixture, buildPlans, PLANS, writePlan, writeSession } from "./helpers/dashboard-fixture.js";
 import { GITIGNORE } from "../skill-packs/cross-review/scripts/lib/config.js";
 import { findWorkspaces } from "../skill-packs/cross-review/scripts/lib/dashboard/scan.js";
 import { startDashboard, createListWatcher } from "../skill-packs/cross-review/scripts/lib/dashboard/server.js";
@@ -1037,6 +1037,25 @@ test("/api/plan: the plan, its real sessions, markdown documents, and 404 for an
     }
     assert.equal((await request(d.port, "/api/plan?ws=harbor-app", { headers: bearer(d) })).status, 400);
     assert.equal((await request(d.port, "/api/plan?file=x.md", { headers: bearer(d) })).status, 400);
+  } finally {
+    await d.close();
+  }
+});
+
+test("/api/plan: a checkpoint session's verdict is the one its sessions row shows, even before anyone polled it", async () => {
+  const { d, fx } = await servePlans();
+  const url = planUrl("services/orchard-api", "result-plan.md");
+  try {
+    writePlan(fx.workspaces.orchard, "result-plan.md", `${PLANS.ready}\n## Progress Log\n- 2026-10-16 Phase 1 checkpoint: review-impl-20261015-009\n`);
+    // the reviewer finished and nobody polled: only its event log has the verdict
+    let x = await getJson(d, url);
+    assert.deepEqual(x.sessions.map(s => [s.id, s.verdict]), [["review-impl-20261015-009", "APPROVE"]]);
+    // the runner's own result arrives later and disagrees: the page and its sig follow it
+    fs.writeFileSync(path.join(fx.sessions.deadPid, "final.txt"), JSON.stringify({ status: "completed", round: 1, review: { verdict: { status: "REVISE" } } }));
+    const before = x.sig;
+    x = await getJson(d, url);
+    assert.equal(x.sessions[0].verdict, "REVISE");
+    assert.notEqual(x.sig, before);
   } finally {
     await d.close();
   }
