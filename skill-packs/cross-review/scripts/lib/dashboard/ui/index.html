@@ -142,8 +142,9 @@
   <h2>Defaults</h2>
   <div class="form">
     <div>Reviewer</div><div><select id="f-reviewer-set" aria-label="Reviewer"></select><div class="help" id="reviewer-help"></div></div>
+    <div>Model and effort for</div><div><select id="f-target" aria-label="Model and effort for"></select><div class="help">Each reviewer keeps its own model and effort, here and in the table below. Shows the reviewer used here unless you pick another.</div></div>
     <div>Model</div><div><select id="f-model-set" aria-label="Model"></select> <input type="text" id="f-model-other" class="other" placeholder="model name" aria-label="Model name"> <a id="refresh" data-i="refresh">refresh list</a><div class="help" id="model-help"></div></div>
-    <div>Effort</div><div><select id="f-effort-set" aria-label="Effort"></select><div class="help">Only the levels the model supports.</div></div>
+    <div>Effort</div><div><select id="f-effort-set" aria-label="Effort"></select><div class="help" id="effort-help">Only the levels the model supports.</div></div>
     <div>Follow reviews</div><div><select id="f-follow" aria-label="Follow reviews"></select><div class="help">When on, every review that starts opens here in your browser so you can watch it. Starts the dashboard if it is not running; it closes itself after 30 minutes with no page open.</div></div>
     <div>Follow plans</div><div><select id="f-showplans" aria-label="Follow plans"></select><div class="help">When on, each plan loop-plan finishes opens here in your browser, on its Plan tab, so you can read it before you approve it. Starts the dashboard the same way as Follow reviews.</div></div>
     <div>Plans in git</div><div><select id="f-plans" aria-label="Plans in git"></select><div class="help">Plans live in <span class="mono">.cross-review/plans/</span>. On adds an exception to <span class="mono">.cross-review/.gitignore</span> so loop-implement commits each plan with its phases; sessions and settings stay out of git. Turning it off later does not remove plans already committed: run <span class="mono">git rm --cached</span> on them.</div></div>
@@ -155,7 +156,7 @@
     <thead><tr><th>Skill</th><th>Model</th><th>Effort</th><th>Result here</th></tr></thead>
     <tbody id="per-skill"></tbody>
   </table>
-  <p class="sub small">First match wins: what you tell the agent in chat · workspace, this skill · workspace · global, this skill · global · Codex's own model and effort <code>high</code>.</p>
+  <p class="sub small">First match wins: what you tell the agent in chat · workspace, this skill · workspace · global, this skill · global · the reviewer's own model and effort <code>high</code>. Each reviewer reads only its own entries.</p>
 
   <div id="avatars-block">
     <h2>Avatars</h2>

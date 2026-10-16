@@ -49,7 +49,7 @@
   const sessionKey = p => `ws=${encodeURIComponent(p.get("ws") || "")}&id=${encodeURIComponent(p.get("id") || "")}`;
   const keyOf = (route, p) => {
     const q = new URLSearchParams();
-    for (const name of ["ws", "id", "file", "round"]) if (p.has(name)) q.set(name, p.get(name));
+    for (const name of ["ws", "id", "file", "round", "reviewer"]) if (p.has(name)) q.set(name, p.get(name));
     const s = q.toString();
     return s ? `${route}?${s}` : route;
   };

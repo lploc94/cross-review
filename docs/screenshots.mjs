@@ -36,7 +36,26 @@ const catalog = {
   defaultModel: () => "gpt-5-codex",
   cliInfo: async () => ({ version: "codex-cli", loggedIn: true }),
 };
-const d = await startDashboard({ root, port: 0, open: false, discoveryFile: null, catalog, latestVersion: async () => null });
+// Claude Code lists its aliases; agy groups its models into families with their levels
+const otherCatalogs = {
+  claude: {
+    listModels: async () => [
+      { slug: "opus", name: "Opus", description: "The latest Opus model.", efforts: ["low", "medium", "high", "xhigh", "max"] },
+      { slug: "sonnet", name: "Sonnet", description: "The latest Sonnet model.", efforts: ["low", "medium", "high", "xhigh", "max"] },
+    ],
+    defaultModel: () => null,
+    cliInfo: async () => ({ version: "claude-code", loggedIn: true }),
+  },
+  agy: {
+    listModels: async () => [
+      { slug: "gemini-flash", name: "Gemini Flash", description: "", efforts: ["low", "high"] },
+      { slug: "gemini-pro", name: "Gemini Pro", description: "", efforts: ["low", "high"] },
+    ],
+    defaultModel: () => "Gemini Flash (High)",
+    cliInfo: async () => ({ version: "agy", loggedIn: null }),
+  },
+};
+const d = await startDashboard({ root, port: 0, open: false, discoveryFile: null, catalogs: { codex: catalog, ...otherCatalogs }, latestVersion: async () => null });
 const css = await oflFontCss();
 const browser = await launchChrome(bin, path.join(tmp, "profile"));
 const id = key => path.basename(fx.sessions[key]);

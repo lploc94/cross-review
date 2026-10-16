@@ -6,7 +6,7 @@
 import { ic } from "./icons.js";
 import { esc, renderField, renderInline, renderMarkdown } from "./markdown.js";
 import { PAGE, applyPage, groupReads, mergeActivity, newFeed, onSnapshot, visible } from "./feed.js";
-import { OTHER, SKILLS, effortOptions, inheritedValue, mergeForm, modelOptions, resolveHere } from "./settings.js";
+import { OTHER, REVIEWERS, SKILLS, effectiveReviewer, effortOptions, hasNoEfforts, inheritedValue, mergeForm, modelOptions, resolveHere } from "./settings.js";
 
 const $ = sel => document.querySelector(sel);
 /** Escaped text with `code` spans, as titles quote file names that way. */
@@ -17,7 +17,6 @@ const clock = s => {
 };
 const st = (kind, label) => `<span class="st ${esc(kind)}">${ic(kind)}${esc(label)}</span>`;
 const skillIc = skill => `<span class="skill" title="${esc(skill)}">${ic(skill)}</span>`;
-const REVIEWERS = { codex: "Codex" };
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 let data = null;
@@ -183,7 +182,13 @@ function when(epoch) {
   return `${d.getDate()} ${MONTHS[d.getMonth()]}${d.getFullYear() === today.getFullYear() ? "" : ` ${d.getFullYear()}`}`;
 }
 
-const modelOf = s => s.model || `${own(REVIEWERS, s.reviewer) || s.reviewer} default`;
+/** The session's model, else its reviewer's default model when the page knows it. */
+const modelOf = s => {
+  if (s.model) return s.model;
+  const label = own(REVIEWERS, s.reviewer) || s.reviewer;
+  const c = own(catalogInfo, s.reviewer);
+  return c && c.defaultModel ? `${modelName(c.defaultModel, c.models)} · ${label} default` : `${label} default`;
+};
 
 function activeRow(s) {
   const where = `${s.wsName} · ${s.skill} · round ${s.round}${s.state === "waiting" ? " returned" : ""}`;
@@ -620,7 +625,7 @@ function onPlanClick(e) {
 
 const AVATAR = { rv: "avatars/reviewer.png", ag: "avatars/agent.png", us: "avatars/you.png" };
 const NAME = { rv: "Reviewer", ag: "Agent", us: "You" };
-const REVIEWER_LETTERS = { codex: "CX" };
+const REVIEWER_LETTERS = { codex: "CX", claude: "CC", agy: "AG" };
 const CALLER_LETTERS = { "claude-code": "CC", "codex-mcp-client": "CX" };
 /** table[key] for the table's own keys only: names from session data can be "constructor" or "__proto__". */
 const own = (table, key) => (Object.hasOwn(table, key) ? table[key] : undefined);
@@ -766,10 +771,13 @@ function renderFacts(d) {
   const f = d.facts;
   const reviewer = own(REVIEWERS, f.reviewer) || f.reviewer;
   $("#f-reviewer").textContent = reviewer;
-  const fallback = catalogInfo.codexDefault ? `${modelName(catalogInfo.codexDefault, catalogInfo.models)} · ${reviewer} default` : `${reviewer} default`;
-  $("#f-model").textContent = f.model ? modelName(f.model, catalogInfo.models) : fallback;
+  const c = own(catalogInfo, f.reviewer) || {};
+  const fallback = c.defaultModel ? `${modelName(c.defaultModel, c.models)} · ${reviewer} default` : `${reviewer} default`;
+  $("#f-model").textContent = f.model ? modelName(f.model, c.models) : fallback;
   const src = f.sources && f.sources.effort ? String(f.sources.effort).split(":").join(", ") : null;
-  $("#f-effort").textContent = f.effort ? `${f.effort}${src ? ` · ${src}` : ""}` : "—";
+  // a model with no effort levels (agy) ran without one, whatever the session stored
+  const levels = !hasNoEfforts(c.models, f.model || c.defaultModel);
+  $("#f-effort").textContent = f.effort && levels ? `${f.effort}${src ? ` · ${src}` : ""}` : "—";
   $("#f-caller").textContent = (f.caller && f.caller.title) || "Agent";
   $("#f-time").textContent = clock(f.reviewerSeconds || 0) + (f.runningSince ? " + running" : "");
   $("#f-started").textContent = started(f.startedAt);
@@ -1030,17 +1038,21 @@ function onDetailClick(e) {
 // ---------- Settings ----------
 
 let settings = null; // /api/settings
-let catalogInfo = { models: null, codexDefault: null }; // for model names on session pages
+let catalogInfo = {}; // reviewer → { models, defaultModel }: model names on session pages and the list
 let avatars = { keys: [], parties: [] };
 let avatarStamp = Date.now();
-const sv = { scope: "global", ws: null, draft: {}, touched: new Set(), refreshed: false };
+// target: the reviewer whose model and effort the form shows (null: the one used at this level)
+const sv = { scope: "global", ws: null, draft: {}, touched: new Set(), refreshed: false, target: null };
 let pendingSave = null; // saves queued or in flight (see saveSoon): the page reloads settings after them
 let settingsLoad = 0; // counts openSettings calls; only the latest one applies its answer
 let savesStarted = 0; // counts saves sent; a settings load that saw one start meanwhile is asked again
 
-const ALL_PATHS = ["reviewer", "model", "effort", "open_dashboard", "open_plans", "track_plans", "check_updates", ...SKILLS.flatMap(s => [`skills.${s}.model`, `skills.${s}.effort`])];
+const ALL_PATHS = ["reviewer", "open_dashboard", "open_plans", "track_plans", "check_updates",
+  ...Object.keys(REVIEWERS).flatMap(r => [`reviewers.${r}.model`, `reviewers.${r}.effort`, ...SKILLS.flatMap(s => [`reviewers.${r}.skills.${s}.model`, `reviewers.${r}.skills.${s}.effort`])])];
+/** Where each reviewer's model list comes from (one without an entry lists aliases and takes any name). */
+const MODEL_SOURCE = { codex: "codex debug models", agy: "agy models" };
 const clone = x => JSON.parse(JSON.stringify(x || {}));
-const modelName = (slug, models = settings ? settings.models : catalogInfo.models) => {
+const modelName = (slug, models) => {
   const m = slug && models ? models.find(x => x.slug === slug) : null;
   return m ? m.name : slug;
 };
@@ -1077,14 +1089,23 @@ function pickScope(r) {
   return true;
 }
 
-/** Take a model list from /api/models or /api/settings. */
+const labelOf = name => own(REVIEWERS, name) || name;
+/** A reviewer's entry in /api/settings (label, models, defaultModel, cli, efforts, allowCustomModel). */
+const reviewerInfo = name => (settings && own(settings.reviewers, name)) || { label: labelOf(name), models: null, defaultModel: null, cli: null, efforts: null, allowCustomModel: false };
+const catalogsOf = s => Object.fromEntries(Object.entries(s.reviewers || {}).map(([n, r]) => [n, { models: r.models, defaultModel: r.defaultModel }]));
+/** The reviewer the form edits: the one picked under "Model and effort for", else the one used here. */
+const targetReviewer = () => sv.target || effectiveReviewer({ global: globalHere(), workspace: workspaceHere() });
+
+/** Take one reviewer's model list from /api/models. */
 function applyCatalog(m) {
-  Object.assign(settings, { models: m.models, modelsFetchedAt: m.fetchedAt, codexDefault: m.codexDefault, reviewer: m.reviewer });
-  catalogInfo = { models: m.models, codexDefault: m.codexDefault };
+  if (!own(settings.reviewers, m.reviewer)) return;
+  Object.assign(settings.reviewers[m.reviewer], { models: m.models, modelsFetchedAt: m.fetchedAt, modelsRefreshing: m.refreshing, defaultModel: m.defaultModel, cli: m.cli });
+  catalogInfo = { ...catalogInfo, [m.reviewer]: { models: m.models, defaultModel: m.defaultModel } };
 }
 
 async function openSettings(r) {
   const load = ++settingsLoad;
+  sv.target = null;
   // Settings loaded before show at once; the answer below then replaces what nobody touched
   const early = Boolean(settings && !pendingSave && pickScope(r));
   if (early) {
@@ -1106,7 +1127,7 @@ async function openSettings(r) {
     return;
   }
   settings = s;
-  catalogInfo = { models: s.models, codexDefault: s.codexDefault };
+  catalogInfo = catalogsOf(s);
   if (a) avatars = a;
   if (!pickScope(r)) {
     location.replace("#/settings");
@@ -1119,18 +1140,22 @@ async function openSettings(r) {
   followCatalog(s);
 }
 
-/** The list in `s` is the one the server saved last time and it is asking the reviewer again: take the new one when it comes. */
-async function followCatalog(s) {
-  if (!s.modelsRefreshing) return;
-  const m = await getJson("/api/models");
-  if (!m || settings !== s) return;
-  applyCatalog(m);
-  if (onSettings()) renderSettings();
-  redrawFacts();
+/** A list in `s` is the one the server saved last time and it is asking that reviewer again: take the new one when it comes. */
+function followCatalog(s) {
+  for (const [name, r] of Object.entries(s.reviewers || {})) {
+    if (!r.modelsRefreshing) continue;
+    getJson(`/api/models?reviewer=${encodeURIComponent(name)}`).then(m => {
+      if (!m || settings !== s) return;
+      applyCatalog(m);
+      if (onSettings()) renderSettings();
+      redrawFacts();
+    });
+  }
 }
 
-/** A session page names its model from the catalog: draw it again when the catalog changes. */
+/** Session pages and the History list name models from the catalogs: draw them again when one changes. */
 function redrawFacts() {
+  if (data) renderHistory();
   if (view && view.detail) {
     view.sig = null;
     renderDetail(view);
@@ -1143,9 +1168,16 @@ function resetDraft() {
   $("#plans-warn").textContent = "";
 }
 
-/** The model a review would use here (for the effort levels and the help line). */
-function effectiveModel() {
-  return resolveHere({ global: globalHere(), workspace: workspaceHere(), skill: null, key: "model" }).value || settings.codexDefault;
+/** The model a review by `reviewer` would use here (for the effort levels and the help line). */
+function effectiveModel(reviewer) {
+  return resolveHere({ global: globalHere(), workspace: workspaceHere(), skill: null, key: "model", reviewer }).value || reviewerInfo(reviewer).defaultModel;
+}
+
+/** The CLI line under Reviewer: version and sign-in (agy reports no sign-in), or the CLI missing. */
+function cliLine(name) {
+  const cli = reviewerInfo(name).cli;
+  if (!cli || !cli.version) return `The ${name} CLI was not found.`;
+  return typeof cli.loggedIn === "boolean" ? `${cli.version}, ${cli.loggedIn ? "signed in" : "not signed in"}` : cli.version;
 }
 
 function renderSettings() {
@@ -1164,32 +1196,50 @@ function renderSettings() {
   $("#settings-error").textContent = (workspace ? own(settings.errors.workspaces, ws) : settings.errors.global) || "";
 
   // Defaults
-  const reviewerOpts = workspace ? [{ value: "", label: "Inherit — Codex", selected: !d.reviewer }, { value: "codex", label: "Codex", selected: d.reviewer === "codex" }]
-    : [{ value: "", label: "Codex", selected: true }];
+  const names = settings.reviewerNames || Object.keys(settings.reviewers);
+  const used = effectiveReviewer({ global: globalHere(), workspace: workspaceHere() });
+  const reviewerOpts = workspace
+    ? [{ value: "", label: `Inherit — ${labelOf(effectiveReviewer({ global: settings.global, workspace: null }))}`, selected: !d.reviewer }]
+    : [];
+  for (const n of names) reviewerOpts.push({ value: n, label: labelOf(n), selected: workspace ? d.reviewer === n : used === n });
   $("#f-reviewer-set").innerHTML = optionsHtml(reviewerOpts);
-  const info = settings.reviewer;
-  $("#reviewer-help").textContent = info && info.version ? `${info.version}, ${info.loggedIn ? "signed in" : "not signed in"}` : "The codex CLI was not found.";
+  $("#reviewer-help").textContent = cliLine(used);
 
-  const codexDefault = settings.codexDefault ? `Codex default (${modelName(settings.codexDefault)})` : "Codex default";
-  const inhModel = inheritedValue({ global: settings.global, workspace: workspaceHere(), skill: null, key: "model" });
-  const modelInherit = workspace ? `Inherit — ${inhModel ? modelName(inhModel) : "Codex default"}` : codexDefault;
+  // Model and effort of the reviewer picked under "Model and effort for", saved under reviewers.<name>
+  const target = targetReviewer();
+  const info = reviewerInfo(target);
+  const models = info.models;
+  const base = `reviewers.${target}`;
+  const entry = (d.reviewers && own(d.reviewers, target)) || {};
+  $("#f-target").innerHTML = optionsHtml(names.map(n => ({ value: n, label: labelOf(n), selected: n === target })));
+  const ownDefault = info.defaultModel ? `${info.label} default (${modelName(info.defaultModel, models)})` : `${info.label} default`;
+  const inhModel = inheritedValue({ global: settings.global, workspace: workspaceHere(), skill: null, key: "model", reviewer: target });
+  const modelInherit = workspace ? `Inherit — ${inhModel ? modelName(inhModel, models) : `${info.label} default`}` : ownDefault;
   const other = $("#f-model-other");
   // a name being typed under Other… stays open until the field is left
   const typing = other.classList.contains("on") && document.activeElement === other;
-  $("#f-model-set").innerHTML = optionsHtml(modelOptions({ catalog: settings.models, saved: d.model, inherited: modelInherit, codexDefault: settings.codexDefault }));
-  $("#f-model-set").dataset.path = "model";
+  $("#f-model-set").innerHTML = optionsHtml(modelOptions({ catalog: models, saved: entry.model, inherited: modelInherit, allowCustom: info.allowCustomModel }));
+  $("#f-model-set").dataset.path = `${base}.model`;
   if (typing) $("#f-model-set").value = OTHER;
   other.classList.toggle("on", $("#f-model-set").value === OTHER);
-  const em = effectiveModel();
-  const desc = settings.models && settings.models.find(m => m.slug === em);
-  $("#model-help").textContent = settings.models
-    ? `${desc ? `${desc.description} ` : ""}Listed by codex debug models, ${ago(settings.modelsFetchedAt)}.`
-    : "The model list is unavailable (codex debug models failed). Pick Other… to type a model name.";
+  const em = effectiveModel(target);
+  const desc = models && models.find(m => m.slug === em);
+  const about = desc && desc.description ? `${desc.description} ` : "";
+  const source = own(MODEL_SOURCE, target) || `${target} models`;
+  $("#model-help").textContent = info.allowCustomModel
+    ? `${about}${info.label} aliases; pick Other… for a full model name.`
+    : models
+      ? `${about}Listed by ${source}, ${ago(info.modelsFetchedAt)}.`
+      : `The model list is unavailable (${source} failed). Pick Other… to type a model name.`;
   $("#refresh").lastChild.textContent = sv.refreshed ? "refreshed just now" : "refresh list";
 
-  const inhEffort = inheritedValue({ global: settings.global, workspace: workspaceHere(), skill: null, key: "effort" });
-  $("#f-effort-set").innerHTML = optionsHtml(effortOptions({ catalog: settings.models, model: em, saved: d.effort, inherited: workspace ? `Inherit — ${inhEffort || "high"}` : "high (default)" }));
-  $("#f-effort-set").dataset.path = "effort";
+  const inhEffort = inheritedValue({ global: settings.global, workspace: workspaceHere(), skill: null, key: "effort", reviewer: target });
+  const levels = info.efforts || undefined;
+  const none = hasNoEfforts(models, em);
+  $("#f-effort-set").innerHTML = optionsHtml(effortOptions({ catalog: models, model: em, saved: entry.effort, inherited: workspace ? `Inherit — ${inhEffort || "high"}` : "high (default)", fallback: levels }));
+  $("#f-effort-set").dataset.path = `${base}.effort`;
+  $("#f-effort-set").disabled = none;
+  $("#effort-help").textContent = none ? "This model has no effort levels." : "Only the levels the model supports.";
 
   const follow = d.open_dashboard;
   const globalFollow = settings.global.open_dashboard === true;
@@ -1213,18 +1263,22 @@ function renderSettings() {
 
   // Per skill
   $("#per-skill").innerHTML = SKILLS.map(s => {
-    const o = (d.skills && d.skills[s]) || {};
-    const model = resolveHere({ global: globalHere(), workspace: workspaceHere(), skill: s, key: "model" });
-    const effort = resolveHere({ global: globalHere(), workspace: workspaceHere(), skill: s, key: "effort" });
-    const im = inheritedValue({ global: workspace ? settings.global : sv.draft, workspace: workspaceHere(), skill: s, key: "model" });
-    const ie = inheritedValue({ global: workspace ? settings.global : sv.draft, workspace: workspaceHere(), skill: s, key: "effort" });
-    const mOpts = modelOptions({ catalog: settings.models, saved: o.model, inherited: `Inherit — ${im ? modelName(im) : "Codex default"}`, codexDefault: settings.codexDefault });
-    const eOpts = effortOptions({ catalog: settings.models, model: model.value || settings.codexDefault, saved: o.effort, inherited: `Inherit — ${ie || "high"}` });
-    const shown = model.value ? modelName(model.value) : settings.codexDefault ? modelName(settings.codexDefault) : "Codex default";
+    const o = (entry.skills && own(entry.skills, s)) || {};
+    const here = { global: globalHere(), workspace: workspaceHere(), skill: s, reviewer: target };
+    const model = resolveHere({ ...here, key: "model" });
+    const effort = resolveHere({ ...here, key: "effort" });
+    const below = { global: workspace ? settings.global : sv.draft, workspace: workspaceHere(), skill: s, reviewer: target };
+    const im = inheritedValue({ ...below, key: "model" });
+    const ie = inheritedValue({ ...below, key: "effort" });
+    const runs = model.value || info.defaultModel;
+    const noLevels = hasNoEfforts(models, runs);
+    const mOpts = modelOptions({ catalog: models, saved: o.model, inherited: `Inherit — ${im ? modelName(im, models) : `${info.label} default`}`, allowCustom: info.allowCustomModel });
+    const eOpts = effortOptions({ catalog: models, model: runs, saved: o.effort, inherited: `Inherit — ${ie || "high"}`, fallback: levels });
+    const shown = runs ? modelName(runs, models) : `${info.label} default`;
     return `<tr><td>${esc(s)}${o.model || o.effort ? `<span class="set">set here</span>` : ""}</td>
-      <td><select data-path="skills.${s}.model" aria-label="${esc(s)} model">${optionsHtml(mOpts)}</select></td>
-      <td><select data-path="skills.${s}.effort" aria-label="${esc(s)} effort">${optionsHtml(eOpts)}</select></td>
-      <td class="soft">${esc(shown)} · ${esc(effort.value)}<div class="line2">${esc(model.source)}; ${esc(effort.source)}</div></td></tr>`;
+      <td><select data-path="${esc(`${base}.skills.${s}.model`)}" aria-label="${esc(s)} model">${optionsHtml(mOpts)}</select></td>
+      <td><select data-path="${esc(`${base}.skills.${s}.effort`)}" aria-label="${esc(s)} effort"${noLevels ? " disabled" : ""}>${optionsHtml(eOpts)}</select></td>
+      <td class="soft">${esc(shown)} · ${esc(noLevels ? "—" : effort.value)}<div class="line2">${esc(model.source)}${noLevels ? "" : `; ${esc(effort.source)}`}</div></td></tr>`;
   }).join("");
 
   $("#preview-title").textContent = workspace ? `Show ${name}/.cross-review/config.json` : `Show ${settings.globalPath}`;
@@ -1245,7 +1299,7 @@ const avatarSrc = (who, key) => (avatars.keys.includes(key) ? `avatars/${encodeU
 function renderAvatarTable() {
   $("#avatars").innerHTML = avatars.parties.map(p => {
     const has = avatars.keys.includes(p.key);
-    const letters = p.who === "us" ? "Y" : p.who === "rv" ? "CX" : p.name ? own(CALLER_LETTERS, p.name) || initial(p.label.split(" · ")[1]) : "AG";
+    const letters = p.who === "us" ? "Y" : p.who === "rv" ? own(REVIEWER_LETTERS, p.key.replace(/^reviewer:/, "")) || "RV" : p.name ? own(CALLER_LETTERS, p.name) || initial(p.label.split(" · ")[1]) : "AG";
     return `<tr><td><div class="mark ${p.who}"><img src="${avatarSrc(p.who, p.key)}" alt="${esc(letters)}"></div>${esc(p.label)}</td>
       <td class="soft">${esc(p.seenIn)}</td>
       <td class="right"><label><a>${has ? "Change" : "Upload image"}</a><input type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-av="${esc(p.key)}" hidden></label>${has ? ` · <a data-av-clear="${esc(p.key)}">remove</a>` : ""}</td></tr>`;
@@ -1310,12 +1364,21 @@ function onSettingsChange(e) {
       return;
     }
   } else if (t.id === "f-reviewer-set") {
-    setPath(sv.draft, "reviewer", t.value || undefined);
+    // Codex at the global level is the default: the key is dropped
+    const v = sv.scope === "global" && t.value === settings.defaultReviewer ? undefined : t.value;
+    setPath(sv.draft, "reviewer", v || undefined);
     sv.touched.add("reviewer");
+    // "Model and effort for" follows the reviewer chosen
+    sv.target = null;
+  } else if (t.id === "f-target") {
+    sv.target = t.value;
+    $("#f-model-other").classList.remove("on");
+    renderSettings();
+    return;
   } else if (t.dataset.path) {
     let value = t.value;
     if (value === OTHER) {
-      if (t.dataset.path === "model") {
+      if (t.id === "f-model-set") {
         $("#f-model-other").classList.add("on");
         $("#f-model-other").focus();
         return;
@@ -1327,8 +1390,9 @@ function onSettingsChange(e) {
     sv.touched.add(t.dataset.path);
   } else if (t.id === "f-model-other") {
     const value = t.value.trim();
-    setPath(sv.draft, "model", value || undefined);
-    sv.touched.add("model");
+    const p = $("#f-model-set").dataset.path;
+    setPath(sv.draft, p, value || undefined);
+    sv.touched.add(p);
   } else {
     return;
   }
@@ -1344,7 +1408,7 @@ async function onSettingsClick(e) {
     return reloadAvatars();
   }
   if (t.closest("#refresh")) {
-    const m = await getJson("/api/models?refresh=1");
+    const m = await getJson(`/api/models?reviewer=${encodeURIComponent(targetReviewer())}&refresh=1`);
     if (m && settings) {
       applyCatalog(m);
       sv.refreshed = true;
@@ -1508,7 +1572,7 @@ async function start() {
     getJson("/api/settings").then(s => {
       if (!s || settings) return;
       settings = s;
-      catalogInfo = { models: s.models, codexDefault: s.codexDefault };
+      catalogInfo = catalogsOf(s);
       redrawFacts();
       followCatalog(s);
     });

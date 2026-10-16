@@ -141,7 +141,7 @@ export function writeSession(sessionsDir, id, spec) {
     session_id: id,
     runner_version: 15,
     skill_name: spec.skill,
-    reviewer: "codex",
+    reviewer: spec.reviewer || "codex",
     state_dir: dir,
     working_dir: path.dirname(path.dirname(path.dirname(sessionsDir))),
     round: spec.rounds.length,
@@ -160,7 +160,7 @@ export function writeSession(sessionsDir, id, spec) {
   }));
   write(path.join(dir, "rounds.json"), json(roundsJson));
   if (spec.meta) {
-    write(path.join(dir, "meta.json"), json({ skill: spec.skill, reviewer: "codex", runner_version: 15, rounds: spec.rounds.length, verdict: spec.meta, timing: {}, session_dir: dir }));
+    write(path.join(dir, "meta.json"), json({ skill: spec.skill, reviewer: spec.reviewer || "codex", runner_version: 15, rounds: spec.rounds.length, verdict: spec.meta, timing: {}, session_dir: dir }));
   }
   return dir;
 }
@@ -288,6 +288,34 @@ export function buildFixture(root, { now = Math.floor(Date.now() / 1000), livePi
     rounds: [{ status: "completed", started: now - 400000, elapsed: 60, review: verdict("APPROVE", "Fine."), acts: activity(2) }],
   });
   return { root, now, workspaces: { harbor, orchard, inkwell }, sessions: s };
+}
+
+/**
+ * One workspace ("lantern") whose finished reviews ran on Claude Code and Antigravity: a
+ * Claude Code review on its default model, an agy review on a model with no effort levels
+ * ("solo-y") and one on agy's default model. Invented data, like the rest.
+ */
+export function buildReviewerFixture(root, { now = Math.floor(Date.now() / 1000) } = {}) {
+  const lantern = path.join(root, "lantern");
+  const sess = path.join(lantern, ".cross-review", "sessions");
+  const done = (t, review) => [{ status: "completed", started: t, elapsed: 120, review, acts: [] }];
+  const s = {};
+  s.claude = writeSession(sess, "review-plan-20261016-001", {
+    skill: "review-plan", reviewer: "claude", created: now - 9000, meta: "APPROVE", inputs: ["PLAN_PATH: /work/lantern/glow-plan.md\n"],
+    state: { ended_at: now - 8800, end_outcome: "finalized", model: null, effort: "max" },
+    rounds: done(now - 9000, verdict("APPROVE", "The plan holds.")),
+  });
+  s.agySolo = writeSession(sess, "review-impl-20261016-001", {
+    skill: "review-impl", mode: "working-tree", reviewer: "agy", created: now - 8000, meta: "APPROVE", inputs: ["## USER_REQUEST\nDim the lamp at night.\n"],
+    state: { ended_at: now - 7800, end_outcome: "finalized", model: "solo-y", effort: "high" },
+    rounds: done(now - 8000, verdict("APPROVE", "Looks right.")),
+  });
+  s.agyDefault = writeSession(sess, "review-impl-20261016-002", {
+    skill: "review-impl", mode: "working-tree", reviewer: "agy", created: now - 7000, meta: "APPROVE", inputs: ["## USER_REQUEST\nLight the lamp at dusk.\n"],
+    state: { ended_at: now - 6800, end_outcome: "finalized", model: null, effort: "low" },
+    rounds: done(now - 7000, verdict("APPROVE", "Looks right.")),
+  });
+  return { root, workspace: lantern, sessions: s };
 }
 
 // ---------- invented plans ----------

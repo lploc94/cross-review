@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { cliInfo, defaultModel, listModels } from "../skill-packs/cross-review/scripts/lib/reviewers/codex.js";
-import { FALLBACK_EFFORTS, effortOptions, mergeForm, modelOptions } from "../skill-packs/cross-review/scripts/lib/dashboard/ui/settings.js";
+import { FALLBACK_EFFORTS, OTHER, effectiveReviewer, effortLevels, effortOptions, hasNoEfforts, inheritedValue, mergeForm, modelOptions, resolveHere } from "../skill-packs/cross-review/scripts/lib/dashboard/ui/settings.js";
 import { startDashboard } from "../skill-packs/cross-review/scripts/lib/dashboard/server.js";
 
 let tmp;
@@ -102,11 +102,11 @@ test("effortOptions: a saved effort outside the list stays, marked and selected 
 });
 
 test("modelOptions: a saved model not in the catalog stays, marked and selected; no catalog offers Other…", () => {
-  const opts = modelOptions({ catalog, saved: "x-unknown", inherited: "Codex default (Model A)", codexDefault: "model-a" });
+  const opts = modelOptions({ catalog, saved: "x-unknown", inherited: "Codex default (Model A)" });
   assert.equal(opts[0].label, "Codex default (Model A)");
   assert.deepEqual(opts.filter(o => o.selected), [{ value: "x-unknown", label: "x-unknown (not in list)", selected: true }]);
   assert.equal(opts.filter(o => o.value.startsWith("model-")).length, 7);
-  const none = modelOptions({ catalog: null, saved: undefined, inherited: "Codex default", codexDefault: null });
+  const none = modelOptions({ catalog: null, saved: undefined, inherited: "Codex default" });
   assert.deepEqual(none.map(o => o.label), ["Codex default", "Other…"]);
   assert.equal(none[0].selected, true);
 });
@@ -137,7 +137,7 @@ test("through the server: with no catalog, changing Follow reviews keeps effort 
     assert.deepEqual(s.global, { reviewers: { codex: { effort: "ultra", model: "x-unknown" } } });
     const codex = s.global.reviewers.codex;
     const shownEffort = effortOptions({ catalog: s.reviewers.codex.models, model: codex.model, saved: codex.effort, inherited: "high (default)" }).find(o => o.selected).value;
-    const shownModel = modelOptions({ catalog: s.reviewers.codex.models, saved: codex.model, inherited: "Codex default", codexDefault: s.reviewers.codex.defaultModel }).find(o => o.selected).value;
+    const shownModel = modelOptions({ catalog: s.reviewers.codex.models, saved: codex.model, inherited: "Codex default" }).find(o => o.selected).value;
     const config = mergeForm(s.global, { reviewers: { codex: { effort: shownEffort, model: shownModel } }, open_dashboard: true }, ["open_dashboard"]);
     const r = await fetch(`http://127.0.0.1:${d.port}/api/settings`, { method: "POST", headers: { ...auth, "Content-Type": "application/json" }, body: JSON.stringify({ scope: "global", config }) });
     assert.equal(r.status, 200, await r.text());
@@ -200,4 +200,64 @@ test("mergeForm nested paths: set, clear and prune under reviewers.<name>", () =
   // a path through a prototype key is ignored
   assert.deepEqual(mergeForm({}, JSON.parse('{"__proto__": {"x": 1}}'), ["__proto__.x"]), {});
   assert.equal({}.x, undefined);
+});
+
+test("settings resolve per reviewer: reviewers.<name> only, with that reviewer's default", () => {
+  const global = {
+    reviewer: "claude",
+    model: "top-level-stray",
+    reviewers: {
+      codex: { model: "gpt-x", effort: "low", skills: { "review-plan": { model: "gpt-plan" } } },
+      claude: { effort: "max", skills: { "review-impl": { model: "sonnet" } } },
+    },
+  };
+  const workspace = { reviewers: { claude: { model: "opus" }, codex: { effort: "medium" } } };
+  // Claude ignores both the top-level model and Codex's entry
+  assert.deepEqual(resolveHere({ global, workspace: null, skill: null, key: "model", reviewer: "claude" }), { value: null, source: "Claude Code default" });
+  assert.deepEqual(resolveHere({ global, workspace: null, skill: null, key: "effort", reviewer: "claude" }), { value: "max", source: "global" });
+  assert.deepEqual(resolveHere({ global, workspace, skill: "review-impl", key: "model", reviewer: "claude" }), { value: "opus", source: "workspace" });
+  assert.deepEqual(resolveHere({ global, workspace: null, skill: "review-impl", key: "model", reviewer: "claude" }), { value: "sonnet", source: "global, this skill" });
+  assert.deepEqual(resolveHere({ global, workspace, skill: "review-plan", key: "model", reviewer: "codex" }), { value: "gpt-plan", source: "global, this skill" });
+  assert.deepEqual(resolveHere({ global, workspace, skill: null, key: "effort", reviewer: "codex" }), { value: "medium", source: "workspace" });
+  assert.deepEqual(resolveHere({ global: {}, workspace: null, skill: null, key: "model", reviewer: "agy" }), { value: null, source: "Antigravity default" });
+  assert.deepEqual(resolveHere({ global: {}, workspace: null, skill: null, key: "effort", reviewer: "agy" }), { value: "high", source: "default" });
+  // a reviewer name from a file is a plain key, never a prototype member
+  assert.deepEqual(resolveHere({ global, workspace: null, skill: null, key: "model", reviewer: "constructor" }).value, null);
+
+  assert.equal(inheritedValue({ global, workspace, skill: null, key: "model", reviewer: "claude" }), null);
+  assert.equal(inheritedValue({ global, workspace, skill: null, key: "effort", reviewer: "claude" }), "max");
+  assert.equal(inheritedValue({ global, workspace, skill: null, key: "model", reviewer: "codex" }), "gpt-x");
+  assert.equal(inheritedValue({ global, workspace, skill: "review-plan", key: "model", reviewer: "codex" }), "gpt-plan");
+  assert.equal(inheritedValue({ global, workspace, skill: "review-impl", key: "model", reviewer: "claude" }), "opus");
+  assert.equal(inheritedValue({ global, workspace: null, skill: "review-impl", key: "effort", reviewer: "claude" }), "max");
+  assert.equal(inheritedValue({ global, workspace: null, skill: null, key: "effort", reviewer: "claude" }), null);
+
+  assert.equal(effectiveReviewer({ global, workspace: null }), "claude");
+  assert.equal(effectiveReviewer({ global, workspace: { reviewer: "agy" } }), "agy");
+  assert.equal(effectiveReviewer({ global: {}, workspace: {} }), "codex");
+  assert.equal(effectiveReviewer({ global: null, workspace: null }), "codex");
+});
+
+test("modelOptions with allowCustom: Other… always last; a typed name shows as itself", () => {
+  const claude = [{ slug: "opus", name: "Opus", efforts: ["high"] }, { slug: "sonnet", name: "Sonnet", efforts: ["high"] }];
+  const opts = modelOptions({ catalog: claude, saved: undefined, inherited: "Claude Code default", allowCustom: true });
+  assert.deepEqual(opts.map(o => o.value), ["", "opus", "sonnet", OTHER]);
+  const typed = modelOptions({ catalog: claude, saved: "claude-opus-5-5", inherited: "x", allowCustom: true });
+  assert.deepEqual(typed.filter(o => o.selected), [{ value: "claude-opus-5-5", label: "claude-opus-5-5", selected: true }]);
+  assert.equal(typed[typed.length - 1].value, OTHER);
+  // without allowCustom a catalog leaves Other… out, as for Codex
+  assert.ok(!modelOptions({ catalog: claude, saved: undefined, inherited: "x", allowCustom: false }).some(o => o.value === OTHER));
+});
+
+test("effort levels: a model listed with none has no levels; the reviewer's own list when the model is not listed", () => {
+  const agy = [{ slug: "fam-a", name: "Fam A", efforts: ["low", "high"] }, { slug: "solo", name: "Solo", efforts: [] }];
+  assert.equal(hasNoEfforts(agy, "solo"), true);
+  assert.equal(hasNoEfforts(agy, "fam-a"), false);
+  assert.equal(hasNoEfforts(agy, "unknown"), false);
+  assert.equal(hasNoEfforts(null, "solo"), false);
+  // agy's default model is a display name with its level: "Fam A (High)"
+  assert.deepEqual(effortLevels(agy, "Fam A (High)"), ["low", "high"]);
+  assert.equal(hasNoEfforts(agy, "Solo"), true);
+  assert.deepEqual(effortLevels(null, "x", ["low", "max"]), ["low", "max"]);
+  assert.deepEqual(effortOptions({ catalog: null, model: null, saved: undefined, inherited: "i", fallback: ["low", "max"] }).map(o => o.value), ["", "low", "max"]);
 });

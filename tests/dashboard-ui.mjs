@@ -12,7 +12,7 @@ import path from "node:path";
 
 import { spawnSync } from "node:child_process";
 
-import { PLANS, buildFixture, buildPlans, writePlan, writeSession } from "./helpers/dashboard-fixture.js";
+import { PLANS, buildFixture, buildPlans, buildReviewerFixture, writePlan, writeSession } from "./helpers/dashboard-fixture.js";
 import { findChrome, launchChrome } from "./helpers/chrome.js";
 import { startDashboard } from "../skill-packs/cross-review/scripts/lib/dashboard/server.js";
 import { GITIGNORE } from "../skill-packs/cross-review/scripts/lib/config.js";
@@ -46,7 +46,24 @@ const catalog = {
   defaultModel: () => "model-a",
   cliInfo: async () => ({ version: "codex-cli 9.9.9-invented", loggedIn: true }),
 };
-const d = await startDashboard({ root, port: 0, open: false, discoveryFile: null, catalog });
+// Claude Code lists aliases and takes any full name; agy groups its models into families, one without levels
+const catalogs = {
+  codex: catalog,
+  claude: {
+    listModels: async () => ["opus", "sonnet"].map(slug => ({ slug, name: slug[0].toUpperCase() + slug.slice(1), description: `The invented ${slug} alias.`, efforts: ["low", "medium", "high", "xhigh", "max"] })),
+    defaultModel: () => null,
+    cliInfo: async () => ({ version: "9.9.9-invented (Claude Code)", loggedIn: false }),
+  },
+  agy: {
+    listModels: async () => [
+      { slug: "fam-x", name: "Fam X", description: "", efforts: ["low", "high"] },
+      { slug: "solo-y", name: "Solo Y", description: "", efforts: [] },
+    ],
+    defaultModel: () => "Fam X (High)",
+    cliInfo: async () => ({ version: "agy 9.9.9-invented", loggedIn: null }),
+  },
+};
+const d = await startDashboard({ root, port: 0, open: false, discoveryFile: null, catalogs });
 // Settings save as they change; this note says when every save is done
 const SAVED = `document.getElementById("save-state").classList.contains("saved")`;
 const browser = await launchChrome(bin, path.join(tmp, "profile"));
@@ -276,7 +293,7 @@ try {
   // those, and the note says Saved
   await page.evaluate(`(() => {
     const f = document.getElementById("f-follow"); f.value = "on"; f.dispatchEvent(new Event("change", { bubbles: true }));
-    const m = document.querySelector('#per-skill select[data-path="skills.review-impl.model"]'); m.value = "model-b"; m.dispatchEvent(new Event("change", { bubbles: true }));
+    const m = document.querySelector('#per-skill select[data-path="reviewers.codex.skills.review-impl.model"]'); m.value = "model-b"; m.dispatchEvent(new Event("change", { bubbles: true }));
   })()`);
   assert.match(await page.evaluate(`document.querySelectorAll("#per-skill tr")[1].textContent`), /set here[\s\S]*Model B · high/);
   await page.waitFor(SAVED);
@@ -443,6 +460,105 @@ try {
     assert.deepEqual(frame, ["40px", "40px", "8px", "1px", "solid"], who);
   }
 
+  // Reviewers: Claude Code with an alias, then a full name under Other…; Antigravity's model
+  // without levels turns the effort off. Each lands under reviewers.<name> in the file, and
+  // Codex's entry stays as it was
+  await page.evaluate(`location.hash = "#/settings"`);
+  await page.waitFor(`document.getElementById("preview-title").textContent === "Show ~/.cross-review/config.json" && document.querySelectorAll("#f-reviewer-set option").length === 3`);
+  const readGlobal = () => JSON.parse(fs.readFileSync(globalFile, "utf8"));
+  const untilFile = async check => {
+    for (let i = 0; i < 50 && !check(readGlobal()); i++) await new Promise(r => setTimeout(r, 100));
+    return readGlobal();
+  };
+  const change = (sel, value) => page.evaluate(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); e.value = ${JSON.stringify(value)}; e.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+  const codexBefore = readGlobal().reviewers.codex;
+  assert.deepEqual(await page.evaluate(`[...document.querySelectorAll("#f-reviewer-set option")].map(o => o.textContent)`), ["Codex", "Claude Code", "Antigravity"]);
+  assert.equal(await page.evaluate(`document.getElementById("f-target").value`), "codex");
+  await change("#f-reviewer-set", "claude");
+  const claudeForm = await page.evaluate(`({
+    target: document.getElementById("f-target").value,
+    help: document.getElementById("reviewer-help").textContent,
+    modelHelp: document.getElementById("model-help").textContent,
+    options: [...document.querySelectorAll("#f-model-set option")].map(o => o.value),
+    efforts: [...document.querySelectorAll("#f-effort-set option")].map(o => o.value),
+  })`);
+  assert.equal(claudeForm.target, "claude", "Model and effort for follows the reviewer");
+  assert.equal(claudeForm.help, "9.9.9-invented (Claude Code), not signed in");
+  assert.match(claudeForm.modelHelp, /Claude Code aliases; pick Other… for a full model name\.$/);
+  assert.deepEqual(claudeForm.options, ["", "opus", "sonnet", "__other__"], "Other… stays with a list");
+  assert.deepEqual(claudeForm.efforts, ["", "low", "medium", "high", "xhigh", "max"]);
+  await change("#f-model-set", "opus");
+  let file = await untilFile(f => f.reviewers && f.reviewers.claude && f.reviewers.claude.model === "opus");
+  assert.equal(file.reviewer, "claude");
+  assert.equal(file.reviewers.claude.model, "opus");
+  await change("#f-model-set", "__other__");
+  await page.evaluate(`(() => { const o = document.getElementById("f-model-other"); o.value = "claude-opus-5-5"; o.blur(); o.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+  file = await untilFile(f => f.reviewers.claude.model === "claude-opus-5-5");
+  assert.equal(file.reviewers.claude.model, "claude-opus-5-5");
+  await page.waitFor(`document.querySelector("#f-model-set option:checked").textContent === "claude-opus-5-5"`);
+  assert.deepEqual(file.reviewers.codex, codexBefore, "Codex's entry is untouched");
+  // a skill row writes under the reviewer shown
+  await change(`#per-skill select[data-path="reviewers.claude.skills.review-pr.effort"]`, "max");
+  file = await untilFile(f => f.reviewers.claude.skills && f.reviewers.claude.skills["review-pr"]);
+  assert.deepEqual(file.reviewers.claude.skills, { "review-pr": { effort: "max" } });
+  await change("#f-target", "agy");
+  const agyForm = await page.evaluate(`({
+    reviewer: document.getElementById("f-reviewer-set").value,
+    modelHelp: document.getElementById("model-help").textContent,
+    efforts: [...document.querySelectorAll("#f-effort-set option")].map(o => o.value),
+    disabled: document.getElementById("f-effort-set").disabled,
+  })`);
+  assert.equal(agyForm.reviewer, "claude", "showing another reviewer's model does not change the reviewer");
+  assert.match(agyForm.modelHelp, /^Listed by agy models, /);
+  assert.deepEqual(agyForm.efforts, ["", "low", "high"], "agy's default family offers its own levels");
+  assert.equal(agyForm.disabled, false);
+  await change("#f-model-set", "solo-y");
+  await page.waitFor(`document.getElementById("f-effort-set").disabled`);
+  assert.equal(await page.evaluate(`document.getElementById("effort-help").textContent`), "This model has no effort levels.");
+  file = await untilFile(f => f.reviewers.agy && f.reviewers.agy.model === "solo-y");
+  assert.equal(file.reviewers.agy.model, "solo-y");
+  // back to Codex: the default reviewer leaves the key out, and the form shows Codex again
+  await change("#f-reviewer-set", "codex");
+  file = await untilFile(f => !Object.hasOwn(f, "reviewer"));
+  assert.equal(Object.hasOwn(file, "reviewer"), false);
+  assert.equal(await page.evaluate(`document.getElementById("f-target").value`), "codex");
+  await page.waitFor(SAVED);
+
+  // Sessions by Claude Code and Antigravity: the list names each reviewer's default model, the
+  // session page its name and letters; a model without levels shows no effort
+  const rvRoot = path.join(tmp, "reviewers");
+  const rvFx = buildReviewerFixture(rvRoot);
+  const dR = await startDashboard({ root: rvRoot, port: 0, open: false, discoveryFile: null, catalogs });
+  const rvPage = await browser.newPage(1400, 1200);
+  try {
+    await rvPage.goto(`${dR.url}#/`);
+    await rvPage.waitFor(`document.querySelectorAll("#history tr[data-go]").length === 3`);
+    await rvPage.waitFor(`/Fam X \\(High\\) · Antigravity default/.test(document.getElementById("history").textContent)`);
+    const models = await rvPage.evaluate(`[...document.querySelectorAll("#history tr[data-go]")].map(tr => tr.children[4].textContent)`);
+    assert.deepEqual(models, ["Fam X (High) · Antigravity default", "solo-y", "Claude Code default"]);
+    const facts = async id => {
+      await rvPage.evaluate(`location.hash = "#/s/lantern/${id}"`);
+      await rvPage.waitFor(`document.querySelector("#thread .mark.rv img") && document.getElementById("f-reviewer").textContent !== ""`);
+      return rvPage.evaluate(`({
+        reviewer: document.getElementById("f-reviewer").textContent,
+        model: document.getElementById("f-model").textContent,
+        effort: document.getElementById("f-effort").textContent,
+        letters: document.querySelector("#thread .mark.rv img").getAttribute("alt"),
+      })`);
+    };
+    assert.deepEqual(await facts(path.basename(rvFx.sessions.claude)), { reviewer: "Claude Code", model: "Claude Code default", effort: "max", letters: "CC" });
+    await facts(path.basename(rvFx.sessions.agySolo));
+    // the model's name and its missing levels come with agy's list, loaded in the background
+    await rvPage.waitFor(`document.getElementById("f-model").textContent === "Solo Y"`);
+    assert.deepEqual(await facts(path.basename(rvFx.sessions.agySolo)), { reviewer: "Antigravity", model: "Solo Y", effort: "—", letters: "AG" });
+    await rvPage.evaluate(`location.hash = "#/settings"`);
+    await rvPage.waitFor(`document.querySelectorAll("#avatars tr").length >= 3`);
+    const parties = await rvPage.evaluate(`[...document.querySelectorAll("#avatars tr")].map(tr => [tr.querySelector("img").getAttribute("alt"), tr.children[0].textContent])`);
+    assert.deepEqual(parties.filter(([, label]) => label.startsWith("Reviewer")), [["CC", "Reviewer · Claude Code"], ["AG", "Reviewer · Antigravity"]]);
+  } finally {
+    await dR.close();
+  }
+
   // Many finished sessions whose titles wrap differently: every page fits the window, Older
   // always moves forward, Newer comes back to the same rows
   const manyRoot = path.join(tmp, "many");
@@ -455,7 +571,7 @@ try {
       rounds: [{ status: "completed", started: manyNow - 1000 - i * 60, elapsed: 1, review: "### VERDICT\n- Status: APPROVE\n- Reason: Invented approval.\n" }],
     });
   }
-  const d3 = await startDashboard({ root: manyRoot, port: 0, open: false, discoveryFile: null, catalog });
+  const d3 = await startDashboard({ root: manyRoot, port: 0, open: false, discoveryFile: null, catalogs });
   const many = await browser.newPage(1400, 1200);
   try {
     await many.goto(`${d3.url}#/`);
@@ -508,7 +624,7 @@ try {
       { status: "completed", started: manyNow - 700, elapsed: 1, review: "### VERDICT\n- Status: APPROVE\n- Reason: Invented approval.\n" },
     ],
   });
-  const d4 = await startDashboard({ root: blankRoot, port: 0, open: false, discoveryFile: null, catalog });
+  const d4 = await startDashboard({ root: blankRoot, port: 0, open: false, discoveryFile: null, catalogs });
   const blank = await browser.newPage(1400, 900);
   try {
     await blank.goto(`${d4.url}#/s/quill/review-impl-20261015-500`);
@@ -546,7 +662,7 @@ try {
   const empty = await browser.newPage(1400, 900);
   const emptyRoot = path.join(tmp, "empty");
   fs.mkdirSync(path.join(emptyRoot, ".cross-review", "sessions"), { recursive: true });
-  const d2 = await startDashboard({ root: emptyRoot, port: 0, open: false, discoveryFile: null, catalog });
+  const d2 = await startDashboard({ root: emptyRoot, port: 0, open: false, discoveryFile: null, catalogs });
   try {
     await empty.goto(`${d2.url}#/`);
     await empty.waitFor(`document.querySelector("#active .empty-state")`);
@@ -723,7 +839,7 @@ async function updateChecks(browser) {
   fs.mkdirSync(path.join(updRoot, "quarry", ".cross-review", "sessions"), { recursive: true });
   let answer;
   const latestVersion = () => new Promise(r => { answer = r; });
-  const d11 = await startDashboard({ root: updRoot, port: 0, open: false, discoveryFile: null, catalog, latestVersion, updateCache: path.join(tmp, "update-cache.json") });
+  const d11 = await startDashboard({ root: updRoot, port: 0, open: false, discoveryFile: null, catalogs, latestVersion, updateCache: path.join(tmp, "update-cache.json") });
   const globalFile = path.join(process.env.HOME, ".cross-review", "config.json");
   const before = fs.readFileSync(globalFile, "utf8");
   const page = await browser.newPage(1400, 1000);
@@ -793,7 +909,7 @@ async function plansChecks(browser) {
   function pl(x) {
     return x.atlas;
   }
-  const d5 = await startDashboard({ root: planRoot, port: 0, open: false, discoveryFile: null, catalog, tickMs: 300, rescanMs: 1000 });
+  const d5 = await startDashboard({ root: planRoot, port: 0, open: false, discoveryFile: null, catalogs, tickMs: 300, rescanMs: 1000 });
   const page = await browser.newPage(1400, 1300);
   try {
     const api = async p => (await fetch(`http://127.0.0.1:${d5.port}${p}`, { headers: { Authorization: `Bearer ${d5.token}` } })).json();
@@ -1009,7 +1125,7 @@ async function plansChecks(browser) {
     const f = writePlan(path.join(manyPlans, "atlas"), `invented-${String(i).padStart(2, "0")}-plan.md`, PLANS.draft.replace(/^# .*$/m, `# Invented plan ${i}${i % 4 === 0 ? " with a much longer title that wraps onto a second line in the plan column of the list" : ""}`));
     fs.utimesSync(f, t - i * 60, t - i * 60);
   }
-  const d6 = await startDashboard({ root: manyPlans, port: 0, open: false, discoveryFile: null, catalog });
+  const d6 = await startDashboard({ root: manyPlans, port: 0, open: false, discoveryFile: null, catalogs });
   try {
     const short = await browser.newPage(1400, 700);
     await short.goto(`${d6.url}#/plans`);
@@ -1034,7 +1150,7 @@ async function plansChecks(browser) {
   // No plans: the empty line
   const noPlans = path.join(tmp, "no-plans");
   fs.mkdirSync(path.join(noPlans, ".cross-review", "sessions"), { recursive: true });
-  const d7 = await startDashboard({ root: noPlans, port: 0, open: false, discoveryFile: null, catalog });
+  const d7 = await startDashboard({ root: noPlans, port: 0, open: false, discoveryFile: null, catalogs });
   try {
     const p = await browser.newPage(1400, 900);
     await p.goto(`${d7.url}#/plans`);

@@ -112,8 +112,27 @@ async function main() {
     defaultModel: () => "gpt-5-codex",
     cliInfo: async () => ({ version: "codex-cli", loggedIn: true }),
   };
+  // Claude Code lists its aliases; agy groups its models into families with their levels
+  const otherCatalogs = {
+    claude: {
+      listModels: async () => [
+        { slug: "opus", name: "Opus", description: "The latest Opus model.", efforts: ["low", "medium", "high", "xhigh", "max"] },
+        { slug: "sonnet", name: "Sonnet", description: "The latest Sonnet model.", efforts: ["low", "medium", "high", "xhigh", "max"] },
+      ],
+      defaultModel: () => null,
+      cliInfo: async () => ({ version: "claude-code", loggedIn: true }),
+    },
+    agy: {
+      listModels: async () => [
+        { slug: "gemini-flash", name: "Gemini Flash", description: "", efforts: ["low", "high"] },
+        { slug: "gemini-pro", name: "Gemini Pro", description: "", efforts: ["low", "high"] },
+      ],
+      defaultModel: () => "Gemini Flash (High)",
+      cliInfo: async () => ({ version: "agy", loggedIn: null }),
+    },
+  };
   const d = await startDashboard({
-    root, port: 0, open: false, discoveryFile: null, catalogs: { codex: catalog }, latestVersion: async () => null,
+    root, port: 0, open: false, discoveryFile: null, catalogs: { codex: catalog, ...otherCatalogs }, latestVersion: async () => null,
     now: () => clock, isAlive: pid => alive.has(pid), tickMs: 100, rescanMs: 100,
   });
   const base = new URL(d.url).origin;
@@ -158,7 +177,7 @@ async function main() {
         keep(`/api/plan?${key}`, i, strip(await get(`/api/plan?${key}`)));
       }
       if (i === 0) {
-        for (const route of ["/api/settings", "/api/avatars", "/api/update", "/api/models", "/api/overview"]) keep(route, 0, strip(await get(route)));
+        for (const route of ["/api/settings", "/api/avatars", "/api/update", "/api/overview", ...["codex", "claude", "agy"].map(r => `/api/models?reviewer=${r}`)]) keep(route, 0, strip(await get(route)));
       }
       process.stdout.write(`step ${i + 1}/${steps.length}\r`);
     }
