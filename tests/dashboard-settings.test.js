@@ -139,7 +139,7 @@ test("through the server: with no catalog, changing Follow reviews keeps effort 
     const config = mergeForm(s.global, { effort: shownEffort, model: shownModel, open_dashboard: true }, ["open_dashboard"]);
     const r = await fetch(`http://127.0.0.1:${d.port}/api/settings`, { method: "POST", headers: { ...auth, "Content-Type": "application/json" }, body: JSON.stringify({ scope: "global", config }) });
     assert.equal(r.status, 200, await r.text());
-    assert.deepEqual(JSON.parse(fs.readFileSync(globalFile, "utf8")), { effort: "ultra", model: "x-unknown", open_dashboard: true });
+    assert.deepEqual(JSON.parse(fs.readFileSync(globalFile, "utf8")), { open_dashboard: true, reviewers: { codex: { effort: "ultra", model: "x-unknown" } } });
   } finally {
     await d.close();
   }
@@ -160,23 +160,25 @@ test("through the server: a save with `touched` changes only those fields in the
     let r = await post({ scope: "global", config: form, touched: ["effort", "skills.review-impl.model"] });
     const answer = await r.text();
     assert.equal(r.status, 200, answer);
-    const want = { effort: "medium", model: "model-x", skills: { "review-pr": { effort: "low" }, "review-impl": { model: "model-b" } } };
+    // written in the per-reviewer form: Codex's fields under reviewers.codex
+    const want = { reviewers: { codex: { effort: "medium", model: "model-x", skills: { "review-pr": { effort: "low" }, "review-impl": { model: "model-b" } } } } };
     assert.deepEqual(JSON.parse(fs.readFileSync(globalFile, "utf8")), want, "untouched open_plans is not written; the file's own fields stay");
     assert.deepEqual(JSON.parse(answer).config, want);
     // clearing a touched field removes it
     r = await post({ scope: "global", config: {}, touched: ["model"] });
     assert.equal(r.status, 200);
-    assert.equal(JSON.parse(fs.readFileSync(globalFile, "utf8")).model, undefined);
+    assert.equal(JSON.parse(fs.readFileSync(globalFile, "utf8")).reviewers.codex.model, undefined);
+    assert.equal(JSON.parse(fs.readFileSync(globalFile, "utf8")).reviewers.codex.effort, "medium");
     // a broken file is replaced by the touched fields
     fs.writeFileSync(globalFile, "{ broken");
     r = await post({ scope: "global", config: { effort: "low" }, touched: ["effort"] });
     assert.equal(r.status, 200);
-    assert.deepEqual(JSON.parse(fs.readFileSync(globalFile, "utf8")), { effort: "low" });
+    assert.deepEqual(JSON.parse(fs.readFileSync(globalFile, "utf8")), { reviewers: { codex: { effort: "low" } } });
     for (const touched of [["__proto__"], ["skills.__proto__.model"], ["skills.review-impl.reviewer"], "effort", [1]]) {
       r = await post({ scope: "global", config: { effort: "high" }, touched });
       assert.equal(r.status, 400, JSON.stringify(touched));
     }
-    assert.deepEqual(JSON.parse(fs.readFileSync(globalFile, "utf8")), { effort: "low" }, "refused saves change nothing");
+    assert.deepEqual(JSON.parse(fs.readFileSync(globalFile, "utf8")), { reviewers: { codex: { effort: "low" } } }, "refused saves change nothing");
   } finally {
     fs.rmSync(globalFile, { force: true });
     await d.close();

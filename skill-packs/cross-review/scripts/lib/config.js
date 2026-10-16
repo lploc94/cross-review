@@ -2,17 +2,21 @@
 // <workspace>/.cross-review/config.json. `begin` takes its defaults from them; the
 // dashboard's Settings page reads and writes them.
 //
-// Schema: { reviewer?, model?, effort?, open_dashboard?, track_plans?, open_plans?,
-//           check_updates? (read from the global file only), skills?: { <skill>: { model?, effort? } } }
-// Each key resolves on its own: requested > workspace skill > workspace > global skill >
-// global > default (the reviewer's own model, effort "high", reviewer "codex").
+// Schema: { reviewer?, open_dashboard?, track_plans?, open_plans?, check_updates? (read from the
+//           global file only), reviewers?: { codex?|claude?|agy?: { model?, effort?,
+//           skills?: { <skill>: { model?, effort? } } } }, model?, effort?, skills? }
+// The last three are the older form of reviewers.codex: readConfig and writeConfig move them
+// there (normalizeConfig), and a field already in reviewers.codex wins.
+// The reviewer resolves first: requested > workspace > global > "codex". Its model and effort
+// then resolve key by key through that reviewer's entries: requested > workspace skill >
+// workspace > global skill > global > default (the reviewer's own model, effort "high").
 // track_plans and open_plans are plan settings, not review settings: workspace > global > false.
 
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { DEFAULT_REVIEWER, REVIEWER_NAMES } from "./reviewers/index.js";
+import { DEFAULT_REVIEWER, REVIEWER_NAMES, getReviewer } from "./reviewers/index.js";
 
 /** The skills a config can name (the runner's SKILL_TEMPLATES; a test keeps them equal). */
 export const CONFIG_SKILLS = ["review-plan", "review-impl", "review-think", "review-pr"];
@@ -37,8 +41,57 @@ function checkModel(v, where, errors) {
   }
 }
 
-function checkEffort(v, where, errors) {
+/** A lowercase word; one of `efforts` when the reviewer has fixed levels. */
+function checkEffort(v, where, errors, efforts = null) {
   if (typeof v !== "string" || !/^[a-z]+$/.test(v)) errors.push(`${where}: must be a lowercase word such as "high"`);
+  else if (efforts && !efforts.includes(v)) errors.push(`${where}: must be one of ${efforts.join(", ")}`);
+}
+
+/** { <skill>: { model?, effort? } } at `where` ("skills" or "reviewers.<name>.skills"). */
+function checkSkills(v, where, errors, efforts) {
+  if (!isObject(v)) {
+    errors.push(`${where}: must be an object keyed by skill`);
+    return;
+  }
+  for (const [skill, entry] of Object.entries(v)) {
+    if (!CONFIG_SKILLS.includes(skill)) {
+      errors.push(`${where}: unknown skill ${JSON.stringify(skill)} (known: ${CONFIG_SKILLS.join(", ")})`);
+      continue;
+    }
+    if (!isObject(entry)) {
+      errors.push(`${where}.${skill}: must be an object`);
+      continue;
+    }
+    for (const [k, x] of Object.entries(entry)) {
+      if (k === "model") checkModel(x, `${where}.${skill}.model`, errors);
+      else if (k === "effort") checkEffort(x, `${where}.${skill}.effort`, errors, efforts);
+      else errors.push(`${where}.${skill}: unknown key ${JSON.stringify(k)} (only model and effort)`);
+    }
+  }
+}
+
+function checkReviewers(v, errors) {
+  if (!isObject(v)) {
+    errors.push("reviewers: must be an object keyed by reviewer");
+    return;
+  }
+  for (const [name, entry] of Object.entries(v)) {
+    if (!REVIEWER_NAMES.includes(name)) {
+      errors.push(`reviewers: unknown reviewer ${JSON.stringify(name)} (known: ${REVIEWER_NAMES.join(", ")})`);
+      continue;
+    }
+    if (!isObject(entry)) {
+      errors.push(`reviewers.${name}: must be an object`);
+      continue;
+    }
+    const efforts = getReviewer(name).efforts || null;
+    for (const [k, x] of Object.entries(entry)) {
+      if (k === "model") checkModel(x, `reviewers.${name}.model`, errors);
+      else if (k === "effort") checkEffort(x, `reviewers.${name}.effort`, errors, efforts);
+      else if (k === "skills") checkSkills(x, `reviewers.${name}.skills`, errors, efforts);
+      else errors.push(`reviewers.${name}: unknown key ${JSON.stringify(k)} (only model, effort and skills)`);
+    }
+  }
 }
 
 /** Problems with a config object, one sentence each; [] when it is valid. */
@@ -55,30 +108,38 @@ export function validateConfig(obj) {
     } else if (key === "open_dashboard" || key === "track_plans" || key === "open_plans" || key === "check_updates") {
       if (typeof v !== "boolean") errors.push(`${key}: must be true or false`);
     } else if (key === "skills") {
-      if (!isObject(v)) {
-        errors.push("skills: must be an object keyed by skill");
-        continue;
-      }
-      for (const [skill, entry] of Object.entries(v)) {
-        if (!CONFIG_SKILLS.includes(skill)) {
-          errors.push(`skills: unknown skill ${JSON.stringify(skill)} (known: ${CONFIG_SKILLS.join(", ")})`);
-          continue;
-        }
-        if (!isObject(entry)) {
-          errors.push(`skills.${skill}: must be an object`);
-          continue;
-        }
-        for (const [k, x] of Object.entries(entry)) {
-          if (k === "model") checkModel(x, `skills.${skill}.model`, errors);
-          else if (k === "effort") checkEffort(x, `skills.${skill}.effort`, errors);
-          else errors.push(`skills.${skill}: unknown key ${JSON.stringify(k)} (only model and effort)`);
-        }
-      }
+      checkSkills(v, "skills", errors, null);
+    } else if (key === "reviewers") {
+      checkReviewers(v, errors);
     } else {
       errors.push(`unknown key ${JSON.stringify(key)}`);
     }
   }
   return errors;
+}
+
+/**
+ * The config with the older top-level model, effort and skills moved into reviewers.codex; a
+ * field already in reviewers.codex wins. Pure: the input is not changed, and normalizing a
+ * normalized config gives it back unchanged.
+ */
+export function normalizeConfig(obj) {
+  if (!isObject(obj)) return obj;
+  const { model, effort, skills, ...rest } = obj;
+  if (model === undefined && effort === undefined && skills === undefined) return { ...obj };
+  const reviewers = isObject(obj.reviewers) ? { ...obj.reviewers } : {};
+  const codex = isObject(reviewers.codex) ? { ...reviewers.codex } : {};
+  if (model !== undefined && codex.model === undefined) codex.model = model;
+  if (effort !== undefined && codex.effort === undefined) codex.effort = effort;
+  if (isObject(skills)) {
+    const merged = isObject(codex.skills) ? { ...codex.skills } : {};
+    for (const [skill, entry] of Object.entries(skills)) {
+      merged[skill] = { ...(isObject(entry) ? entry : {}), ...(isObject(merged[skill]) ? merged[skill] : {}) };
+    }
+    codex.skills = merged;
+  }
+  reviewers.codex = codex;
+  return { ...rest, reviewers };
 }
 
 /** The config in `file`: {} when it does not exist; throws CONFIG_INVALID when it is broken. */
@@ -98,12 +159,12 @@ export function readConfig(file) {
   }
   const errors = validateConfig(obj);
   if (errors.length) throw new ConfigError(`${file}: ${errors.join("; ")}`);
-  return obj;
+  return normalizeConfig(obj);
 }
 
-/** Drop empty skill entries, so a cleared field leaves no `{}` behind. */
-function prune(obj) {
-  const out = { ...obj };
+/** An entry without empty skill entries, so a cleared field leaves no `{}` behind. */
+function pruneEntry(entry) {
+  const out = { ...entry };
   if (isObject(out.skills)) {
     const skills = {};
     for (const [s, e] of Object.entries(out.skills)) if (isObject(e) && Object.keys(e).length) skills[s] = e;
@@ -112,11 +173,25 @@ function prune(obj) {
   return out;
 }
 
-/** Validate and write `obj` (temp file + rename). An empty config deletes the file. */
+/** Drop empty skill and reviewer entries, so a cleared field leaves no `{}` behind. */
+function prune(obj) {
+  const out = pruneEntry(obj);
+  if (isObject(out.reviewers)) {
+    const reviewers = {};
+    for (const [name, e] of Object.entries(out.reviewers)) {
+      const entry = isObject(e) ? pruneEntry(e) : e;
+      if (isObject(entry) && Object.keys(entry).length) reviewers[name] = entry;
+    }
+    if (Object.keys(reviewers).length) out.reviewers = reviewers; else delete out.reviewers;
+  }
+  return out;
+}
+
+/** Validate and write `obj` normalized (temp file + rename). An empty config deletes the file. */
 export function writeConfig(file, obj) {
   const errors = validateConfig(obj);
   if (errors.length) throw new ConfigError(errors.join("; "));
-  const clean = prune(obj);
+  const clean = prune(normalizeConfig(obj));
   if (!Object.keys(clean).length) {
     fs.rmSync(file, { force: true });
     return clean;
@@ -200,30 +275,34 @@ export function resolvePlanSettings(ws) {
 
 /**
  * Settings for a new session of `skill` started in `workingDir`; `explicit` holds what the
- * agent passed (reviewer, model, effort). Returns { reviewer, model, effort, open_dashboard,
+ * agent passed (reviewer, model, effort). The reviewer resolves first; model and effort then
+ * come from that reviewer's entries only. Returns { reviewer, model, effort, open_dashboard,
  * sources } where each source is requested | workspace:<skill> | workspace | global:<skill> |
  * global | default. Throws CONFIG_INVALID when either file is broken.
  */
 export function resolveSettings({ skill, workingDir, explicit = {} }) {
   const global = readConfig(globalConfigPath());
   const ws = workingDir ? readConfig(workspaceConfigPath(path.resolve(workingDir))) : {};
-  const levels = [
-    [ws.skills && ws.skills[skill], `workspace:${skill}`],
-    [ws, "workspace"],
-    [global.skills && global.skills[skill], `global:${skill}`],
-    [global, "global"],
-  ];
-  const pick = (key, fallback, perSkill = true) => {
-    if (explicit[key] !== undefined && explicit[key] !== null && explicit[key] !== "") return [explicit[key], "requested"];
-    for (const [level, source] of levels) {
-      if (!perSkill && source.includes(":")) continue;
-      if (level && level[key] !== undefined) return [level[key], source];
-    }
+  const asked = key => explicit[key] !== undefined && explicit[key] !== null && explicit[key] !== "";
+  const first = (key, fallback, levels) => {
+    if (asked(key)) return [explicit[key], "requested"];
+    for (const [level, source] of levels) if (level && level[key] !== undefined) return [level[key], source];
     return [fallback, "default"];
   };
-  const [reviewer, rs] = pick("reviewer", DEFAULT_REVIEWER, false);
-  const [model, ms] = pick("model", null);
-  const [effort, es] = pick("effort", DEFAULT_EFFORT);
-  const [open, os_] = pick("open_dashboard", false, false);
+  const top = [[ws, "workspace"], [global, "global"]];
+  const [reviewer, rs] = first("reviewer", DEFAULT_REVIEWER, top);
+  const entryOf = cfg => (isObject(cfg.reviewers) && Object.hasOwn(cfg.reviewers, reviewer) ? cfg.reviewers[reviewer] : {});
+  const skillOf = entry => (isObject(entry.skills) && Object.hasOwn(entry.skills, skill) ? entry.skills[skill] : null);
+  const wsEntry = entryOf(ws);
+  const globalEntry = entryOf(global);
+  const levels = [
+    [skillOf(wsEntry), `workspace:${skill}`],
+    [wsEntry, "workspace"],
+    [skillOf(globalEntry), `global:${skill}`],
+    [globalEntry, "global"],
+  ];
+  const [model, ms] = first("model", null, levels);
+  const [effort, es] = first("effort", DEFAULT_EFFORT, levels);
+  const [open, os_] = first("open_dashboard", false, top);
   return { reviewer, model, effort, open_dashboard: open, sources: { reviewer: rs, model: ms, effort: es, open_dashboard: os_ } };
 }

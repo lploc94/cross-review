@@ -983,3 +983,26 @@ test("a failed agy turn (status ERROR) stops the round with its error", async ()
     delete process.env.FAKE_AGY_ERROR;
   }
 });
+
+// ---------- settings per reviewer ----------
+
+test("begin reads the chosen reviewer's settings from reviewers.<name>", async () => {
+  const ws = freshWorkspace("chosen-reviewer");
+  fs.rmSync(process.env.FAKE_CLAUDE_LOG, { force: true });
+  fs.writeFileSync(process.env.FAKE_CLAUDE_OUTPUT, "### VERDICT\n- Status: APPROVE\n- Reason: ok\n");
+  // a legacy global model is Codex's: it must not reach Claude
+  putConfig(globalConfig(), { model: "gpt-legacy", effort: "low" });
+  putConfig(path.join(ws, ".cross-review", "config.json"), { reviewer: "claude", reviewers: { claude: { model: "sonnet" } } });
+  try {
+    const begun = await beginSession({ skill: "review-plan", inputText: inputFor("review-plan", "cr"), workingDir: ws });
+    await waitSession(begun.session_dir, { maxWaitSeconds: 30 });
+    const [call] = claudeCalls();
+    assert.equal(argAfter(call.args, "--model"), "sonnet");
+    assert.equal(argAfter(call.args, "--effort"), "high");
+    const st = stateOf(begun.session_dir);
+    assert.deepEqual([st.reviewer, st.settings_sources.reviewer, st.settings_sources.model, st.settings_sources.effort], ["claude", "workspace", "workspace", "default"]);
+    await endSession(begun.session_dir);
+  } finally {
+    fs.rmSync(globalConfig(), { force: true });
+  }
+});

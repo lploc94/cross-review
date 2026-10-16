@@ -677,12 +677,26 @@ export async function startDashboard({
     return { ...catalogState, refreshing: Boolean(refreshing) };
   };
 
+  // Until the Settings page edits reviewers.<name>, it reads and writes Codex's model, effort and
+  // skills at the top level, where older files keep them: readConfig gives them under
+  // reviewers.codex, so they move back up here, and writeConfig moves them down again.
+  const codexAtTop = cfg => {
+    const codex = cfg && cfg.reviewers && cfg.reviewers.codex;
+    if (!codex) return cfg;
+    const { model, effort, skills, ...restCodex } = codex;
+    const reviewers = { ...cfg.reviewers, codex: restCodex };
+    if (!Object.keys(restCodex).length) delete reviewers.codex;
+    const out = { ...cfg, ...(model !== undefined && { model }), ...(effort !== undefined && { effort }), ...(skills !== undefined && { skills }) };
+    if (Object.keys(reviewers).length) out.reviewers = reviewers; else delete out.reviewers;
+    return out;
+  };
+
   async function settingsPayload() {
     // Keyed by workspace path: no prototype, so a workspace named __proto__ is a plain key
     const errors = { global: undefined, workspaces: Object.create(null) };
     const load = (file, onError) => {
       try {
-        return readConfig(file);
+        return codexAtTop(readConfig(file));
       } catch (e) {
         onError(e.message);
         return {};
@@ -734,7 +748,7 @@ export async function startDashboard({
       if (!next || typeof next !== "object" || Array.isArray(next)) return fail(res, 400, "config must be a JSON object");
       let current = {};
       try {
-        current = readConfig(file);
+        current = codexAtTop(readConfig(file));
       } catch {}
       next = mergeForm(current, next, body.touched);
     }

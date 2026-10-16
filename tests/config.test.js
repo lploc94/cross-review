@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 
 import {
-  CONFIG_SKILLS, ensureCrossReviewDir, globalConfigPath, readConfig, resolvePlanSettings, resolveSettings, validateConfig, workspaceConfigPath, writeConfig,
+  CONFIG_SKILLS, ensureCrossReviewDir, globalConfigPath, normalizeConfig, readConfig, resolvePlanSettings, resolveSettings, validateConfig, workspaceConfigPath, writeConfig,
 } from "../skill-packs/cross-review/scripts/lib/config.js";
 import { SKILL_TEMPLATES } from "../skill-packs/cross-review/scripts/lib/review-core.js";
 
@@ -112,7 +112,7 @@ test("writeConfig validates, writes atomically, and an empty object deletes the 
   assert.throws(() => writeConfig(file, { nope: 1 }), e => e.code === "CONFIG_INVALID");
   assert.equal(fs.existsSync(file), false);
   writeConfig(file, { effort: "low", skills: { "review-impl": {} } });
-  assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8")), { effort: "low" });
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8")), { reviewers: { codex: { effort: "low" } } });
   assert.deepEqual(fs.readdirSync(path.dirname(file)).filter(n => n.includes(".tmp")), []);
   writeConfig(file, {});
   assert.equal(fs.existsSync(file), false);
@@ -149,4 +149,125 @@ test("ensureCrossReviewDir writes .gitignore once and keeps an existing one", ()
   fs.writeFileSync(gi, "custom\n");
   ensureCrossReviewDir(ws);
   assert.equal(fs.readFileSync(gi, "utf8"), "custom\n");
+});
+
+// ---------- settings per reviewer (reviewers.<name>) ----------
+
+test("resolve per reviewer: the chosen reviewer's entry, legacy keys only for Codex", () => {
+  const ws = workspace("per-reviewer");
+  // 1. a legacy global model is Codex's, so Claude gets its own default
+  put(globalConfigPath(), { model: "gpt-5.5" });
+  put(workspaceConfigPath(ws), { reviewer: "claude" });
+  let r = resolveSettings({ skill: "review-impl", workingDir: ws });
+  assert.deepEqual([r.reviewer, r.model, r.effort, r.sources.reviewer, r.sources.model], ["claude", null, "high", "workspace", "default"]);
+  // the same files with Codex requested: the legacy model applies
+  r = resolveSettings({ skill: "review-impl", workingDir: ws, explicit: { reviewer: "codex" } });
+  assert.deepEqual([r.reviewer, r.model, r.sources.model], ["codex", "gpt-5.5", "global"]);
+
+  // 2. Claude's global entry and its per-skill effort
+  put(globalConfigPath(), { reviewers: { claude: { model: "opus", skills: { "review-plan": { effort: "max" } } } } });
+  r = resolveSettings({ skill: "review-plan", workingDir: ws });
+  assert.deepEqual([r.reviewer, r.model, r.effort], ["claude", "opus", "max"]);
+  assert.deepEqual([r.sources.model, r.sources.effort], ["global", "global:review-plan"]);
+  r = resolveSettings({ skill: "review-impl", workingDir: ws });
+  assert.deepEqual([r.model, r.effort, r.sources.effort], ["opus", "high", "default"]);
+
+  // 3. a legacy config without a reviewer runs Codex as before
+  fs.rmSync(workspaceConfigPath(ws));
+  put(globalConfigPath(), { model: "gpt-x", skills: { "review-impl": { effort: "xhigh" } } });
+  r = resolveSettings({ skill: "review-impl", workingDir: ws });
+  assert.deepEqual([r.reviewer, r.model, r.effort, r.sources.model, r.sources.effort], ["codex", "gpt-x", "xhigh", "global", "global:review-impl"]);
+
+  // workspace entry beats global entry for the same reviewer; another reviewer's entry never applies
+  put(globalConfigPath(), { reviewer: "agy", reviewers: { agy: { model: "g-model", effort: "low" }, codex: { model: "c-model" } } });
+  put(workspaceConfigPath(ws), { reviewers: { agy: { effort: "medium" }, claude: { model: "sonnet" } } });
+  r = resolveSettings({ skill: "review-pr", workingDir: ws });
+  assert.deepEqual([r.reviewer, r.model, r.sources.model, r.effort, r.sources.effort], ["agy", "g-model", "global", "medium", "workspace"]);
+  fs.rmSync(globalConfigPath());
+  fs.rmSync(workspaceConfigPath(ws));
+});
+
+test("validate reviewers: unknown reviewer, unknown key, Claude effort, skills", () => {
+  assert.deepEqual(validateConfig({
+    reviewer: "claude",
+    reviewers: {
+      codex: { model: "gpt-x", effort: "xhigh", skills: { "review-impl": { effort: "low" } } },
+      claude: { model: "opus", effort: "max", skills: { "review-plan": { model: "sonnet", effort: "low" } } },
+      agy: { model: "gemini-x-flash", effort: "medium" },
+    },
+  }), []);
+  // legacy keys next to reviewers stay valid
+  assert.deepEqual(validateConfig({ model: "gpt-x", skills: { "review-pr": { effort: "low" } }, reviewers: { codex: { effort: "high" } } }), []);
+  const bad = [
+    [{ reviewers: { gemini: { model: "m" } } }, 'reviewers: unknown reviewer "gemini" (known: codex, claude, agy)'],
+    [{ reviewers: { codex: { colour: "red" } } }, /reviewers\.codex: unknown key "colour"/],
+    [{ reviewers: { claude: { effort: "huge" } } }, "reviewers.claude.effort: must be one of low, medium, high, xhigh, max"],
+    [{ reviewers: { claude: { skills: { "review-plan": { effort: "huge" } } } } }, /reviewers\.claude\.skills\.review-plan\.effort: must be one of/],
+    [{ reviewers: { codex: { skills: { "review-commit": { model: "m" } } } } }, /reviewers\.codex\.skills: unknown skill "review-commit"/],
+    [{ reviewers: { agy: { model: "two words" } } }, /reviewers\.agy\.model/],
+    [{ reviewers: { agy: { effort: "High" } } }, /reviewers\.agy\.effort/],
+    [{ reviewers: [] }, /reviewers: must be an object/],
+    [{ reviewers: { claude: "opus" } }, /reviewers\.claude: must be an object/],
+    [{ reviewers: { __proto__: null, ["__proto__"]: {} } }, /unknown reviewer/],
+  ];
+  for (const [value, want] of bad) {
+    const errors = validateConfig(value).join("\n");
+    if (typeof want === "string") assert.ok(errors.includes(want), `${JSON.stringify(value)} → ${errors}`);
+    else assert.match(errors, want, JSON.stringify(value));
+  }
+  assert.ok(validateConfig(JSON.parse('{"reviewers": {"__proto__": {"model": "m"}}}')).join().includes("unknown reviewer"));
+});
+
+// The steps Breaking Changes gives to go back to 10.3.x, as a pure function: the 10.3 keys
+// and reviewer names are written out here, not taken from the current validator.
+const KEYS_10_3 = ["reviewer", "model", "effort", "open_dashboard", "track_plans", "open_plans", "check_updates", "skills"];
+function rollbackTo103(cfg) {
+  const out = { ...cfg };
+  const codex = (cfg.reviewers && cfg.reviewers.codex) || {};
+  for (const k of ["model", "effort", "skills"]) if (codex[k] !== undefined) out[k] = codex[k];
+  delete out.reviewers;
+  if (out.reviewer !== undefined && out.reviewer !== "codex") delete out.reviewer;
+  return out;
+}
+
+test("legacy keys move to reviewers.codex: normalize, write, rewrite, roll back", () => {
+  const legacy = { reviewer: "codex", model: "gpt-x", effort: "low", skills: { "review-impl": { effort: "xhigh", model: "gpt-y" }, "review-pr": { model: "gpt-z" } }, open_dashboard: true };
+  const frozen = JSON.stringify(legacy);
+  const n = normalizeConfig(legacy);
+  assert.equal(JSON.stringify(legacy), frozen, "the input is not changed");
+  assert.deepEqual(n, {
+    reviewer: "codex", open_dashboard: true,
+    reviewers: { codex: { model: "gpt-x", effort: "low", skills: { "review-impl": { effort: "xhigh", model: "gpt-y" }, "review-pr": { model: "gpt-z" } } } },
+  });
+  assert.deepEqual(normalizeConfig(n), n, "normalizing twice is normalizing once");
+  // a field already in reviewers.codex wins, field by field
+  const mixed = { model: "old", skills: { "review-impl": { effort: "low", model: "old-impl" } }, reviewers: { codex: { model: "new", skills: { "review-impl": { effort: "high" } } }, claude: { model: "opus" } } };
+  const mixedFrozen = JSON.stringify(mixed);
+  assert.deepEqual(normalizeConfig(mixed), {
+    reviewers: { codex: { model: "new", skills: { "review-impl": { effort: "high", model: "old-impl" } } }, claude: { model: "opus" } },
+  });
+  assert.equal(JSON.stringify(mixed), mixedFrozen);
+
+  // readConfig gives the normalized form; writeConfig writes it, and rewriting changes nothing
+  const ws = workspace("normalize");
+  const file = workspaceConfigPath(ws);
+  put(file, legacy);
+  assert.deepEqual(readConfig(file), n);
+  writeConfig(file, legacy);
+  const written = fs.readFileSync(file, "utf8");
+  assert.deepEqual(JSON.parse(written), n);
+  assert.ok(!("model" in JSON.parse(written)) && !("skills" in JSON.parse(written)));
+  writeConfig(file, readConfig(file));
+  assert.equal(fs.readFileSync(file, "utf8"), written, "rewriting a normalized file leaves it byte for byte");
+  // emptied entries are pruned away
+  writeConfig(file, { reviewers: { claude: { skills: { "review-plan": {} } }, codex: {} }, open_dashboard: false });
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8")), { open_dashboard: false });
+
+  // rollback recipe yields a 10.3 config
+  const back = rollbackTo103({ reviewer: "claude", reviewers: { codex: { model: "gpt-x" }, claude: { model: "opus" } } });
+  assert.ok(Object.keys(back).every(k => KEYS_10_3.includes(k)), JSON.stringify(back));
+  assert.ok(back.reviewer === undefined || back.reviewer === "codex");
+  assert.equal(back.model, "gpt-x");
+  assert.equal(back.reviewers, undefined);
+  assert.deepEqual(rollbackTo103(n), { reviewer: "codex", open_dashboard: true, model: "gpt-x", effort: "low", skills: legacy.skills });
 });

@@ -714,7 +714,7 @@ test("settings: GET lists both levels and the catalog; POST writes the workspace
 
     const ok = await post({ scope: "workspace", ws: "harbor-app", config: { effort: "low", skills: { "review-impl": { model: "model-a" } } } });
     assert.equal(ok.status, 200, ok.text);
-    assert.deepEqual(JSON.parse(fs.readFileSync(wsFile, "utf8")), { effort: "low", skills: { "review-impl": { model: "model-a" } } });
+    assert.deepEqual(JSON.parse(fs.readFileSync(wsFile, "utf8")), { reviewers: { codex: { effort: "low", skills: { "review-impl": { model: "model-a" } } } } });
     assert.equal(fs.readFileSync(path.join(fx.workspaces.harbor, ".cross-review", ".gitignore"), "utf8"), "*\n");
     const before = fs.readFileSync(wsFile, "utf8");
     assert.equal((await post({ scope: "workspace", ws: "harbor-app", config: { effort: "Not An Effort" } })).status, 400);
