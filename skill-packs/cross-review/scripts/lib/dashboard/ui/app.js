@@ -1005,6 +1005,7 @@ let avatarStamp = Date.now();
 const sv = { scope: "global", ws: null, draft: {}, touched: new Set(), refreshed: false };
 let pendingSave = null; // a POST /api/settings in flight: the page reloads settings after it
 let settingsLoad = 0; // counts openSettings calls; only the latest one applies its answer
+let savesStarted = 0; // counts saves sent; a settings load that saw one start meanwhile is asked again
 
 const ALL_PATHS = ["reviewer", "model", "effort", "open_dashboard", "open_plans", "track_plans", ...SKILLS.flatMap(s => [`skills.${s}.model`, `skills.${s}.effort`])];
 const clone = x => JSON.parse(JSON.stringify(x || {}));
@@ -1034,12 +1035,41 @@ function setPath(obj, p, value) {
 
 const optionsHtml = opts => opts.map(o => `<option value="${esc(o.value)}"${o.selected ? " selected" : ""}>${esc(o.label)}</option>`).join("");
 
+const onSettings = () => parseRoute(location.hash)?.view === "settings";
+
+/** Point the form at the route's level; false when the route names a workspace the page does not know. */
+function pickScope(r) {
+  const names = Object.keys(settings.workspaces);
+  if (r.ws && !names.includes(r.ws)) return false;
+  sv.scope = r.ws ? "workspace" : "global";
+  sv.ws = r.ws || (sv.ws && names.includes(sv.ws) ? sv.ws : names[0] || null);
+  return true;
+}
+
+/** Take a model list from /api/models or /api/settings. */
+function applyCatalog(m) {
+  Object.assign(settings, { models: m.models, modelsFetchedAt: m.fetchedAt, codexDefault: m.codexDefault, reviewer: m.reviewer });
+  catalogInfo = { models: m.models, codexDefault: m.codexDefault };
+}
+
 async function openSettings(r) {
   const load = ++settingsLoad;
-  if (pendingSave) await pendingSave.catch(() => null);
-  const [s, a] = await Promise.all([getJson("/api/settings"), getJson("/api/avatars")]);
-  // a newer Settings page was opened meanwhile, or the user left Settings
-  if (load !== settingsLoad || parseRoute(location.hash)?.view !== "settings") return;
+  // Settings loaded before show at once; the answer below then replaces what nobody touched
+  const early = Boolean(settings && !pendingSave && pickScope(r));
+  if (early) {
+    resetDraft();
+    renderSettings();
+  }
+  let s, a;
+  for (;;) {
+    if (pendingSave) await pendingSave.catch(() => null);
+    const saves = savesStarted;
+    [s, a] = await Promise.all([getJson("/api/settings"), getJson("/api/avatars")]);
+    // a newer Settings page was opened meanwhile, or the user left Settings
+    if (load !== settingsLoad || !onSettings()) return;
+    // an answer that may predate a save made meanwhile is asked again
+    if (saves === savesStarted) break;
+  }
   if (!s) {
     $("#settings-error").textContent = "The settings could not be loaded.";
     return;
@@ -1047,15 +1077,33 @@ async function openSettings(r) {
   settings = s;
   catalogInfo = { models: s.models, codexDefault: s.codexDefault };
   if (a) avatars = a;
-  const names = Object.keys(settings.workspaces);
-  sv.scope = r.ws ? "workspace" : "global";
-  sv.ws = r.ws && names.includes(r.ws) ? r.ws : (sv.ws && names.includes(sv.ws) ? sv.ws : names[0] || null);
-  if (r.ws && !names.includes(r.ws)) {
+  if (!pickScope(r)) {
     location.replace("#/settings");
     return;
   }
-  resetDraft();
+  // the fields the user changed while this loaded stay as they are
+  if (early && sv.touched.size) sv.draft = mergeForm(savedConfig(), sv.draft, sv.touched);
+  else resetDraft();
   renderSettings();
+  followCatalog(s);
+}
+
+/** The list in `s` is the one the server saved last time and it is asking the reviewer again: take the new one when it comes. */
+async function followCatalog(s) {
+  if (!s.modelsRefreshing) return;
+  const m = await getJson("/api/models");
+  if (!m || settings !== s) return;
+  applyCatalog(m);
+  if (onSettings()) renderSettings();
+  redrawFacts();
+}
+
+/** A session page names its model from the catalog: draw it again when the catalog changes. */
+function redrawFacts() {
+  if (view && view.detail) {
+    view.sig = null;
+    renderDetail(view);
+  }
 }
 
 function resetDraft() {
@@ -1251,8 +1299,7 @@ async function onSettingsClick(e) {
   if (t.closest("#refresh")) {
     const m = await getJson("/api/models?refresh=1");
     if (m && settings) {
-      Object.assign(settings, { models: m.models, modelsFetchedAt: m.fetchedAt, codexDefault: m.codexDefault, reviewer: m.reviewer });
-      catalogInfo = { models: m.models, codexDefault: m.codexDefault };
+      applyCatalog(m);
       sv.refreshed = true;
       renderSettings();
     }
@@ -1277,6 +1324,7 @@ async function onSettingsClick(e) {
     const config = mergeForm(savedConfig(), draft, sv.touched);
     const body = scope === "global" ? { scope: "global", config } : { scope: "workspace", ws, config };
     $("#save").disabled = true;
+    savesStarted++;
     pendingSave = fetch("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     try {
       const res = await pendingSave.catch(() => null);
@@ -1370,6 +1418,16 @@ async function start() {
   if (first) apply(first);
   if (a) avatars = a;
   route();
+  // loaded in the background, so Settings opens filled in and session pages name their models
+  if (!onSettings()) {
+    getJson("/api/settings").then(s => {
+      if (!s || settings) return;
+      settings = s;
+      catalogInfo = { models: s.models, codexDefault: s.codexDefault };
+      redrawFacts();
+      followCatalog(s);
+    });
+  }
   setInterval(tickClocks, 1000);
 }
 

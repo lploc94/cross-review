@@ -493,7 +493,7 @@ try {
   const empty = await browser.newPage(1400, 900);
   const emptyRoot = path.join(tmp, "empty");
   fs.mkdirSync(path.join(emptyRoot, ".cross-review", "sessions"), { recursive: true });
-  const d2 = await startDashboard({ root: emptyRoot, port: 0, open: false, discoveryFile: null });
+  const d2 = await startDashboard({ root: emptyRoot, port: 0, open: false, discoveryFile: null, catalog });
   try {
     await empty.goto(`${d2.url}#/`);
     await empty.waitFor(`document.querySelector("#active .empty-state")`);
@@ -502,6 +502,8 @@ try {
   } finally {
     await d2.close();
   }
+
+  await settingsAtOnceChecks(browser);
 
   await plansChecks(browser);
 
@@ -512,6 +514,111 @@ try {
   await d.close();
   // Chrome helpers can still be writing into the profile for a moment after the kill
   fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+}
+
+// ---------- Settings without waiting ----------
+
+/**
+ * Settings show at once: from the model list an earlier run saved while the reviewer is asked
+ * again, and on a later visit from what the page loaded before; what the server answers then
+ * replaces every field the user did not touch.
+ */
+async function settingsAtOnceChecks(browser) {
+  const cacheFile = path.join(tmp, "models-cache.json");
+  fs.writeFileSync(cacheFile, JSON.stringify({ models: [{ slug: "model-old", name: "Model Old", description: "An invented saved model.", efforts: ["high"] }], reviewer: { version: "codex-cli 9.9.8-invented", loggedIn: true }, fetchedAt: Math.floor(Date.now() / 1000) - 3600 }));
+  let release;
+  const slow = { ...catalog, listModels: () => new Promise(r => { release = () => r(catalog.listModels()); }) };
+  const d8 = await startDashboard({ root, port: 0, open: false, discoveryFile: null, catalog: slow, catalogCache: cacheFile });
+  const options = `[...document.querySelectorAll("#f-model-set option")].map(o => o.textContent)`;
+  const holdLoad = `(() => {
+    const native = window.fetch;
+    window.fetch = async (...args) => {
+      const res = await native(...args);
+      if (args[0] === "/api/settings" && !args[1] && !window.held) {
+        window.held = true;
+        await new Promise(r => { window.releaseLoad = r; });
+      }
+      return res;
+    };
+  })()`;
+  const page = await browser.newPage(1400, 1000);
+  try {
+    // The saved list shows while Codex is still being asked; a field touched meanwhile stays
+    await page.goto(`${d8.url}#/settings`);
+    await page.waitFor(`${options}.includes("Model Old")`);
+    assert.equal(await page.evaluate(`document.getElementById("reviewer-help").textContent`), "codex-cli 9.9.8-invented, signed in");
+    await page.evaluate(`(() => { const f = document.getElementById("f-showplans"); f.value = "on"; f.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+    release();
+    await page.waitFor(`${options}.includes("Model A")`);
+    assert.equal((await page.evaluate(options)).includes("Model Old"), false);
+    assert.equal(await page.evaluate(`document.getElementById("reviewer-help").textContent`), "codex-cli 9.9.9-invented, signed in");
+    assert.equal(await page.evaluate(`document.getElementById("f-showplans").value`), "on");
+    assert.match(await page.evaluate(`document.getElementById("preview").textContent`), /"open_plans": true/);
+    assert.equal(JSON.parse(fs.readFileSync(cacheFile, "utf8")).models[0].slug, "model-a", "the new list replaced the saved one");
+
+    // A new page loads Settings in the background, so Settings opens filled in before its own
+    // load answers; that answer then brings a change made outside the page, and keeps the
+    // field touched meanwhile
+    const globalFile = path.join(process.env.HOME, ".cross-review", "config.json");
+    const before = JSON.parse(fs.readFileSync(globalFile, "utf8"));
+    const fresh = await browser.newPage(1400, 1000);
+    try {
+      await fresh.goto(`${d8.url}#/`);
+      await fresh.waitFor(`performance.getEntriesByType("resource").some(e => e.name.endsWith("/api/settings") && e.responseEnd > 0)`);
+      fs.writeFileSync(globalFile, JSON.stringify({ ...before, effort: "xhigh" }));
+      await fresh.evaluate(holdLoad);
+      await fresh.evaluate(`location.hash = "#/settings"`);
+      await fresh.waitFor(`typeof window.releaseLoad === "function"`);
+      assert.equal(await fresh.evaluate(`document.querySelectorAll("#per-skill tr").length`), 4, "the form is filled while the load is held");
+      assert.equal(await fresh.evaluate(`document.getElementById("save").textContent`), "Save global");
+      assert.match(await fresh.evaluate(`document.getElementById("preview").textContent`), new RegExp(`"effort": "${before.effort}"`));
+      assert.ok(await fresh.evaluate(`${options}.includes("Model A")`));
+      await fresh.evaluate(`(() => { const f = document.getElementById("f-showplans"); f.value = "on"; f.dispatchEvent(new Event("change", { bubbles: true })); window.releaseLoad(); })()`);
+      await fresh.waitFor(`/"effort": "xhigh"/.test(document.getElementById("preview").textContent)`);
+      assert.equal(await fresh.evaluate(`document.getElementById("f-showplans").value`), "on");
+      assert.match(await fresh.evaluate(`document.getElementById("preview").textContent`), /"open_plans": true/);
+    } finally {
+      fs.writeFileSync(globalFile, JSON.stringify(before));
+    }
+
+    // A save made while the page's own load is held: the load that answers afterwards predates
+    // the save, so it is asked again and the saved value stays
+    try {
+      await page.evaluate(`location.hash = "#/"`);
+      await page.waitFor(`document.getElementById("sessions").classList.contains("on")`);
+      await page.evaluate(holdLoad);
+      await page.evaluate(`location.hash = "#/settings"`);
+      await page.waitFor(`typeof window.releaseLoad === "function"`);
+      await page.evaluate(`(() => { const e = document.getElementById("f-effort-set"); e.value = "low"; e.dispatchEvent(new Event("change", { bubbles: true })); document.getElementById("save").click(); })()`);
+      for (let i = 0; i < 50 && JSON.parse(fs.readFileSync(globalFile, "utf8")).effort !== "low"; i++) await new Promise(r => setTimeout(r, 100));
+      await page.waitFor(`!document.getElementById("save").disabled`);
+      await page.evaluate(`(async () => { window.releaseLoad(); await new Promise(r => setTimeout(r, 400)); })()`);
+      assert.equal(await page.evaluate(`document.getElementById("f-effort-set").value`), "low");
+      assert.match(await page.evaluate(`document.getElementById("preview").textContent`), /"effort": "low"/);
+    } finally {
+      fs.writeFileSync(globalFile, JSON.stringify(before));
+    }
+  } finally {
+    await d8.close();
+  }
+
+  // A session page opened first names its model once the background load and the reviewer's
+  // new list arrive
+  let release2;
+  const slow2 = { ...catalog, listModels: () => new Promise(r => { release2 = () => r(catalog.listModels()); }) };
+  fs.writeFileSync(cacheFile, JSON.stringify({ models: [{ slug: "model-old", name: "Model Old", description: "An invented saved model.", efforts: ["high"] }], reviewer: null, fetchedAt: 1000 }));
+  const d9 = await startDashboard({ root, port: 0, open: false, discoveryFile: null, catalog: slow2, catalogCache: cacheFile });
+  try {
+    const id = path.basename(fx.sessions.waiting);
+    const ws = encodeURIComponent(path.relative(root, path.dirname(path.dirname(path.dirname(fx.sessions.waiting)))));
+    const detail = await browser.newPage(1400, 1000);
+    await detail.goto(`${d9.url}#/s/${ws}/${id}`);
+    await detail.waitFor(`/^model-a · /.test(document.getElementById("f-model").textContent)`);
+    release2();
+    await detail.waitFor(`/^Model A · /.test(document.getElementById("f-model").textContent)`);
+  } finally {
+    await d9.close();
+  }
 }
 
 // ---------- Plans (dashboard-plans plan, Phase 4) ----------

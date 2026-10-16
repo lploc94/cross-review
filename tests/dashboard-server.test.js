@@ -37,11 +37,11 @@ after(() => {
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
-/** A fixture root and a running dashboard on it (port 0, no discovery file, no browser). */
+/** A fixture root and a running dashboard on it (port 0, no discovery file, no browser, the invented catalog). */
 async function serve(opts = {}) {
   const root = mk("root");
   const fx = buildFixture(root, { now: nowS(), livePid: process.pid });
-  const d = await startDashboard({ root, port: 0, open: false, discoveryFile: null, ...opts });
+  const d = await startDashboard({ root, port: 0, open: false, discoveryFile: null, catalog: CATALOG, ...opts });
   return { root, fx, d };
 }
 
@@ -216,7 +216,7 @@ test("a session folder that is a symlink is neither listed nor served", async ()
   const fx = buildFixture(mk("elsewhere"), { now: nowS(), livePid: 1 });
   const id = idOf(fx.sessions.waiting);
   fs.symlinkSync(fx.sessions.waiting, path.join(root, ".cross-review", "sessions", id));
-  const d = await startDashboard({ root, port: 0, open: false, discoveryFile: null });
+  const d = await startDashboard({ root, port: 0, open: false, discoveryFile: null, catalog: CATALOG });
   try {
     const p = await getJson(d, "/api/sessions");
     assert.equal(p.active.length + p.history.length, 0);
@@ -338,7 +338,7 @@ test("list stream: a new session in a known workspace appears on the next tick; 
 
 test("port: random in [20000, 30000]; busy ports are skipped; 50 busy ports fail", async () => {
   const root = mk("port");
-  const d = await startDashboard({ root, open: false, discoveryFile: null });
+  const d = await startDashboard({ root, open: false, discoveryFile: null, catalog: CATALOG });
   try {
     assert.ok(d.port >= 20000 && d.port <= 30000, `port ${d.port}`);
   } finally {
@@ -354,13 +354,13 @@ test("port: random in [20000, 30000]; busy ports are skipped; 50 busy ports fail
   const picks = [...busy.map(s => s.address().port), free];
   let calls = 0;
   try {
-    const d2 = await startDashboard({ root, open: false, discoveryFile: null, pickPort: () => picks[calls++] });
+    const d2 = await startDashboard({ root, open: false, discoveryFile: null, catalog: CATALOG, pickPort: () => picks[calls++] });
     assert.equal(d2.port, free);
     assert.equal(calls, 4);
     await d2.close();
     let n = 0;
     await assert.rejects(
-      startDashboard({ root, open: false, discoveryFile: null, pickPort: () => { n++; return busy[0].address().port; } }),
+      startDashboard({ root, open: false, discoveryFile: null, catalog: CATALOG, pickPort: () => { n++; return busy[0].address().port; } }),
       /No free port/,
     );
     assert.equal(n, 50);
@@ -406,7 +406,7 @@ test("token: 401 without it, 303 with a cookie for the right one, Bearer accepte
 test("dashboard.json: written 0600 with pid, port, token, root; removed on close unless another process owns it", async () => {
   const root = mk("disc");
   const file = path.join(mk("home"), ".cross-review", "dashboard.json");
-  const d = await startDashboard({ root, port: 0, open: false, discoveryFile: file });
+  const d = await startDashboard({ root, port: 0, open: false, discoveryFile: file, catalog: CATALOG });
   const info = JSON.parse(fs.readFileSync(file, "utf8"));
   assert.equal(fs.statSync(file).mode & 0o777, 0o600);
   assert.deepEqual({ pid: info.pid, port: info.port, token: info.token, root: info.root }, { pid: process.pid, port: d.port, token: d.token, root: fs.realpathSync(root) });
@@ -414,7 +414,7 @@ test("dashboard.json: written 0600 with pid, port, token, root; removed on close
   await d.close();
   assert.equal(fs.existsSync(file), false);
 
-  const d2 = await startDashboard({ root, port: 0, open: false, discoveryFile: file });
+  const d2 = await startDashboard({ root, port: 0, open: false, discoveryFile: file, catalog: CATALOG });
   const other = { pid: 1, port: 1234, token: "f".repeat(64), root: "/elsewhere", started_at: 1 };
   fs.writeFileSync(file, JSON.stringify(other));
   await d2.close();
@@ -771,6 +771,97 @@ test("settings: workspaces named __proto__ and global are listed; a broken works
   }
 });
 
+/** A catalog that answers only when the test says so; `calls` counts listModels calls. */
+function slowCatalog() {
+  const c = { calls: 0, pending: [] };
+  c.listModels = () => {
+    c.calls++;
+    return new Promise(resolve => c.pending.push(resolve));
+  };
+  c.answer = list => {
+    for (const resolve of c.pending.splice(0)) resolve(list);
+  };
+  c.defaultModel = () => "model-a";
+  c.cliInfo = async () => ({ version: "codex-cli 9.9.9-invented", loggedIn: true });
+  return c;
+}
+const OLD_MODELS = [{ slug: "model-old", name: "Model Old", description: "Invented, cached.", efforts: ["high"] }];
+const NEW_MODELS = [{ slug: "model-a", name: "Model A", description: "Invented.", efforts: ["low", "high"] }];
+const writeCache = (file, models) => {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify({ models, reviewer: { version: "codex-cli 9.9.8-invented", loggedIn: true }, fetchedAt: 1000 }));
+};
+
+test("models: a cached catalog answers at once while the server asks the reviewer again; the answer replaces the cache", async () => {
+  const cache = path.join(mk("models-cache"), "models.json");
+  writeCache(cache, OLD_MODELS);
+  const catalog = slowCatalog();
+  const { d } = await serve({ catalog, catalogCache: cache });
+  try {
+    // the server asked at start, before any page did
+    assert.equal(catalog.calls, 1);
+    let s = await getJson(d, "/api/settings");
+    assert.deepEqual([s.models, s.modelsFetchedAt, s.modelsRefreshing, s.reviewer.version], [OLD_MODELS, 1000, true, "codex-cli 9.9.8-invented"]);
+    // /api/models waits for the answer in flight instead of asking again
+    const fresh = getJson(d, "/api/models");
+    await new Promise(r => setTimeout(r, 50));
+    assert.equal(catalog.calls, 1);
+    catalog.answer(NEW_MODELS);
+    const m = await fresh;
+    assert.deepEqual([m.models, m.reviewer.version, m.refreshing], [NEW_MODELS, "codex-cli 9.9.9-invented", false]);
+    assert.ok(m.fetchedAt > 1000);
+    s = await getJson(d, "/api/settings");
+    assert.deepEqual([s.models, s.modelsRefreshing], [NEW_MODELS, false]);
+    assert.deepEqual(JSON.parse(fs.readFileSync(cache, "utf8")).models, NEW_MODELS);
+  } finally {
+    catalog.answer(null);
+    await d.close();
+  }
+});
+
+test("models: a failed refresh keeps the cached list; with no cache the first settings load waits for the reviewer once", async () => {
+  const cache = path.join(mk("models-cache"), "models.json");
+  writeCache(cache, OLD_MODELS);
+  let catalog = slowCatalog();
+  let { d } = await serve({ catalog, catalogCache: cache });
+  try {
+    catalog.answer(null); // the reviewer CLI is gone or broken
+    const m = await getJson(d, "/api/models");
+    assert.deepEqual(m.models, OLD_MODELS);
+    assert.deepEqual(JSON.parse(fs.readFileSync(cache, "utf8")).models, OLD_MODELS);
+  } finally {
+    await d.close();
+  }
+  fs.rmSync(cache);
+  catalog = slowCatalog();
+  ({ d } = await serve({ catalog, catalogCache: cache }));
+  try {
+    let answered = false;
+    const s = getJson(d, "/api/settings").then(x => { answered = true; return x; });
+    await new Promise(r => setTimeout(r, 50));
+    assert.equal(answered, false, "nothing to show yet: the first load waits");
+    catalog.answer(NEW_MODELS);
+    assert.deepEqual((await s).models, NEW_MODELS);
+    assert.equal(catalog.calls, 1, "the load waited for the request the start made");
+    assert.deepEqual(JSON.parse(fs.readFileSync(cache, "utf8")).models, NEW_MODELS);
+  } finally {
+    catalog.answer(null);
+    await d.close();
+  }
+});
+
+test("models: an injected catalog writes no cache unless one is named", async () => {
+  const file = path.join(process.env.HOME, ".cross-review", "models.json");
+  fs.rmSync(file, { force: true });
+  const { d } = await serve({ catalog: CATALOG });
+  try {
+    await getJson(d, "/api/settings");
+    assert.equal(fs.existsSync(file), false);
+  } finally {
+    await d.close();
+  }
+});
+
 test("avatars: a real PNG is stored and served byte for byte; renamed text, over 1 MB and bad keys are refused", async () => {
   const { d } = await serve({ catalog: CATALOG });
   const png = fs.readFileSync(path.join(REPO, "skill-packs/cross-review/scripts/lib/dashboard/ui/avatars/you.png"));
@@ -833,7 +924,7 @@ async function servePlans(opts = {}) {
   const root = mk("plans-root");
   const fx = buildFixture(root, { now: nowS(), livePid: process.pid });
   const pl = buildPlans(fx);
-  const d = await startDashboard({ root, port: 0, open: false, discoveryFile: null, ...opts });
+  const d = await startDashboard({ root, port: 0, open: false, discoveryFile: null, catalog: CATALOG, ...opts });
   return { root, fx, pl, d };
 }
 const planOf = (p, ws, file) => p.plans.find(x => x.ws === ws && x.file === file);

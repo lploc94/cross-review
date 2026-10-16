@@ -524,13 +524,17 @@ function deniedHtml() {
 /**
  * Start the dashboard. Options besides the documented four are for tests: pickPort,
  * discoveryFile (null: none), now, tickMs, rescanMs, isAlive, reveal, catalog
- * ({listModels, defaultModel, cliInfo}; default: the Codex adapter's).
+ * ({listModels, defaultModel, cliInfo}; default: the Codex adapter's), catalogCache (the file that
+ * keeps the model list between runs; default ~/.cross-review/models.json for the Codex adapter,
+ * none for an injected catalog; null: none).
  */
 export async function startDashboard({
   root = process.cwd(), port = null, open = false, idleExitSeconds = null,
   pickPort = randomPort, discoveryFile: discFile = discoveryFile(), host = "127.0.0.1",
-  now, tickMs = 1000, rescanMs, isAlive, reveal = revealFolder, catalog = getReviewer("codex"),
+  now, tickMs = 1000, rescanMs, isAlive, reveal = revealFolder, catalog: injectedCatalog, catalogCache,
 } = {}) {
+  const catalog = injectedCatalog || getReviewer("codex");
+  const cacheFile = catalogCache !== undefined ? catalogCache : injectedCatalog ? null : path.join(os.homedir(), ".cross-review", "models.json");
   const watcher = createListWatcher({ root, now, tickMs, rescanMs, isAlive });
   const token = crypto.randomBytes(32).toString("hex");
   const tokenBuf = Buffer.from(token);
@@ -589,15 +593,43 @@ export async function startDashboard({
 
   // ----- settings -----
 
-  // The model catalog stays in memory; "refresh list" asks Codex again
-  let catalogPromise = null;
-  const models = refresh => {
-    if (!catalogPromise || refresh) {
-      catalogPromise = Promise.all([catalog.listModels(), catalog.cliInfo ? catalog.cliInfo() : null])
-        .then(([list, info]) => ({ models: list, fetchedAt: Math.floor(Date.now() / 1000), reviewer: info }))
-        .catch(() => ({ models: null, fetchedAt: Math.floor(Date.now() / 1000), reviewer: null }));
+  // The model catalog, stale-while-revalidate: the list saved by an earlier run answers at once while
+  // the reviewer CLI is asked again (at start, and on "refresh list"); a new list replaces it and the
+  // file. A failed ask keeps the list it had. Only a first run with no saved list waits for the CLI.
+  let catalogState = null; // { models, fetchedAt, reviewer }
+  let refreshing = null; // the ask in flight
+  try {
+    const saved = cacheFile ? JSON.parse(fs.readFileSync(cacheFile, "utf8")) : null;
+    if (saved && Array.isArray(saved.models)) catalogState = { models: saved.models, fetchedAt: saved.fetchedAt || null, reviewer: saved.reviewer || null };
+  } catch {}
+  const refreshCatalog = () => {
+    if (!refreshing) {
+      refreshing = Promise.resolve()
+        .then(() => Promise.all([catalog.listModels(), catalog.cliInfo ? catalog.cliInfo() : null]))
+        .catch(() => [null, null])
+        .then(([list, info]) => {
+          const fetchedAt = Math.floor(Date.now() / 1000);
+          if (list || !catalogState || !catalogState.models) catalogState = { models: list || null, fetchedAt, reviewer: info };
+          else catalogState = { ...catalogState, reviewer: info || catalogState.reviewer };
+          if (list && cacheFile) {
+            try {
+              fs.mkdirSync(path.dirname(cacheFile), { recursive: true });
+              const tmp = `${cacheFile}.${process.pid}.tmp`;
+              fs.writeFileSync(tmp, JSON.stringify(catalogState));
+              fs.renameSync(tmp, cacheFile);
+            } catch {}
+          }
+        })
+        .finally(() => { refreshing = null; });
     }
-    return catalogPromise;
+    return refreshing;
+  };
+  refreshCatalog();
+  /** The catalog now (waiting only when there is none yet); `settle` also waits for the ask in flight, `refresh` starts one. */
+  const models = async ({ refresh = false, settle = false } = {}) => {
+    if (refresh) await refreshCatalog();
+    else if (!catalogState || settle) await (refreshing || (catalogState ? null : refreshCatalog()));
+    return { ...catalogState, refreshing: Boolean(refreshing) };
   };
 
   async function settingsPayload() {
@@ -617,7 +649,7 @@ export async function startDashboard({
       workspacesCfg[ws] = load(workspaceConfigPath(abs), m => { errors.workspaces[ws] = m; });
       paths[ws] = tildePath(workspaceConfigPath(abs));
     }
-    const m = await models(false);
+    const m = await models();
     let codexDefault = null;
     try {
       codexDefault = catalog.defaultModel();
@@ -630,6 +662,7 @@ export async function startDashboard({
       names: Object.fromEntries([...watcher.workspaceMap().keys()].map(ws => [ws, watcher.wsName(ws)])),
       models: m.models,
       modelsFetchedAt: m.fetchedAt,
+      modelsRefreshing: m.refreshing,
       codexDefault,
       reviewer: m.reviewer,
       errors,
@@ -910,12 +943,13 @@ export async function startDashboard({
       case "/api/settings":
         return json(res, 200, await settingsPayload());
       case "/api/models": {
-        const m = await models(url.searchParams.get("refresh") === "1");
+        // Waits for the ask in flight, so a page shown from the saved list learns the new one
+        const m = await models({ refresh: url.searchParams.get("refresh") === "1", settle: true });
         let codexDefault = null;
         try {
           codexDefault = catalog.defaultModel();
         } catch {}
-        return json(res, 200, { models: m.models, fetchedAt: m.fetchedAt, codexDefault, reviewer: m.reviewer });
+        return json(res, 200, { models: m.models, fetchedAt: m.fetchedAt, refreshing: m.refreshing, codexDefault, reviewer: m.reviewer });
       }
       case "/api/avatars":
         return json(res, 200, avatarParties());
