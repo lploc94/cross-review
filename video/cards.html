@@ -1,0 +1,118 @@
+<!doctype html>
+<!--
+  The promo video's text cards and caption bars, in the dashboard's paper style.
+  build.mjs opens cards.html?kind=<name> (a card below) or ?kind=caption&text=<caption>,
+  injects the OFL fonts and takes a screenshot. Wording follows the landing page.
+-->
+<html lang="en">
+<meta charset="utf-8">
+<title>cards</title>
+<style>
+  :root { --paper: #f8f7f3; --sheet: #fffefb; --ink: #1c1b19; --soft: #4a4843; --muted: #8a877f; --rule: #e3e0d7; --blue: #2448b8; --rust: #a8481c; --green: #2f7a4a; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); }
+  .card { width: 1920px; height: 1080px; display: flex; flex-direction: column; justify-content: center; padding: 0 210px; }
+  .center { align-items: center; text-align: center; gap: 34px; padding: 0; }
+  /* the avatars are drawn on white: show them as rounded tiles, as the dashboard does */
+  .owl, .who img { background: #fff; border: 1px solid var(--rule); border-radius: 28px; }
+  .owl { width: 168px; height: 168px; }
+  .name { font: 600 46px var(--serif); letter-spacing: -0.01em; }
+  .kicker { font: 600 30px var(--sans); color: var(--blue); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 26px; }
+  .big { font: 600 84px/1.12 var(--serif); letter-spacing: -0.015em; max-width: 1500px; }
+  .big em, .h em { font-style: italic; color: var(--rust); }   /* as the landing page's h1 */
+  .h { font: 600 72px/1.14 var(--serif); letter-spacing: -0.015em; max-width: 1450px; }
+  .p { font: 400 40px/1.45 var(--sans); color: var(--soft); max-width: 1360px; margin-top: 34px; }
+  .p code, .h code { font-family: var(--mono); font-size: 0.86em; color: var(--ink); }
+  .cmd { font: 500 44px var(--mono); background: var(--sheet); border: 1px solid var(--rule); border-radius: 10px; padding: 22px 40px; }
+  .cmd .d { color: var(--muted); margin-right: 22px; }
+  .url { font: 400 34px var(--sans); color: var(--soft); }
+  .sub { font: 400 40px var(--sans); color: var(--soft); margin-top: -8px; }
+
+  /* steps */
+  .step { display: grid; grid-template-columns: 220px 1fr; align-items: start; }
+  .num { font: 600 150px/1 var(--serif); color: var(--blue); }
+  .dots { display: flex; gap: 14px; margin-top: 64px; }
+  .dots span { width: 90px; height: 8px; border-radius: 4px; background: var(--rule); }
+  .dots span.on { background: var(--blue); }
+
+  /* how it works */
+  .cast { display: grid; grid-template-columns: 300px 1fr 300px 1fr 300px; align-items: center; margin-top: 70px; }
+  .who { text-align: center; }
+  .who img { width: 190px; height: 190px; }
+  .who b { display: block; font: 600 40px var(--serif); margin-top: 14px; }
+  .who span { display: block; font: 400 30px/1.3 var(--sans); color: var(--soft); margin-top: 6px; }
+  .arrows { display: flex; flex-direction: column; gap: 26px; padding: 0 18px; margin-top: -90px; }
+  .arrow { font: 400 28px/1.3 var(--sans); color: var(--soft); text-align: center; }
+  .arrow i { display: block; height: 3px; background: var(--ink); position: relative; margin: 10px 0; }
+  .arrow i::after { content: ""; position: absolute; top: -8px; border: 9px solid transparent; }
+  .arrow.r i::after { right: -4px; border-left: 14px solid var(--ink); border-right: 0; }
+  .arrow.l i::after { left: -4px; border-right: 14px solid var(--ink); border-left: 0; }
+  .arrow code { font: 500 28px var(--mono); color: var(--ink); }
+  .loop { text-align: center; font: italic 600 40px var(--serif); color: var(--blue); margin-top: 60px; }
+
+  /* columns */
+  .cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: 56px; margin-top: 70px; }
+  .cols b { display: block; font: 600 42px/1.2 var(--serif); }
+  .cols span { display: block; font: 400 32px/1.45 var(--sans); color: var(--soft); margin-top: 14px; }
+  .skills { display: grid; grid-template-columns: repeat(3, 1fr); gap: 46px 56px; margin-top: 64px; }
+  .skills code { display: block; font: 600 38px var(--mono); }
+  .skills span { display: block; font: 400 31px/1.4 var(--sans); color: var(--soft); margin-top: 10px; }
+
+  .cap { width: 1920px; height: 140px; display: flex; align-items: center; gap: 30px; padding: 0 120px; background: var(--paper); border-top: 1px solid var(--rule); }
+  .cap .bar { width: 6px; height: 62px; border-radius: 3px; background: var(--blue); flex: none; }
+  .cap .t { font: 600 44px var(--serif); letter-spacing: -0.01em; }
+  .cap .t small { font: 600 30px var(--sans); color: var(--blue); letter-spacing: 0.08em; text-transform: uppercase; margin-right: 26px; }
+</style>
+<div id="root"></div>
+<script>
+  const q = new URLSearchParams(location.search);
+  const kind = q.get("kind");
+  const esc = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+  const AV = "../skill-packs/cross-review/scripts/lib/dashboard/ui/avatars/";
+  const owl = `<img class="owl" src="${AV}reviewer.png" alt="">`;
+  const STEPS = [
+    ["You ask for a review.", "After a code change, type <code>/review-impl</code> in Claude Code, or <code>$review-impl</code> in Codex. Plans go to <code>review-plan</code>."],
+    ["A second model checks.", "It reads the code, runs the tests, and lists each issue with a file and a line."],
+    ["Your agent answers each issue.", "It fixes what is real, and disputes the rest with evidence."],
+    ["Round after round, until it <em>approves.</em>", "The reviewer checks every fix and every dispute. Follow each round live on a local dashboard."],
+  ];
+  const step = n => {
+    const [h, p] = STEPS[n - 1];
+    const dots = STEPS.map((_, i) => `<span class="${i < n ? "on" : ""}"></span>`).join("");
+    return `<div class="card"><div class="step"><div class="num">${n}</div><div><div class="kicker">Step ${n} of 4</div><div class="h">${h}</div><div class="p">${p}</div><div class="dots">${dots}</div></div></div></div>`;
+  };
+  const CARDS = {
+    title: `<div class="card center">${owl}<div class="big">A second model checks<br>your agent's <em>work.</em></div><div class="sub">An agent that checks its own work keeps its own blind spots.</div><div class="name">cross-review</div></div>`,
+    how: `<div class="card"><div class="kicker">How it works</div><div class="h">Two models, one thread, until they agree.</div>
+      <div class="cast">
+        <div class="who"><img src="${AV}you.png" alt=""><b>You</b><span>ask for a review</span></div>
+        <div class="arrows"><div class="arrow r"><code>/review-impl</code><i></i>or <code>$review-impl</code></div></div>
+        <div class="who"><img src="${AV}agent.png" alt=""><b>Your agent</b><span>Claude Code or Codex</span></div>
+        <div class="arrows"><div class="arrow r">the change, then fixes<i></i></div><div class="arrow l"><i></i>issues, then a verdict</div></div>
+        <div class="who"><img src="${AV}reviewer.png" alt=""><b>The reviewer</b><span>a second model (Codex)</span></div>
+      </div></div>`,
+    step1: step(1), step2: step(2), step3: step(3), step4: step(4),
+    decide: `<div class="card"><div class="kicker">You stay in charge</div><div class="h">The models argue. You decide.</div><div class="cols">
+      <div><b>Disputes need evidence.</b><span>A finding is rejected only with a file, a test, or your decision.</span></div>
+      <div><b>Stalemates come to you.</b><span>When the models cannot agree, you choose.</span></div>
+      <div><b>Your instruction wins.</b><span>Skip a review, accept a result, or change the model.</span></div>
+    </div></div>`,
+    skills: `<div class="card"><div class="kicker">Six skills</div><div class="h">A review for every stage of the work.</div><div class="skills">
+      <div><code>loop-plan</code><span>Writes a phased plan from the code, with tests and review checkpoints.</span></div>
+      <div><code>loop-implement</code><span>Builds the plan phase by phase, with a review at each checkpoint.</span></div>
+      <div><code>review-plan</code><span>Before you write code: what will not work, missing steps.</span></div>
+      <div><code>review-impl</code><span>Before you commit, push or merge.</span></div>
+      <div><code>review-think</code><span>A second opinion on a technical decision.</span></div>
+      <div><code>review-pr</code><span>Someone else's pull request, reviewed as a peer.</span></div>
+    </div></div>`,
+    end: `<div class="card center">${owl}<div class="name">cross-review</div><div class="cmd"><span class="d">$</span>npx @tlelabs/cross-review</div><div class="url">cross-review.tlelabs.com · for Claude Code and Codex · MIT</div></div>`,
+  };
+  const root = document.getElementById("root");
+  if (kind === "caption") {
+    const label = q.get("label");
+    root.innerHTML = `<div class="cap"><div class="bar"></div><div class="t">${label ? `<small>${esc(label)}</small>` : ""}${esc(q.get("text") || "")}</div></div>`;
+  } else {
+    root.innerHTML = CARDS[kind];
+  }
+</script>
+</html>

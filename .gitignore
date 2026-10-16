@@ -22,3 +22,7 @@ PROGRESS_REPORT.md
 FINAL_REPORT.md
 IMPROVEMENT_PLAN.md
 docs/superpowers/
+
+# Promo video: fetched fonts and rendered output (video/build.mjs)
+video/.cache/
+video/out/

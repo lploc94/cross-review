@@ -1,0 +1,88 @@
+<!doctype html>
+<!--
+  The terminal scene of the promo video: a neutral terminal (no client's look or logo) where
+  an agent runs /review-impl. Everything here is invented. build.mjs loads it at 1280x627,
+  injects the OFL fonts, calls play() and records it; the timeline below is the scene's script.
+-->
+<html lang="en">
+<meta charset="utf-8">
+<title>terminal scene</title>
+<style>
+  :root { --paper: #f8f7f3; --ink: #1c1b19; --text: #ebe7dc; --muted: #8f8a7e; --rust: #e0895a; --green: #8cc79c; --blue: #9db4ff; --violet: #c3a6f0; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--paper); }
+  body { display: flex; align-items: center; justify-content: center; }
+  .win { width: 1160px; height: 560px; background: var(--ink); border-radius: 12px; box-shadow: 0 18px 50px rgb(28 27 25 / 0.22); overflow: hidden; display: flex; flex-direction: column; }
+  .bar { height: 38px; display: flex; align-items: center; gap: 8px; padding: 0 16px; border-bottom: 1px solid #2c2a26; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; background: #45423c; }
+  .bar .t { flex: 1; text-align: center; margin-right: 52px; font: 13px var(--mono); color: var(--muted); }
+  .screen { flex: 1; padding: 22px 28px; font: 16.5px/1.62 var(--mono); color: var(--text); white-space: pre; overflow: hidden; }
+  .line { min-height: 1.62em; }
+  .muted { color: var(--muted); }
+  .rust { color: var(--rust); }
+  .green { color: var(--green); }
+  .blue { color: var(--blue); }
+  .violet { color: var(--violet); }
+  .b { font-weight: 700; }
+  .caret { display: inline-block; width: 0.6em; height: 1.15em; vertical-align: -0.2em; background: var(--text); animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  /* The spinner and the tick are drawn with CSS: JetBrains Mono has no Braille or check glyphs,
+     and any other font would be a system font in the video. Each takes one character cell. */
+  .spin, .done { display: inline-block; position: relative; width: 1ch; height: 1em; vertical-align: -0.15em; }
+  .spin::before { content: ""; position: absolute; left: 0.05em; top: 0.18em; width: 0.62em; height: 0.62em; box-sizing: border-box; border: 2px solid var(--blue); border-right-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .done::before { content: ""; position: absolute; left: 0.2em; top: 0.08em; width: 0.28em; height: 0.6em; border: solid var(--green); border-width: 0 2px 2px 0; transform: rotate(45deg); }
+</style>
+<div class="win">
+  <div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="t">~/orchard-api — agent</span></div>
+  <div class="screen" id="screen"></div>
+</div>
+<script>
+  const screen = document.getElementById("screen");
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const add = html => { const d = document.createElement("div"); d.className = "line"; d.innerHTML = html; screen.append(d); return d; };
+
+  // Lines: [time in seconds, html]. A line whose html starts with "~" marks a running step:
+  // it shows a spinner until the next running step (or the end) replaces it with a tick.
+  const SCRIPT = [
+    [1.7, '<span class="b">●</span> review-impl <span class="muted">· working tree · 3 files changed</span>'],
+    [2.3, '  <span class="muted">A second model (Codex) reviews the change.</span>'],
+    [3.0, '~  <span class="muted">reviewer</span>  reading src/upload/retry.js'],
+    [3.8, '~  <span class="muted">reviewer</span>  running npm test -- upload'],
+    [4.7, '~  <span class="muted">reviewer</span>  reading src/upload/client.js'],
+    [5.7, ''],
+    [5.8, '  Round 1 · <span class="rust b">REVISE</span> · 2 issues'],
+    [6.3, '    ISSUE-1  <span class="rust">high  </span>  Retries never stop on a 4xx     <span class="muted">src/upload/retry.js:42</span>'],
+    [6.8, '    ISSUE-2  <span class="rust">medium</span>  Backoff ignores Retry-After     <span class="muted">src/upload/retry.js:57</span>'],
+    [8.6, ''],
+    [8.7, '<span class="b">●</span> agent <span class="muted">· answering 2 issues</span>'],
+    [9.0, '  <span class="green">Fixed</span>     ISSUE-1  stop on 4xx · <span class="muted">src/upload/retry.js:42</span> · tests pass'],
+    [10.0, '  <span class="violet">Disputed</span>  ISSUE-2  Retry-After is read in <span class="muted">src/upload/client.js:88</span>'],
+    [11.2, '~  Round 2 · reviewer checking the fixes'],
+  ];
+  const END = 13.4;
+
+  window.play = async () => {
+    const t0 = performance.now();
+    const at = s => sleep(Math.max(0, s * 1000 - (performance.now() - t0)));
+    const prompt = add('<span class="blue">›</span> <span id="typed"></span><span class="caret"></span>');
+    await at(0.5);
+    const typed = prompt.querySelector("#typed");
+    for (const ch of "/review-impl") { typed.textContent += ch; await sleep(70); }
+    await at(1.4);
+    prompt.querySelector(".caret").remove();
+    let running = null;
+    for (const [s, html] of SCRIPT) {
+      await at(s);
+      if (html.startsWith("~")) {
+        if (running) running.firstElementChild.className = "done";
+        running = add(`  <span class="spin"></span>${html.slice(1)}`);
+      } else {
+        if (running && html.includes("Round 1")) { running.firstElementChild.className = "done"; running = null; }
+        add(html);
+      }
+    }
+    await at(END);
+  };
+</script>
+</html>
