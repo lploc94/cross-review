@@ -1,4 +1,4 @@
-<h1 align="center"><b>Cross Review</b></h1>
+<h1 align="center"><b>cross-review</b></h1>
 
 <p align="center"><a href="https://cross-review.tlelabs.com">cross-review.tlelabs.com</a> · <a href="https://www.npmjs.com/package/@tlelabs/cross-review">npm</a></p>
 
@@ -6,7 +6,7 @@ Cross-model review skills for [Claude Code](https://docs.anthropic.com/en/docs/c
 
 ![A review session in the dashboard: the reviewer's rounds, the agent's replies, the issue ledger](docs/images/session.png)
 
-Seven skills (Claude Code: `/name`, Codex: `$name`):
+Six skills (Claude Code: `/name`, Codex: `$name`):
 - `loop-plan` — write a phased, code-grounded implementation plan for large, multi-feature work
 - `loop-implement` — execute an approved loop plan phase by phase with TDD, checkpoint reviews, and commits
 - `review-plan` — debate implementation plans before coding
