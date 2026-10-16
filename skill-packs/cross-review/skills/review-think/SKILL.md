@@ -1,6 +1,6 @@
 ---
 name: review-think
-description: Peer debate with an external reviewer model (Codex CLI by default) on any technical question. Both think independently, challenge each other, converge to consensus or explicit disagreement.
+description: Peer debate with an external reviewer model (Codex CLI by default; Claude Code or Antigravity on request) on any technical question. Both think independently, challenge each other, converge to consensus or explicit disagreement.
 ---
 
 # Think About

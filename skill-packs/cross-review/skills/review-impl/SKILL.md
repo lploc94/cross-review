@@ -1,6 +1,6 @@
 ---
 name: review-impl
-description: Review uncommitted changes, unpushed or recent commits, or a branch diff against the plan/target with an external reviewer model (Codex CLI by default) — verify correctness, catch unacceptable deviations and bugs (logic/security/memory/runtime). No new features or over-engineering beyond the plan. You apply valid fixes, rebut invalid points, and iterate until consensus or stalemate.
+description: Review uncommitted changes, unpushed or recent commits, or a branch diff against the plan/target with an external reviewer model (Codex CLI by default; Claude Code or Antigravity on request) — verify correctness, catch unacceptable deviations and bugs (logic/security/memory/runtime). No new features or over-engineering beyond the plan. You apply valid fixes, rebut invalid points, and iterate until consensus or stalemate.
 ---
 
 # Implementation Review

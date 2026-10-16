@@ -1,6 +1,6 @@
 ---
 name: review-pr
-description: Review someone else's pull request or branch with an external reviewer model (Codex CLI by default) as a peer: both review independently, debate the differences, and produce one consolidated review with a merge recommendation. No code changes.
+description: Review someone else's pull request or branch with an external reviewer model (Codex CLI by default; Claude Code or Antigravity on request) as a peer: both review independently, debate the differences, and produce one consolidated review with a merge recommendation. No code changes.
 ---
 
 # PR Review

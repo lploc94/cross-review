@@ -10,7 +10,7 @@
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/npm/l/@tlelabs/cross-review"></a>
 </p>
 
-Cross-model review skills for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and [OpenAI Codex CLI](https://github.com/openai/codex): the agent you work with orchestrates, and a second model reviews its plans, code and reasoning. The reviewer today is the Codex CLI; the runner selects reviewers through one adapter per CLI (`scripts/lib/reviewers/`), so others can be added.
+Cross-model review skills for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and [OpenAI Codex CLI](https://github.com/openai/codex): the agent you work with orchestrates, and a second model reviews its plans, code and reasoning. The reviewer is the Codex CLI by default; Claude Code (`claude`) and Antigravity (`agy`) can review too. The runner drives each reviewer CLI through its own adapter (`scripts/lib/reviewers/`).
 
 ![A review session in the dashboard: the reviewer's rounds, the agent's replies, the issue ledger](docs/images/session.png)
 
@@ -28,7 +28,10 @@ This project was called **codex-review** (`lploc94/codex_skill`, skills `codex-p
 
 - Node.js >= 22 and npm
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI and/or [Codex CLI](https://github.com/openai/codex)
-- `codex` in PATH, configured with an OpenAI account or API key (the default reviewer)
+- At least one reviewer CLI in PATH, signed in:
+  - `codex` ([Codex CLI](https://github.com/openai/codex), an OpenAI account or API key): the default reviewer
+  - `claude` ([Claude Code](https://docs.anthropic.com/en/docs/claude-code))
+  - `agy` ([Antigravity CLI](https://antigravity.google/docs))
 
 ## Install
 
@@ -74,9 +77,36 @@ Adds a block to `~/.claude/CLAUDE.md` that has Claude Code use the `review-plan`
 
 The reviewer runs with full access so it can run tests and network commands (`curl`, `npm view`, `git fetch`) to check its findings; its prompts forbid changing project files.
 
+### Choosing the reviewer (optional)
+
+Codex reviews unless you choose another reviewer:
+- for one review, name it when you ask ("review this with Claude Code"); the skill passes `reviewer` (`codex`, `claude` or `agy`) to `review_begin`, and the session keeps it for every round;
+- as a default, set `"reviewer"` in `~/.cross-review/config.json` or `<workspace>/.cross-review/config.json`, or pick it in the dashboard's Settings.
+
+Each reviewer keeps its own model and effort under `reviewers.<name>`, so switching reviewers never hands one CLI another's model:
+
+```json
+{
+  "reviewer": "claude",
+  "reviewers": {
+    "codex": { "model": "<codex model>", "effort": "high" },
+    "claude": { "model": "opus", "effort": "max", "skills": { "review-pr": { "effort": "high" } } },
+    "agy": { "model": "<agy model family>", "effort": "low" }
+  }
+}
+```
+
+- **Codex**: the models `codex debug models` lists; effort as Codex names it.
+- **Claude Code**: the aliases (`opus`, `sonnet`, …) or a full model name; effort `low`, `medium`, `high`, `xhigh` or `max`.
+- **Antigravity**: `agy models` lists one model per effort (`<family>-low`, `<family>-high`, …). Pick the family and an effort, and the runner passes both to agy (`--model <family> --effort <level>`); a model listed without levels takes no effort. A level the family lacks fails before the review starts.
+
+`model`, `effort` and `skills` at the top of a file are the older form of `reviewers.codex` and are still read that way; the dashboard saves them under `reviewers.codex`.
+
+A reviewer never starts a review of its own: the runner marks the reviewer's environment (`CROSS_REVIEW_REVIEWER`), and a `begin` inside it fails with `NESTED_REVIEW`. This matters most when Claude Code reviews, since the cross-review skills are installed for it too.
+
 ### Choose a model (optional)
 
-Name a model or effort when you ask for a review (or in a plan's review checkpoint). The skill passes it to `review_begin`; the runner stores it and reuses it for every later round. Without one, the runner applies the dashboard settings (below), else the reviewer CLI's default model and effort `high`.
+Name a model or effort when you ask for a review (or in a plan's review checkpoint). The skill passes it to `review_begin`; the runner stores it and reuses it for every later round. Without one, the runner applies the dashboard settings (below) for the chosen reviewer, else the reviewer CLI's default model and effort `high`.
 
 ## Dashboard
 
@@ -95,7 +125,7 @@ Starts a local web page and opens it in your browser. It lists the review sessio
 
 - **Sessions**: reviews in progress (reviewer working, waiting for the agent, stopped) update live; History lists the finished ones with filters. A review left waiting for the agent, or stopped, for over an hour moves to History (`no reply` or `stopped`) and comes back when the agent resumes it. A session's page shows the conversation round by round, the issue ledger, and what the reviewer is doing right now. The dashboard only reads sessions; it never starts, stops or answers one.
 - **Plans**: every plan in `.cross-review/plans/` with its state (draft, in review, ready, phase N of M, done) and progress, live. A plan's page has two tabs: **Progress** (phases, their criteria, checkpoints, commits, the progress log) and **Plan** (the whole file with its contents). Another `.md` file in that folder shows as a plain document. Plans elsewhere in the repository are not shown.
-- **Settings**: the reviewer, model and effort a review uses when you do not name them, saved as you change them, globally (`~/.cross-review/config.json`) or for one workspace (`<workspace>/.cross-review/config.json`, ignored by git), with overrides per skill. First match wins: what you tell the agent in chat · workspace, this skill · workspace · global, this skill · global · the reviewer's default model and effort `high`. The model list comes from `codex debug models`; the dashboard keeps the last one in `~/.cross-review/models.json`, so Settings opens at once while it asks Codex again.
+- **Settings**: the reviewer, and each reviewer's model and effort, that a review uses when you do not name them, saved as you change them, globally (`~/.cross-review/config.json`) or for one workspace (`<workspace>/.cross-review/config.json`, ignored by git), with overrides per skill. **Model and effort for** picks which reviewer's values the form shows. First match wins: what you tell the agent in chat · workspace, this skill · workspace · global, this skill · global · the reviewer's default model and effort `high`. Model lists come from `codex debug models` and `agy models` (kept in `~/.cross-review/models.json` and `models-agy.json`, so Settings opens at once while it asks again); Claude Code shows its aliases, and **Other…** takes a full model name.
 - **Follow reviews**: when on, every review that starts opens its page in your browser, starting the dashboard if it is not running; that dashboard closes itself after 30 minutes with no page open.
 - **Follow plans**: when on, each plan `loop-plan` finishes opens on its Plan tab the same way, so you can read it before you approve it.
 - **Plans in git**: off by default. On adds an exception for `plans/` to `.cross-review/.gitignore`, so `loop-implement` commits the plan with each phase; sessions and settings stay out of git. A root `.gitignore` that ignores `.cross-review/` itself overrides that exception: change it to `.cross-review/*` and add `!.cross-review/plans/` (the dashboard and `loop-plan` warn when this happens). Turning it off later does not remove plans already committed: run `git rm --cached` on them.

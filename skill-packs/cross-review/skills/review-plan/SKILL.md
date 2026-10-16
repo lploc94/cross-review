@@ -1,6 +1,6 @@
 ---
 name: review-plan
-description: Review/debate plans before implementation with an external reviewer model (Codex CLI by default). Can run in plan mode — debates the plan and edits the plan file to fix accepted issues.
+description: Review/debate plans before implementation with an external reviewer model (Codex CLI by default; Claude Code or Antigravity on request). Can run in plan mode — debates the plan and edits the plan file to fix accepted issues.
 ---
 
 # Plan Review

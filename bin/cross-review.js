@@ -315,11 +315,15 @@ try {
   }).trim();
   console.log(`  review-runner.js version: ${versionOutput}`);
 
-  if (!commandExists('codex')) {
+  const reviewerClis = ['codex', 'claude', 'agy'].filter(commandExists);
+  if (!reviewerClis.length) {
     console.warn('');
-    console.warn('⚠️  Warning: codex CLI not found in PATH.');
-    console.warn('   The default reviewer is the Codex CLI.');
-    console.warn('   Install: npm install -g @openai/codex');
+    console.warn('⚠️  Warning: No reviewer CLI found (codex, claude or agy) in PATH.');
+    console.warn('   The default reviewer is the Codex CLI: npm install -g @openai/codex');
+    console.warn('   Or install Claude Code (npm install -g @anthropic-ai/claude-code) or Antigravity (agy) and choose it as the reviewer.');
+  } else if (!reviewerClis.includes('codex')) {
+    console.log('');
+    console.log(`Note: codex CLI not found in PATH; Codex is the default reviewer. To use ${reviewerClis.join(' or ')} instead, set "reviewer" in ~/.cross-review/config.json or in the dashboard's Settings, or name it when you ask for a review.`);
   }
 
   // 4. Atomic swap per directory: backup old → move staging → cleanup. Any failure rolls back every root.
