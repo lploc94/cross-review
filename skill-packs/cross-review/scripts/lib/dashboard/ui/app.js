@@ -264,6 +264,7 @@ function tickClocks() {
 
 const PLAN_KIND = { progress: "progress", review: "running", ready: "ready", draft: "draft", done: "done", doc: "doc" };
 const SESSION_LABEL = { approve: "approved", consensus: "consensus", stalemate: "stalemate", running: "reviewer working", waiting: "agent's turn", stopped: "stopped" };
+const VERDICT_LABEL = { APPROVE: ["approve", "approved"], REVISE: ["revise", "changes asked"], STALEMATE: ["stalemate", "stalemate"], CONSENSUS: ["consensus", "consensus"] };
 const gitShort = tracked => (tracked === true ? "in git" : tracked === false ? "local only" : "no git");
 const gitLong = tracked => (tracked === true ? "in git" : tracked === false ? "local only — git ignores it" : "not in a git repository");
 /** 2026-10-14 → 14 Oct (with the year when it is not this one). */
@@ -382,7 +383,11 @@ function checkpointText(d, p) {
   const id = ids[ids.length - 1];
   const s = id && d.sessions.find(x => x.id === id);
   if (!s) return id ? `Checkpoint: review-impl · ${sessionRef(d, id)}` : "Checkpoint: review-impl";
-  return `Checkpoint: review-impl · ${st(s.state, own(SESSION_LABEL, s.state) || s.state)} · ${sessionRef(d, id)}`;
+  const label = own(SESSION_LABEL, s.state) || s.state;
+  // the last verdict, unless the state says it already or a new round is under way
+  const verdict = s.state !== "running" && own(VERDICT_LABEL, s.verdict);
+  const result = verdict && verdict[1] !== label ? ` · ${st(verdict[0], verdict[1])}` : "";
+  return `Checkpoint: review-impl · ${st(s.state, label)}${result} · ${sessionRef(d, id)}`;
 }
 
 function depsText(p) {
@@ -427,12 +432,16 @@ function renderPlanProgress(v) {
     const all = phaseDone(p);
     return `<span class="s ${all ? "done" : m ? "progress" : "todo"}" data-jump="ph${Number(p.n)}">${all ? ic("done") : ""}<b>${Number(p.n)}</b> ${renderInline(p.name)}${m && !all ? ` ${m}/${p.acs.length}` : ""}</span>`;
   }).join(`<span class="arrow">→</span>`);
+  // the current phase opens when it becomes current; nothing closes on its own, and a phase the reader closed stays closed
+  if (pr.current && pr.current !== v.current) {
+    v.current = pr.current;
+    if (!v.closed.has(pr.current)) v.opened.add(pr.current);
+  }
   $("#phases").innerHTML = d.phases.map(p => {
     const m = phaseMet(p);
     const all = phaseDone(p);
     const cls = all ? "done" : m ? "progress" : "todo";
-    // the current phase starts open; the reader's clicks win over that
-    const open = v.opened.has(p.n) || (p.n === pr.current && !v.closed.has(p.n));
+    const open = v.opened.has(p.n);
     const icon = all ? `<span class="st done">${ic("done")}</span>` : m ? `<span class="st progress">${ic("progress")}</span>` : `<span class="st draft">${ic("box")}</span>`;
     return `<div class="phase ${cls}${open ? " open" : ""}" id="ph${Number(p.n)}" data-phase="${Number(p.n)}">
       <div class="ph-head">${icon}<span class="n">Phase ${Number(p.n)}</span><span>${renderInline(p.name)}</span><span class="cnt">${m} / ${p.acs.length} criteria</span></div>
@@ -491,7 +500,7 @@ function openPlan(r) {
     setPlanTab(pv, r.tab);
     return;
   }
-  const v = { ws: r.ws, file: r.file, tab: r.tab, d: null, sig: null, gone: false, seq: 0, opened: new Set(), closed: new Set() };
+  const v = { ws: r.ws, file: r.file, tab: r.tab, d: null, sig: null, gone: false, seq: 0, opened: new Set(), closed: new Set(), current: null };
   pv = v;
   window.scrollTo(0, 0);
   $("#p-ws").textContent = r.ws;

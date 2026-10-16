@@ -646,6 +646,16 @@ async function plansChecks(browser) {
     await page.waitFor(`document.getElementById("p-acs").textContent === "${metInFile + 1} of 16 met"`);
     assert.deepEqual(await page.evaluate(`({ open: [...document.querySelectorAll("#phases .phase.open")].map(p => p.dataset.phase), tab: document.querySelector(".ptabs a.on").dataset.ptab, y: window.scrollY })`),
       { open: ["1", "3"], tab: "progress", y });
+    // live: phase 3 completes and its checkpoint asks for changes; phase 3 stays open, phase 4 opens as the new current one
+    writeSession(path.join(harbor, ".cross-review", "sessions"), "review-impl-20261016-007", {
+      skill: "review-impl", mode: "branch", created: t - 600, inputs: ["BASE_BRANCH: a1b2c3d\n\n## USER_REQUEST\nInvented checkpoint after phase 3.\n"],
+      rounds: [{ status: "completed", started: t - 600, elapsed: 60, review: "### VERDICT\n- Status: REVISE\n- Reason: Invented.\n", acts: [] }],
+    });
+    fs.writeFileSync(ppl.files.progress, `${exportText.replace("- [ ] AC-3.3", "- [x] AC-3.3").replace("- [ ] AC-3.4", "- [x] AC-3.4").trimEnd()}\n- 2026-10-16 Phase 3 checkpoint: review-impl-20261016-007 asked for changes.\n`);
+    await page.waitFor(`document.getElementById("p-acs").textContent === "${metInFile + 2} of 16 met" && /review-impl-20261016-007/.test(document.querySelector('#phases .phase[data-phase="3"] .ph-foot').textContent)`);
+    assert.deepEqual(await page.evaluate(`[...document.querySelectorAll("#phases .phase.open")].map(p => p.dataset.phase)`), ["1", "3", "4"]);
+    assert.match(await page.evaluate(`document.querySelector('#phases .phase[data-phase="3"] .ph-foot').textContent`), /^Checkpoint: review-impl · agent's turn · changes asked · review-impl-20261016-007/);
+    assert.match(prog.foot1, /^Checkpoint: review-impl · approved · review-impl-20261013-004/, "an approved checkpoint says it once");
 
     // the Plan tab: every H2 in order, contents, "read phase N", and the /plan route
     await page.evaluate(`document.querySelector('.ptabs a[data-ptab="doc"]').click()`);
