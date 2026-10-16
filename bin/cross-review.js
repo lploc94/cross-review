@@ -63,6 +63,12 @@ const MCP_TOOLS = ['review_begin', 'review_wait', 'review_reply', 'review_end'];
 const WAIT_DEFAULT_S = 270;
 const CODEX_TOOL_TIMEOUT_S = 300;
 
+// The cross-review command: a shell script that runs the installed runner (`cross-review dashboard`, …).
+// The marker tells a script this installer wrote from anyone else's file of the same name.
+const commandDir = path.join(home, '.local', 'bin');
+const commandPath = path.join(commandDir, PACK);
+const COMMAND_MARKER = '# cross-review command, written by the cross-review installer; reinstalling rewrites it';
+
 const autoMode = process.argv.includes('--auto');
 const SKILLS = [...RUNNER_SKILLS, ...PLAIN_SKILLS];
 
@@ -151,6 +157,39 @@ function approveCodexTools(configPath) {
   let text = kept.join('\n').replace(/\n*$/, '\n');
   for (const tool of MCP_TOOLS) text += `\n${prefix}${tool}]\napproval_mode = "approve"\n`;
   fs.writeFileSync(configPath, text, 'utf8');
+}
+
+/** Quote a string for a POSIX shell: single quotes, with each ' written as '\'' */
+function shellQuote(s) {
+  return `'${String(s).replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * Write ~/.local/bin/cross-review, or rewrite the one an earlier install wrote. Anything else at that path
+ * (another file, a link) is left alone. Returns { written, note }; never throws.
+ */
+function installCommand(nodePath) {
+  try {
+    let st = null;
+    try {
+      st = fs.lstatSync(commandPath);
+    } catch (e) {
+      if (e.code !== 'ENOENT') throw e;
+    }
+    if (st && !(st.isFile() && fs.readFileSync(commandPath, 'utf8').includes(COMMAND_MARKER))) {
+      return { written: false, note: `left ${commandPath} in place; the installer did not write it. Run the dashboard with: node ${shellQuote(runnerPath)} dashboard` };
+    }
+    fs.mkdirSync(commandDir, { recursive: true });
+    const text = `#!/bin/sh\n${COMMAND_MARKER}\nexec ${shellQuote(nodePath)} ${shellQuote(runnerPath)} "$@"\n`;
+    const tmp = path.join(commandDir, `.${PACK}-${uid}`);
+    fs.writeFileSync(tmp, text, { mode: 0o755 });
+    fs.chmodSync(tmp, 0o755);
+    fs.renameSync(tmp, commandPath);
+    const onPath = (process.env.PATH || '').split(path.delimiter).some(d => d && path.resolve(d) === commandDir);
+    return { written: true, note: onPath ? null : `${commandDir} is not on your PATH; add it (for example: export PATH="$HOME/.local/bin:$PATH" in your shell profile)` };
+  } catch (e) {
+    return { written: false, note: `could not write ${commandPath}: ${e.message}` };
+  }
 }
 
 // The earlier pack's runtime lived only here; its skills had this runner path rendered into them
@@ -375,13 +414,20 @@ try {
     }
   }
 
-  // 6. Success message
+  // 6. The cross-review command (POSIX shells only; on Windows the dashboard runs through npx)
+  const command = process.platform === 'win32'
+    ? { written: false, note: null }
+    : installCommand(stableNodePath());
+
+  // 7. Success message
   console.log('');
   console.log(`${PACK} skills installed successfully!`);
   console.log(`  Runtime:       ${runtimeDir}`);
   console.log(`  Claude Code:   ${claudeSkillsRoot}`);
   console.log(`  Codex:         ${agentsSkillsRoot}`);
   console.log(`  MCP server:    ${registered.length ? `registered with ${registered.join(' and ')}` : 'not registered (runner CLI fallback)'}`);
+  console.log(`  Command:       ${command.written ? `${commandPath} (cross-review dashboard)` : 'npx github:lploc94/cross-review dashboard'}`);
+  if (command.note) console.warn(`  Note: ${command.note}`);
   console.log('');
   console.log('Skills (Claude Code: /name, Codex: $name):');
   console.log('  loop-plan             — write a phased, code-grounded implementation plan');

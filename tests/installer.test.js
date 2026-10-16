@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -66,8 +66,18 @@ test("upgrading from the codex-review pack removes its skills, runtime, MCP serv
     write(path.join(home, ".claude", "CLAUDE.md"),
       "# Mine\n\n<!-- codex-auto-review-start -->\nold guidance\n<!-- codex-auto-review-end -->\n\nkeep me\n");
 
+    // The cross-review command an earlier install wrote, pointing at a runner that moved
+    write(path.join(home, ".local", "bin", "cross-review"), "#!/bin/sh\n# cross-review command, written by the cross-review installer; reinstalling rewrites it\nexec node '/old/place/review-runner.js' \"$@\"\n");
+
     // A plain install (no --auto) refreshes the guidance block the old pack wrote
-    execFileSync(process.execPath, [INSTALLER], { env, stdio: "pipe" });
+    const run = spawnSync(process.execPath, [INSTALLER], { env, encoding: "utf8" });
+    assert.equal(run.status, 0, run.stderr);
+    const log = run.stdout + run.stderr;
+    if (process.platform !== "win32") {
+      assert.match(log, /Command: +.*\.local\/bin\/cross-review/);
+      // the test's PATH does not hold <home>/.local/bin, so the installer says how to add it
+      assert.match(log, /not on your PATH/);
+    }
     const out = execFileSync(process.execPath, [CHECK, home], { env, encoding: "utf8" });
     assert.match(out, /install-check: ok/);
     const md = fs.readFileSync(path.join(home, ".claude", "CLAUDE.md"), "utf8");
@@ -172,6 +182,46 @@ test("cleanup never deletes the new install when the Codex skills root is an ali
     assert.match(out, /install-check: ok/);
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("the cross-review command never replaces a file or link the installer did not write", { skip: process.platform === "win32", timeout: 600_000 }, () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "install-command-"));
+  const env = { ...process.env, HOME: home, CODEX_HOME: path.join(home, ".codex") };
+  const command = path.join(home, ".local", "bin", "cross-review");
+  const install = () => {
+    const r = spawnSync(process.execPath, [INSTALLER], { env, encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+    return r.stdout + r.stderr;
+  };
+  try {
+    write(command, "#!/bin/sh\necho my own cross-review\n");
+    assert.match(install(), /left .*\.local\/bin\/cross-review in place/);
+    assert.equal(fs.readFileSync(command, "utf8"), "#!/bin/sh\necho my own cross-review\n");
+    // a link is never followed or replaced, even to a file that looks like the installer's
+    const target = path.join(home, "elsewhere", "cross-review");
+    write(target, "#!/bin/sh\n# cross-review command, written by the cross-review installer; reinstalling rewrites it\n");
+    fs.rmSync(command);
+    fs.symlinkSync(target, command);
+    assert.match(install(), /left .*\.local\/bin\/cross-review in place/);
+    assert.ok(fs.lstatSync(command).isSymbolicLink());
+    assert.equal(fs.readFileSync(target, "utf8"), "#!/bin/sh\n# cross-review command, written by the cross-review installer; reinstalling rewrites it\n");
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("a HOME with an apostrophe gets a working cross-review command", { skip: process.platform === "win32", timeout: 600_000 }, () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "install-quote-"));
+  const home = path.join(tmp, "user's home");
+  fs.mkdirSync(home);
+  const env = { ...process.env, HOME: home, CODEX_HOME: path.join(home, ".codex") };
+  try {
+    execFileSync(process.execPath, [INSTALLER], { env, stdio: "pipe" });
+    const out = execFileSync(process.execPath, [CHECK, home], { env, encoding: "utf8" });
+    assert.match(out, /install-check: ok/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
 

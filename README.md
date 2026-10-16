@@ -30,6 +30,7 @@ npx github:lploc94/cross-review
 3. Renders each SKILL.md with the shared review protocol and the absolute runner path
 4. Registers the `cross-review` MCP server with Claude Code (user scope) and Codex
 5. Swaps directories atomically with rollback on failure; removes the old `codex-review` pack and this pack's copies in `~/.codex/skills`
+6. Writes the `cross-review` command to `~/.local/bin/cross-review` (macOS and Linux), a small script that runs the installed runner. A file of that name the installer did not write is left alone. When `~/.local/bin` is not on your `PATH`, the installer says so
 
 ### Verify
 ```bash
@@ -66,7 +67,8 @@ Name a model or effort when you ask for a review (or in a plan's review checkpoi
 ## Dashboard
 
 ```bash
-npx github:lploc94/cross-review dashboard          # or: node ~/.claude/skills/cross-review/scripts/review-runner.js dashboard
+cross-review dashboard                             # the command the installer writes to ~/.local/bin
+npx github:lploc94/cross-review dashboard          # without installing, and on Windows
 ```
 
 Starts a local web page and opens it in your browser. It lists the review sessions and plans in the folder you start it from and up to 3 levels below. Options: `--root <dir>` scans another folder, `--port <n>` picks the port (default: a random free one), `--no-open` only prints the link, `--idle-exit <s>` stops the server after that many seconds with no page open.

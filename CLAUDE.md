@@ -50,6 +50,7 @@ Never test the installer against the real HOME; use a temporary `HOME` and `CODE
 4. Verify the runner (`node review-runner.js version`)
 5. Atomic swap in both skill roots with full rollback; delete the old `codex-review` pack (runtime and skills, ownership checked) and this pack's copies in `$CODEX_HOME/skills`
 6. Remove the old `codex-review` MCP registration when it points at that pack's runtime, then register MCP server `cross-review` (Claude: `claude mcp remove` + `add -s user`, `REVIEW_WAIT_DEFAULT_S=270`; Codex: `codex mcp add`, `REVIEW_WAIT_DEFAULT_S=270` and `tool_timeout_sec = 300`). Skipped with a warning when `npm ci` failed
+7. Write the `cross-review` command `~/.local/bin/cross-review` (not on Windows): `#!/bin/sh` + a marker line + `exec <node> <installed runner> "$@"`, written atomically. A file there without the marker, or a link, is left in place with a note; a missing `~/.local/bin` on `PATH` is reported. Failures only warn
 
 ### Skill Pack Layout
 
@@ -82,6 +83,7 @@ skill-packs/cross-review/
 ~/.agents/skills/
 ├── review-*/            ← SKILL.md only; points at the shared runtime
 └── loop-plan/, loop-implement/   ← SKILL.md + agents/openai.yaml
+~/.local/bin/cross-review  ← runs the installed runner: `cross-review dashboard`, `cross-review version`, …
 ```
 
 ### Core Execution Flow
@@ -104,7 +106,7 @@ Besides the prompts and outputs, a session keeps what the dashboard needs to ret
 
 ### Dashboard
 
-`review-runner.js dashboard` (or `npx github:lploc94/cross-review dashboard`) serves a local page on `127.0.0.1` (random port 20000–30000, per-run token in cookie or Bearer, Host check, Origin check on writes). It scans `--root` (default cwd) and 3 levels below for `.cross-review/sessions/` or `.cross-review/plans/` and only reads sessions and plans (git commands it runs are read-only); it writes `~/.cross-review/dashboard.json` (port, token, pid), the settings files, `.cross-review/.gitignore` when Plans in git is saved, and avatars in `~/.cross-review/avatars/`. Routes are hash routes (`#/`, `#/s/<ws>/<session>[/ISSUE-N]`, `#/plans`, `#/p/<ws>/<file>[/plan]`, `#/settings[/<ws>]`); updates arrive over SSE (`/api/stream?view=list|session`). The model list comes from the reviewer adapter (`codex debug models`, then `--bundled`, else none). The UI follows `mockups/dashboard.html`: system fonts only, Lucide icons (ISC, `ui/LICENSE-lucide.txt`), no brand logos.
+`review-runner.js dashboard` (or `cross-review dashboard`, or `npx github:lploc94/cross-review dashboard`) serves a local page on `127.0.0.1` (random port 20000–30000, per-run token in cookie or Bearer, Host check, Origin check on writes). It scans `--root` (default cwd) and 3 levels below for `.cross-review/sessions/` or `.cross-review/plans/` and only reads sessions and plans (git commands it runs are read-only); it writes `~/.cross-review/dashboard.json` (port, token, pid), the settings files, `.cross-review/.gitignore` when Plans in git is saved, and avatars in `~/.cross-review/avatars/`. Routes are hash routes (`#/`, `#/s/<ws>/<session>[/ISSUE-N]`, `#/plans`, `#/p/<ws>/<file>[/plan]`, `#/settings[/<ws>]`); updates arrive over SSE (`/api/stream?view=list|session`). The model list comes from the reviewer adapter (`codex debug models`, then `--bundled`, else none). The UI follows `mockups/dashboard.html`: system fonts only, Lucide icons (ISC, `ui/LICENSE-lucide.txt`), no brand logos.
 
 ### Key Design Decisions
 

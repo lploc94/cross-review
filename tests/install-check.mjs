@@ -155,6 +155,23 @@ try {
   failures.push(`runtime: runner version failed: ${e.message}`);
 }
 
+// The cross-review command: a small shell script in ~/.local/bin that runs the installed runner (not on Windows)
+if (process.platform !== "win32") {
+  const command = path.join(home, ".local", "bin", "cross-review");
+  try {
+    const st = fs.lstatSync(command);
+    check(st.isFile() && (st.mode & 0o111) !== 0, "command: ~/.local/bin/cross-review is not an executable file");
+    const text = fs.readFileSync(command, "utf8");
+    check(text.startsWith("#!/bin/sh\n") && text.includes("# cross-review command"), "command: ~/.local/bin/cross-review has no cross-review marker");
+    // the runner path as a POSIX shell single-quoted word (each ' written as '\'')
+    check(text.includes(`'${runner.replace(/'/g, `'\\''`)}'`), "command: ~/.local/bin/cross-review does not run the installed runner");
+    const version = execFileSync(command, ["version"], { encoding: "utf8" }).trim();
+    check(version === "15", `command: cross-review version printed ${version}, expected 15`);
+  } catch (e) {
+    failures.push(`command: ~/.local/bin/cross-review: ${e.message}`);
+  }
+}
+
 // The installed MCP server starts and lists the four tools
 try {
   const sdk = path.join(runtime, "node_modules", "@modelcontextprotocol", "sdk", "dist", "esm", "client");
