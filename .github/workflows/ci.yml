@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # the lowest supported (package.json engines) and the one the release builds with
+        node: ["22", "24"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Install the runtime dependencies
+        run: npm ci --prefix skill-packs/cross-review
+      - name: Test
+        run: node test-default-timeout.js && node test-stall-recovery.js && node test-timeout-resume.js && node --test "tests/*.test.js"
+      # The installer under a temporary HOME, as in CLAUDE.md; never the runner's real HOME.
+      - name: Install check
+        run: |
+          H="$(mktemp -d)"
+          HOME="$H" CODEX_HOME="$H/.codex" node bin/cross-review.js
+          node tests/install-check.mjs "$H"

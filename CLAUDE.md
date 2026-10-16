@@ -212,6 +212,8 @@ Besides the prompts and outputs, a session keeps what the dashboard needs to ret
 
 ## Releasing
 
+`.github/workflows/ci.yml` runs the tests and a temp-HOME install check on Node 22 (the lowest `engines` allows) and 24 for every push to `main` and every pull request; the README shows its badge with the npm version, release, Node and license badges (shields.io, no logos).
+
 `.github/workflows/release.yml` publishes `@tlelabs/cross-review` to npm when a `v<version>` tag is pushed: it checks that the tag, `package.json` and `manifest.json` carry the same version, runs the tests and a temp-HOME install check, packs, publishes with npm trusted publishing (OIDC, provenance; no token) unless that version is already on npm, and creates a GitHub release with the tarball.
 
 1. Bump `version` in `package.json` and `skill-packs/cross-review/manifest.json` together; add a Breaking Changes entry when behavior changes.

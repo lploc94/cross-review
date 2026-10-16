@@ -20,8 +20,11 @@ before(() => {
   process.env.HOME = path.join(tmp, "home");
   fs.mkdirSync(process.env.HOME);
 });
-after(() => {
+after(async () => {
   for (const pid of spawned) try { process.kill(pid, "SIGTERM"); } catch {}
+  // a dashboard still writes its files while it shuts down; remove the folder once they are gone
+  const alive = pid => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  for (let i = 0; i < 100 && spawned.some(alive); i++) await new Promise(r => setTimeout(r, 50));
   process.env.HOME = savedHome;
   fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });

@@ -2,6 +2,14 @@
 
 <p align="center"><a href="https://cross-review.tlelabs.com">cross-review.tlelabs.com</a> · <a href="https://www.npmjs.com/package/@tlelabs/cross-review">npm</a></p>
 
+<p align="center">
+  <a href="https://www.npmjs.com/package/@tlelabs/cross-review"><img alt="npm version" src="https://img.shields.io/npm/v/@tlelabs/cross-review"></a>
+  <a href="https://github.com/lploc94/cross-review/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/lploc94/cross-review/ci.yml?branch=main&label=CI"></a>
+  <a href="https://github.com/lploc94/cross-review/actions/workflows/release.yml"><img alt="Release" src="https://img.shields.io/github/actions/workflow/status/lploc94/cross-review/release.yml?label=release"></a>
+  <a href="https://www.npmjs.com/package/@tlelabs/cross-review"><img alt="Node.js version" src="https://img.shields.io/node/v/@tlelabs/cross-review"></a>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/npm/l/@tlelabs/cross-review"></a>
+</p>
+
 Cross-model review skills for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and [OpenAI Codex CLI](https://github.com/openai/codex): the agent you work with orchestrates, and a second model reviews its plans, code and reasoning. The reviewer today is the Codex CLI; the runner selects reviewers through one adapter per CLI (`scripts/lib/reviewers/`), so others can be added.
 
 ![A review session in the dashboard: the reviewer's rounds, the agent's replies, the issue ledger](docs/images/session.png)
