@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 
 import {
-  CONFIG_SKILLS, ensureCrossReviewDir, globalConfigPath, readConfig, resolveSettings, validateConfig, workspaceConfigPath, writeConfig,
+  CONFIG_SKILLS, ensureCrossReviewDir, globalConfigPath, readConfig, resolvePlanSettings, resolveSettings, validateConfig, workspaceConfigPath, writeConfig,
 } from "../skill-packs/cross-review/scripts/lib/config.js";
 import { SKILL_TEMPLATES } from "../skill-packs/cross-review/scripts/lib/review-core.js";
 
@@ -117,6 +117,28 @@ test("writeConfig validates, writes atomically, and an empty object deletes the 
   writeConfig(file, {});
   assert.equal(fs.existsSync(file), false);
   writeConfig(file, {}); // nothing to delete is fine
+});
+
+test("track_plans and open_plans: booleans at the global and workspace level only; workspace wins", () => {
+  assert.deepEqual(validateConfig({ track_plans: true, open_plans: false }), []);
+  for (const [value, re] of [
+    [{ track_plans: "yes" }, /track_plans/],
+    [{ open_plans: 1 }, /open_plans/],
+    [{ skills: { "review-plan": { track_plans: true } } }, /track_plans/],
+    [{ skills: { "review-plan": { open_plans: true } } }, /open_plans/],
+  ]) assert.match(validateConfig(value).join("\n"), re, JSON.stringify(value));
+
+  const ws = workspace("plan-settings");
+  assert.deepEqual(resolvePlanSettings(ws), { track_plans: { value: false, source: "default" }, open_plans: { value: false, source: "default" } });
+  put(globalConfigPath(), { track_plans: true, open_plans: true });
+  assert.deepEqual(resolvePlanSettings(ws), { track_plans: { value: true, source: "global" }, open_plans: { value: true, source: "global" } });
+  put(workspaceConfigPath(ws), { track_plans: false });
+  assert.deepEqual(resolvePlanSettings(ws), { track_plans: { value: false, source: "workspace" }, open_plans: { value: true, source: "global" } });
+  // review settings stay as they were: the plan keys are not review settings
+  assert.deepEqual(Object.keys(resolveSettings({ skill: "review-plan", workingDir: ws }).sources).sort(), ["effort", "model", "open_dashboard", "reviewer"]);
+  put(workspaceConfigPath(ws), "[");
+  assert.throws(() => resolvePlanSettings(ws), e => e.code === "CONFIG_INVALID");
+  fs.rmSync(globalConfigPath());
 });
 
 test("ensureCrossReviewDir writes .gitignore once and keeps an existing one", () => {

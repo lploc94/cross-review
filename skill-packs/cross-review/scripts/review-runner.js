@@ -1988,6 +1988,11 @@ function main() {
       verb(rest).then(code => process.exit(code));
       return;
     }
+    case "plans":
+      import("./lib/plans.js")
+        .then(m => m.runPlansCli(rest))
+        .then(code => process.exit(code));
+      return;
     case "dashboard":
       // Loaded on demand: the review commands never pay for the dashboard modules
       import("./lib/dashboard/server.js")
@@ -2002,7 +2007,8 @@ function main() {
         "  node review-runner.js wait <session_dir> [--max-wait <s>]\n" +
         "  node review-runner.js reply <session_dir> --input <file|-> [--model <name>] [--effort <level>]\n" +
         "  node review-runner.js end <session_dir> [--outcome consensus|stalemate]\n" +
-        "  node review-runner.js dashboard [--root <dir>] [--port <n>] [--no-open] [--idle-exit <s>]\n\n" +
+        "  node review-runner.js dashboard [--root <dir>] [--port <n>] [--no-open] [--idle-exit <s>]\n" +
+        "  node review-runner.js plans --working-dir <dir> [--finished <file>]\n\n" +
         "Usage (low-level):\n" +
         "  node review-runner.js version\n" +
         "  node review-runner.js init --skill-name <name> --working-dir <dir>\n" +

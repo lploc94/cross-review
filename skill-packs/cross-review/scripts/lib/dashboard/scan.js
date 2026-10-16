@@ -1,6 +1,6 @@
-// Where the dashboard looks for sessions: the root folder and up to three levels below it.
-// A workspace is a folder with `.cross-review/sessions/`. Hidden folders, node_modules and
-// symlinks are not followed.
+// Where the dashboard looks for sessions and plans: the root folder and up to three levels
+// below it. A workspace is a folder with `.cross-review/sessions/` or `.cross-review/plans/`.
+// Hidden folders, node_modules and symlinks are not followed.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -14,7 +14,11 @@ export function sessionsDir(ws) {
 
 export function isWorkspace(dir) {
   try {
-    return fs.statSync(sessionsDir(dir)).isDirectory();
+    if (fs.statSync(sessionsDir(dir)).isDirectory()) return true;
+  } catch {}
+  // A workspace with plans but no review yet; a symlinked plans folder does not count
+  try {
+    return fs.lstatSync(path.join(dir, ".cross-review", "plans")).isDirectory();
   } catch {
     return false;
   }

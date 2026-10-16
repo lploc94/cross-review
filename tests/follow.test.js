@@ -141,3 +141,45 @@ test("CLI begin with Follow reviews on waits for the browser launcher and prints
     fs.rmSync(path.join(process.env.HOME, ".cross-review", "config.json"), { force: true });
   }
 });
+
+test("Follow plans: `plans --finished` opens the plan's Plan tab, also in workspaces that have no sessions", async () => {
+  const repo = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+  const bin = path.join(tmp, "plans-bin");
+  fs.mkdirSync(bin, { recursive: true });
+  fs.writeFileSync(path.join(bin, "open"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  fs.writeFileSync(path.join(bin, "xdg-open"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  const fixture = fs.readFileSync(path.join(repo, "tests", "helpers", "fixtures", "export-formats-plan.md"), "utf8");
+  const planWs = name => {
+    const ws = path.join(tmp, name);
+    fs.mkdirSync(path.join(ws, ".cross-review", "plans"), { recursive: true });
+    fs.writeFileSync(path.join(ws, ".cross-review", "plans", "export-formats-plan.md"), fixture);
+    fs.writeFileSync(path.join(ws, ".cross-review", "plans", "notes.md"), "# Invented notes\n");
+    return ws;
+  };
+  const first = planWs("plans-first");
+  const second = planWs("plans-second");
+  const run = (ws, file) => spawnSync(process.execPath, [path.join(repo, "skill-packs", "cross-review", "scripts", "review-runner.js"), "plans", "--working-dir", ws, "--finished", file], {
+    encoding: "utf8", timeout: 30000, env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}` },
+  });
+  fs.mkdirSync(path.join(process.env.HOME, ".cross-review"), { recursive: true });
+  fs.writeFileSync(path.join(process.env.HOME, ".cross-review", "config.json"), JSON.stringify({ open_plans: true }));
+  fs.rmSync(discoveryFile(), { force: true });
+  try {
+    const r = run(first, "export-formats-plan.md");
+    if (fs.existsSync(discoveryFile())) spawned.push(JSON.parse(fs.readFileSync(discoveryFile(), "utf8")).pid);
+    assert.equal(r.status, 0, r.stderr);
+    const out = JSON.parse(r.stdout);
+    assert.match(out.dashboard_url || "", /^http:\/\/127\.0\.0\.1:\d+\/\?t=[0-9a-f]{64}#\/p\/\.\/export-formats-plan\.md\/plan$/, r.stdout);
+    assert.equal(out.plans.length, 2);
+    // a second workspace with plans only: the same dashboard takes it and opens the document
+    const r2 = run(second, "notes.md");
+    assert.equal(r2.status, 0, r2.stderr);
+    const out2 = JSON.parse(r2.stdout);
+    assert.ok((out2.dashboard_url || "").endsWith(`#/p/${encodeURIComponent(second)}/notes.md/plan`), r2.stdout);
+    const info = JSON.parse(fs.readFileSync(discoveryFile(), "utf8"));
+    const list = await bearerGet(info, "/api/sessions");
+    assert.ok(list.workspaces.some(w => w.path === second), JSON.stringify(list.workspaces));
+  } finally {
+    fs.rmSync(path.join(process.env.HOME, ".cross-review", "config.json"), { force: true });
+  }
+});

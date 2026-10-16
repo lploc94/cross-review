@@ -2,9 +2,11 @@
 // <workspace>/.cross-review/config.json. `begin` takes its defaults from them; the
 // dashboard's Settings page reads and writes them.
 //
-// Schema: { reviewer?, model?, effort?, open_dashboard?, skills?: { <skill>: { model?, effort? } } }
+// Schema: { reviewer?, model?, effort?, open_dashboard?, track_plans?, open_plans?,
+//           skills?: { <skill>: { model?, effort? } } }
 // Each key resolves on its own: requested > workspace skill > workspace > global skill >
 // global > default (the reviewer's own model, effort "high", reviewer "codex").
+// track_plans and open_plans are plan settings, not review settings: workspace > global > false.
 
 import fs from "node:fs";
 import os from "node:os";
@@ -50,8 +52,8 @@ export function validateConfig(obj) {
       checkModel(v, "model", errors);
     } else if (key === "effort") {
       checkEffort(v, "effort", errors);
-    } else if (key === "open_dashboard") {
-      if (typeof v !== "boolean") errors.push("open_dashboard: must be true or false");
+    } else if (key === "open_dashboard" || key === "track_plans" || key === "open_plans") {
+      if (typeof v !== "boolean") errors.push(`${key}: must be true or false`);
     } else if (key === "skills") {
       if (!isObject(v)) {
         errors.push("skills: must be an object keyed by skill");
@@ -126,14 +128,74 @@ export function writeConfig(file, obj) {
   return clean;
 }
 
-/** Create <ws>/.cross-review with a `*` .gitignore, so sessions and config stay out of git. */
+/**
+ * The two .gitignore files the pack writes in <ws>/.cross-review: everything ignored, or
+ * everything but plans/. Git cannot re-include a file whose parent folder is excluded, so the
+ * exception names both the folder and what is in it.
+ */
+export const GITIGNORE = { ignore: "*\n", track: "*\n!plans/\n!plans/**\n" };
+
+/**
+ * Make <ws>/.cross-review/.gitignore ignore or keep plans. Only a missing file or one of the
+ * two the pack writes is changed; a file edited by hand is left alone ("custom").
+ * Returns "created" | "updated" | "unchanged" | "custom".
+ */
+export function syncGitignore(ws, track) {
+  const dir = path.join(ws, ".cross-review");
+  const file = path.join(dir, ".gitignore");
+  const want = track ? GITIGNORE.track : GITIGNORE.ignore;
+  let have = null;
+  try {
+    have = fs.readFileSync(file, "utf8");
+  } catch (e) {
+    if (e.code !== "ENOENT") throw e;
+  }
+  if (have === want) return "unchanged";
+  if (have !== null && have !== GITIGNORE.ignore && have !== GITIGNORE.track) return "custom";
+  fs.mkdirSync(dir, { recursive: true });
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, want);
+  fs.renameSync(tmp, file);
+  return have === null ? "created" : "updated";
+}
+
+/**
+ * Create <ws>/.cross-review with a .gitignore that keeps sessions and config out of git, and
+ * plans too unless track_plans is on. A broken config does not stop it: an existing
+ * .gitignore is kept, a missing one is created ignoring everything.
+ */
 export function ensureCrossReviewDir(ws) {
   const dir = path.join(ws, ".cross-review");
   fs.mkdirSync(dir, { recursive: true });
+  let track;
   try {
-    fs.writeFileSync(path.join(dir, ".gitignore"), "*\n", { encoding: "utf8", flag: "wx" });
-  } catch {}
+    track = resolvePlanSettings(ws).track_plans.value;
+  } catch (e) {
+    if (e.code !== "CONFIG_INVALID") throw e;
+    try {
+      fs.writeFileSync(path.join(dir, ".gitignore"), GITIGNORE.ignore, { encoding: "utf8", flag: "wx" });
+    } catch {}
+    return dir;
+  }
+  try {
+    syncGitignore(ws, track);
+  } catch {} // as before: a .gitignore that cannot be written never stops a review
   return dir;
+}
+
+/**
+ * Plan settings for the workspace `ws`: { track_plans, open_plans }, each { value, source }
+ * with source workspace | global | default. Throws CONFIG_INVALID when either file is broken.
+ */
+export function resolvePlanSettings(ws) {
+  const global = readConfig(globalConfigPath());
+  const local = ws ? readConfig(workspaceConfigPath(path.resolve(ws))) : {};
+  const pick = key => {
+    if (local[key] !== undefined) return { value: local[key], source: "workspace" };
+    if (global[key] !== undefined) return { value: global[key], source: "global" };
+    return { value: false, source: "default" };
+  };
+  return { track_plans: pick("track_plans"), open_plans: pick("open_plans") };
 }
 
 /**

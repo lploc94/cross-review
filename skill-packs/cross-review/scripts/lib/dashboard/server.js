@@ -233,7 +233,7 @@ export function createListWatcher({ root, now = () => Math.floor(Date.now() / 10
       } catch {
         throw new Error("no such folder");
       }
-      if (!isWorkspace(abs)) throw new Error("the folder has no .cross-review/sessions");
+      if (!isWorkspace(abs)) throw new Error("the folder has no .cross-review/sessions or plans");
       const key = wsKey(abs);
       registered.set(key, abs);
       return key;
