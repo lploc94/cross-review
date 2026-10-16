@@ -1,6 +1,7 @@
 // The dashboard page: hash routes, the Sessions view (live "In progress" and filtered
-// History), the session page (status, steps, conversation, issues, live activity) and the
-// header. Each view has at most one stream open; clocks tick here, against the server's clock.
+// History), the session page (status, steps, conversation, issues, live activity), the Plans
+// view and a plan's page (progress and the plan itself), Settings and the header. Each view has
+// at most one stream open; clocks tick here, against the server's clock.
 
 import { ic } from "./icons.js";
 import { esc, renderField, renderInline, renderMarkdown } from "./markdown.js";
@@ -23,6 +24,7 @@ let data = null;
 let stream = null; // this tab's one EventSource
 let streamUrl = null;
 let view = null; // the open session page
+let pv = null; // the open plan page
 let skew = 0; // server clock minus this clock, in seconds
 const nowS = () => Date.now() / 1000 + skew;
 
@@ -38,6 +40,16 @@ export function parseRoute(hash) {
       return null;
     }
   }
+  if (parts[0] === "plans" && parts.length === 1) return { view: "plans" };
+  if (parts[0] === "p") {
+    // a plan: #/p/<ws>/<file>, or its Plan tab with /plan; anything else under p goes to the list
+    if ((parts.length === 3 || (parts.length === 4 && parts[3] === "plan")) && parts[1] && parts[2]) {
+      try {
+        return { view: "plan", ws: decodeURIComponent(parts[1]), file: decodeURIComponent(parts[2]), tab: parts[3] === "plan" ? "doc" : "progress" };
+      } catch {}
+    }
+    return { view: "plans", redirect: true };
+  }
   if (parts[0] === "settings" && parts.length <= 2) {
     try {
       return { view: "settings", ws: parts[1] ? decodeURIComponent(parts[1]) : null };
@@ -49,6 +61,7 @@ export function parseRoute(hash) {
 }
 
 export const sessionHref = (ws, id) => `#/s/${encodeURIComponent(ws)}/${id}`;
+export const planHref = (ws, file, tab = "progress") => `#/p/${encodeURIComponent(ws)}/${encodeURIComponent(file)}${tab === "doc" ? "/plan" : ""}`;
 
 function route() {
   const r = parseRoute(location.hash);
@@ -56,10 +69,14 @@ function route() {
     location.replace("#/");
     return;
   }
+  if (r.redirect) {
+    location.replace("#/plans");
+    return;
+  }
   const same = r.view === "detail" && view && view.ws === r.ws && view.id === r.id;
   document.querySelectorAll(".view").forEach(v => v.classList.toggle("on", v.id === r.view));
-  // a session's page lights the Sessions tab
-  const tab = r.view === "settings" ? "settings" : "sessions";
+  // a session's page lights the Sessions tab; a plan's page the Plans tab
+  const tab = r.view === "settings" ? "settings" : r.view === "plans" || r.view === "plan" ? "plans" : "sessions";
   document.querySelectorAll(".top nav a").forEach(a => a.classList.toggle("on", a.dataset.nav === tab));
   if (r.view === "detail") {
     if (same) {
@@ -70,11 +87,21 @@ function route() {
     return openDetail(r);
   }
   view = null;
+  // the list stream feeds Sessions, Plans and a plan's page
+  const list = () => connect("/api/stream?view=list", { sessions: e => apply(JSON.parse(e.data)) });
+  if (r.view === "plan") {
+    list();
+    return openPlan(r);
+  }
+  pv = null;
   window.scrollTo(0, 0);
   if (r.view === "sessions") {
     // the page size depends on the visible layout
     if (data) renderHistory();
-    connect("/api/stream?view=list", { sessions: e => apply(JSON.parse(e.data)) });
+    list();
+  } else if (r.view === "plans") {
+    if (data) renderPlans();
+    list();
   }
   else connect(null);
   if (r.view === "settings") openSettings(r);
@@ -147,21 +174,69 @@ function historyRow(s) {
 const EMPTY_ACTIVE = `<tr class="empty"><td colspan="4"><div class="empty-state">
   <img src="avatars/reviewer-full.png" alt=""><img src="avatars/agent-full.png" alt=""><span>Nothing in progress.</span></div></td></tr>`;
 
-function renderFilters() {
-  const sel = $("#f-ws");
+function renderFilters(id = "#f-ws") {
+  const sel = $(id);
   const keep = sel.value;
   sel.innerHTML = `<option value="">All workspaces</option>` +
     data.workspaces.map(w => `<option value="${esc(w.ws)}" title="${esc(w.path)}">${esc(w.name)}</option>`).join("");
   sel.value = data.workspaces.some(w => w.ws === keep) ? keep : "";
 }
 
-// History pages (user decision 2026-10-15): from `offset`, as many rows as fit in the window
-// with the pager under them, so the Sessions page does not scroll; at least HISTORY_MIN_ROWS.
-// Rows wrap differently, so the page is measured on the rows it shows. "Older" moves the
-// offset past the rows shown; "Newer" goes back to the offset before.
-const HISTORY_MIN_ROWS = 3;
-const HISTORY_MAX_ROWS = 100; // more rows than any window holds; bounds the rows laid out to measure
-const hist = { offset: 0, back: [] };
+// Pages that fit the window (user decisions 2026-10-15 for History, 2026-10-16 for Plans): from
+// `offset`, as many rows as fit with the pager under them, so the page does not scroll; at least
+// PAGE_MIN_ROWS. Rows wrap differently, so a page is measured on the rows it shows. The forward
+// link moves the offset past the rows shown; the back link goes back to the offset before.
+const PAGE_MIN_ROWS = 3;
+const PAGE_MAX_ROWS = 100; // more rows than any window holds; bounds the rows laid out to measure
+
+function paintPage(pg, rows, count, pager) {
+  const shown = rows.slice(pg.offset, pg.offset + count);
+  $(pg.body).innerHTML = shown.length ? shown.map(pg.row).join("") : pg.empty();
+  $(pg.pager).innerHTML = pager
+    ? `<a data-${pg.attr}="-1"${pg.offset === 0 ? ' class="off"' : ""}>‹ ${pg.back}</a><span>${pg.offset + 1}–${pg.offset + shown.length} of ${rows.length}</span><a data-${pg.attr}="1"${pg.offset + shown.length >= rows.length ? ' class="off"' : ""}>${pg.forward} ›</a>`
+    : "";
+  pg.shown = shown.length;
+  if (pg.painted) pg.painted();
+}
+
+function fitPage(pg, rows) {
+  pg.offset = Math.max(0, Math.min(pg.offset, rows.length - 1));
+  const left = rows.length - pg.offset;
+  if (!$(pg.section).classList.contains("on")) {
+    // hidden: nothing to measure; the route renders again when it shows
+    paintPage(pg, rows, Math.min(left, 10), rows.length > 10);
+    return;
+  }
+  // Lay out the candidates with the pager, then keep the rows that end above the pager's place
+  paintPage(pg, rows, Math.min(left, PAGE_MAX_ROWS), true);
+  const pager = $(pg.pager);
+  const main = pager.closest("main");
+  const budget = window.innerHeight - (parseFloat(getComputedStyle(main).paddingBottom) || 0)
+    - pager.getBoundingClientRect().height - (parseFloat(getComputedStyle(pager).marginTop) || 0);
+  let fit = 0;
+  for (const row of $(pg.body).querySelectorAll("tr[data-go]")) {
+    if (row.getBoundingClientRect().bottom + window.scrollY > budget) break;
+    fit++;
+  }
+  fit = Math.max(Math.min(PAGE_MIN_ROWS, left), fit);
+  // everything from the first row fits: no pager
+  paintPage(pg, rows, fit, !(pg.offset === 0 && fit >= left));
+}
+
+function turnPage(pg, dir) {
+  if (dir > 0) {
+    pg.back_.push(pg.offset);
+    pg.offset += pg.shown;
+  } else {
+    pg.offset = pg.back_.length ? pg.back_.pop() : 0;
+  }
+}
+
+const hist = {
+  offset: 0, back_: [], section: "#sessions", body: "#history", pager: "#h-pager", attr: "hpage", back: "Newer", forward: "Older",
+  row: historyRow,
+  empty: () => `<tr class="empty"><td colspan="7" class="soft">${data.history.length ? "No session matches." : "No finished sessions yet."}</td></tr>`,
+};
 
 function filteredHistory() {
   const ws = $("#f-ws").value;
@@ -172,40 +247,7 @@ function filteredHistory() {
     && (!q || s.searchText.includes(q) || s.wsName.toLowerCase().includes(q) || s.id.includes(q)));
 }
 
-function paintHistory(rows, count, pager) {
-  const shown = rows.slice(hist.offset, hist.offset + count);
-  $("#history").innerHTML = shown.length ? shown.map(historyRow).join("")
-    : `<tr class="empty"><td colspan="7" class="soft">${data.history.length ? "No session matches." : "No finished sessions yet."}</td></tr>`;
-  $("#h-pager").innerHTML = pager
-    ? `<a data-hpage="-1"${hist.offset === 0 ? ' class="off"' : ""}>‹ Newer</a><span>${hist.offset + 1}–${hist.offset + shown.length} of ${rows.length}</span><a data-hpage="1"${hist.offset + shown.length >= rows.length ? ' class="off"' : ""}>Older ›</a>`
-    : "";
-  hist.shown = shown.length;
-}
-
-function renderHistory() {
-  const rows = filteredHistory();
-  hist.offset = Math.max(0, Math.min(hist.offset, rows.length - 1));
-  const left = rows.length - hist.offset;
-  if (!$("#sessions").classList.contains("on")) {
-    // hidden: nothing to measure; the route renders again when it shows
-    paintHistory(rows, Math.min(left, 10), rows.length > 10);
-    return;
-  }
-  // Lay out the candidates with the pager, then keep the rows that end above the pager's place
-  paintHistory(rows, Math.min(left, HISTORY_MAX_ROWS), true);
-  const pager = $("#h-pager");
-  const main = pager.closest("main");
-  const budget = window.innerHeight - (parseFloat(getComputedStyle(main).paddingBottom) || 0)
-    - pager.getBoundingClientRect().height - (parseFloat(getComputedStyle(pager).marginTop) || 0);
-  let fit = 0;
-  for (const row of $("#history").querySelectorAll("tr[data-go]")) {
-    if (row.getBoundingClientRect().bottom + window.scrollY > budget) break;
-    fit++;
-  }
-  fit = Math.max(Math.min(HISTORY_MIN_ROWS, left), fit);
-  // everything from the first row fits: no pager
-  paintHistory(rows, fit, !(hist.offset === 0 && fit >= left));
-}
+const renderHistory = () => fitPage(hist, filteredHistory());
 
 function renderSessions() {
   $("#active").innerHTML = data.active.length ? data.active.map(activeRow).join("") : EMPTY_ACTIVE;
@@ -216,6 +258,322 @@ function renderSessions() {
 function tickClocks() {
   const t = nowS();
   document.querySelectorAll("[data-since]").forEach(el => { el.textContent = clock(t - Number(el.dataset.since)); });
+}
+
+// ---------- Plans ----------
+
+const PLAN_KIND = { progress: "progress", review: "running", ready: "ready", draft: "draft", done: "done", doc: "doc" };
+const SESSION_LABEL = { approve: "approved", consensus: "consensus", stalemate: "stalemate", running: "reviewer working", waiting: "agent's turn", stopped: "stopped" };
+const gitShort = tracked => (tracked === true ? "in git" : tracked === false ? "local only" : "no git");
+const gitLong = tracked => (tracked === true ? "in git" : tracked === false ? "local only — git ignores it" : "not in a git repository");
+/** 2026-10-14 → 14 Oct (with the year when it is not this one). */
+function isoDay(iso) {
+  const m = String(iso || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return String(iso || "");
+  const year = new Date(nowS() * 1000).getFullYear();
+  return `${Number(m[3])} ${MONTHS[Number(m[2]) - 1]}${Number(m[1]) === year ? "" : ` ${m[1]}`}`;
+}
+function changed(epoch) {
+  const s = nowS() - epoch;
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return when(epoch);
+}
+
+function planLabel(p) {
+  if (p.state === "progress") return `phase ${p.progress.current} of ${p.progress.phasesTotal}`;
+  return { review: "in review", ready: "ready to start", draft: "draft", done: "done", doc: "document" }[p.state] || p.state;
+}
+
+function progressText(p) {
+  const pr = p.progress;
+  if (!pr) return "not a loop-plan file";
+  if (!pr.acsMet && !pr.phasesDone) return `${pr.phasesTotal} ${pr.phasesTotal === 1 ? "phase" : "phases"} · not started`;
+  return `${pr.phasesDone} of ${pr.phasesTotal} phases · ${pr.acsMet} of ${pr.acsTotal} criteria`;
+}
+
+// a phase's share is set as --p through the CSSOM after painting: the CSP blocks style attributes
+const pbar = bar => `<div class="pbar">${(bar || []).map(f => (f >= 1 ? `<i class="done"></i>` : f > 0 ? `<i class="part" data-p="${Math.round(f * 100)}"></i>` : "<i></i>")).join("")}</div>`;
+const setShares = root => root.querySelectorAll("i[data-p]").forEach(i => i.style.setProperty("--p", `${Number(i.dataset.p)}%`));
+
+function reviewCell(p) {
+  if (p.format !== "loop-plan") return `<span class="soft">—</span>`;
+  if (p.reviewSession) return `${st("running", `round ${p.reviewSession.round}`)}<div class="line2 mono">${esc(p.reviewSession.id)}</div>`;
+  const r = p.planReview || {};
+  if (r.verdict === "APPROVE" && r.session) return `${st("approve", "approved")}<div class="line2 mono">${esc(r.session)}</div>`;
+  if (r.verdict === "APPROVE" && r.user) return `${st("approve", "approved by you")}<div class="line2">${esc(isoDay(r.user))}</div>`;
+  if (r.verdict === "REVISE") return st("revise", "changes asked");
+  return `<span class="st draft">${ic("draft")}${r.verdict === "APPROVE" ? "approval without a source" : "not reviewed"}</span>`;
+}
+
+function planRow(p) {
+  const sub = `${p.wsName} · ${p.file} · ${gitShort(p.tracked)}`;
+  return `<tr data-go="${esc(planHref(p.ws, p.file))}"><td>${st(own(PLAN_KIND, p.state) || "draft", planLabel(p))}</td>
+    <td>${inline(p.title)}<div class="line2">${esc(sub)}</div></td>
+    <td>${p.format === "loop-plan" ? pbar(p.bar) : `<span class="soft">—</span>`}<div class="line2">${esc(progressText(p))}</div></td>
+    <td>${reviewCell(p)}</td><td class="num line2 nw">${esc(changed(p.changedAt))}</td></tr>`;
+}
+
+const plansPage = {
+  offset: 0, back_: [], section: "#plans", body: "#plan-list", pager: "#p-pager", attr: "ppage", back: "Previous", forward: "Next",
+  row: planRow,
+  empty: () => `<tr class="empty"><td colspan="5" class="soft">${data.plans.length ? "No plan matches." : "No plans yet. loop-plan writes them to .cross-review/plans/."}</td></tr>`,
+  painted: () => setShares($("#plan-list")),
+};
+
+function filteredPlans() {
+  const ws = $("#pf-ws").value;
+  const state = $("#pf-state").value;
+  const q = $("#pf-search").value.trim().toLowerCase();
+  return (data.plans || []).filter(p => (!ws || p.ws === ws) && (!state || p.state === state)
+    && (!q || p.searchText.includes(q) || p.wsName.toLowerCase().includes(q) || p.file.toLowerCase().includes(q)));
+}
+
+function renderPlans() {
+  renderFilters("#pf-ws");
+  fitPage(plansPage, filteredPlans());
+}
+
+// ----- one plan -----
+
+const phaseMet = p => p.acs.filter(a => a.met).length;
+const phaseDone = p => p.acs.length > 0 && p.acs.every(a => a.met);
+const words = list => (list.length < 2 ? list.join("") : `${list.slice(0, -1).join(", ")} and ${list[list.length - 1]}`);
+const SESSION_ID = /\b[a-z]+(?:-[a-z]+)*-\d{8}-\d{3}\b/g;
+
+/** A session id as a link when the plan's workspace has that session, else as text. */
+function sessionRef(d, id) {
+  return d.sessions && d.sessions.some(x => x.id === id)
+    ? `<a class="mono" href="${esc(sessionHref(d.ws, id))}">${esc(id)}</a>` : `<span class="mono">${esc(id)}</span>`;
+}
+
+/** Inline markdown with session ids linked (outside tags only). */
+const withSessions = (d, text) => renderInline(text).split(/(<[^>]+>)/)
+  .map(part => (part.startsWith("<") ? part : part.replace(SESSION_ID, id => sessionRef(d, id)))).join("");
+
+function planStatus(d) {
+  const ph = d.phases;
+  const pr = d.progress;
+  if (d.state === "progress") {
+    const p = ph.find(x => x.n === pr.current) || ph[0];
+    const done = ph.filter(phaseDone).map(x => x.n);
+    const before = !done.length ? "No phase is done yet." : done.length === 1 ? `Phase ${done[0]} is done.` : `Phases ${words(done)} are done.`;
+    return { kind: "progress", what: esc(`Phase ${p.n} of ${ph.length} — ${p.name}: ${phaseMet(p)} of ${p.acs.length} criteria met.`),
+      next: esc(before + (p.checkpoint ? " A review-impl checkpoint follows this phase." : "")) };
+  }
+  if (d.state === "done") return { kind: "done", what: esc(`Done: all ${ph.length} phases and ${pr.acsTotal} criteria met.`), next: "loop-implement finished every phase." };
+  if (d.state === "review") {
+    const rs = d.reviewSession;
+    return { kind: "running", what: "In review: the plan is not approved yet.",
+      next: `review-plan is in round ${Number(rs.round)}; ${sessionRef(d, rs.id)}. loop-implement starts once the plan is approved.` };
+  }
+  if (d.state === "ready") return { kind: "ready", what: "Ready to start: the plan is approved.", next: "loop-implement starts at the first phase." };
+  return { kind: "draft", what: "Draft: the plan is not approved yet.",
+    next: d.planReview && d.planReview.verdict === "REVISE"
+      ? "The last plan review asked for changes. Run review-plan again, or approve the plan yourself."
+      : "Run review-plan, or approve the plan yourself. loop-implement starts once the plan is approved." };
+}
+
+function checkpointText(d, p) {
+  if (!p.checkpoint) return "No checkpoint: covered by the next one";
+  if (!phaseDone(p)) return "Checkpoint: review-impl after this phase";
+  const ids = d.log.filter(e => e.phase === p.n).flatMap(e => e.sessions).filter(id => id.startsWith("review-impl-"));
+  const id = ids[ids.length - 1];
+  const s = id && d.sessions.find(x => x.id === id);
+  if (!s) return id ? `Checkpoint: review-impl · ${sessionRef(d, id)}` : "Checkpoint: review-impl";
+  return `Checkpoint: review-impl · ${st(s.state, own(SESSION_LABEL, s.state) || s.state)} · ${sessionRef(d, id)}`;
+}
+
+function depsText(p) {
+  const dep = String(p.dependencies || "").trim().replace(/\.$/, "");
+  if (!dep || /^none$/i.test(dep)) return "No dependencies";
+  return `Depends on ${renderInline(dep.replace(/^./, c => c.toLowerCase()))}`;
+}
+
+function planReviewFact(d) {
+  if (d.state === "review" && d.reviewSession) return `${st("running", `round ${Number(d.reviewSession.round)}`)} · ${sessionRef(d, d.reviewSession.id)}`;
+  const r = d.planReview || {};
+  if (r.verdict === "APPROVE" && r.session) return `<span title="${esc(r.session)}">${st("approve", "approved")}</span>`;
+  if (r.verdict === "APPROVE" && r.user) return st("approve", `approved by you, ${isoDay(r.user)}`);
+  if (r.verdict === "REVISE") return st("revise", "changes asked");
+  return `<span class="st draft">${ic("draft")}not reviewed</span>`;
+}
+
+function logHtml(d) {
+  // newest first: by date, then later lines first; lines without a date last
+  const entries = d.log.map((e, i) => ({ e, i }))
+    .sort((a, b) => Number(Boolean(b.e.date)) - Number(Boolean(a.e.date)) || (b.e.date || "").localeCompare(a.e.date || "") || b.i - a.i);
+  if (!entries.length) return `<div class="sub">Nothing yet: loop-implement writes a line per finished phase.</div>`;
+  return entries.map(({ e }) => {
+    const label = e.kind === "decision" ? "Decision" : e.kind === "discovery" ? "Discovery" : e.kind === "phase" ? `Phase ${e.phase}` : "";
+    let text = e.text.replace(/^\d{4}-\d{2}-\d{2}\s*/, "");
+    if (e.kind === "decision") text = text.replace(/^Decision:\s*/, "");
+    if (e.kind === "discovery") text = text.replace(/^Discovery:\s*/, "");
+    if (e.kind === "phase") text = text.replace(/^Phase \d+\s*:?\s*/, "").replace(/^./, c => c.toUpperCase());
+    return `<div>${e.date ? `<span class="d">${esc(isoDay(e.date))}</span>` : ""}${label ? `<span class="k ${esc(e.kind)}">${esc(label)}</span>` : ""}${text.split("\n").map(line => withSessions(d, line)).join("<br>")}</div>`;
+  }).join("");
+}
+
+function renderPlanProgress(v) {
+  const d = v.d;
+  const pr = d.progress;
+  const s = planStatus(d);
+  const box = $("#p-status");
+  box.className = `status ${s.kind}`;
+  box.innerHTML = `<div class="what"><span>${ic(s.kind)}</span>${s.what}</div><div class="next">${s.next}</div>`;
+  $("#p-steps").innerHTML = d.phases.map(p => {
+    const m = phaseMet(p);
+    const all = phaseDone(p);
+    return `<span class="s ${all ? "done" : m ? "progress" : "todo"}" data-jump="ph${Number(p.n)}">${all ? ic("done") : ""}<b>${Number(p.n)}</b> ${renderInline(p.name)}${m && !all ? ` ${m}/${p.acs.length}` : ""}</span>`;
+  }).join(`<span class="arrow">→</span>`);
+  $("#phases").innerHTML = d.phases.map(p => {
+    const m = phaseMet(p);
+    const all = phaseDone(p);
+    const cls = all ? "done" : m ? "progress" : "todo";
+    // the current phase starts open; the reader's clicks win over that
+    const open = v.opened.has(p.n) || (p.n === pr.current && !v.closed.has(p.n));
+    const icon = all ? `<span class="st done">${ic("done")}</span>` : m ? `<span class="st progress">${ic("progress")}</span>` : `<span class="st draft">${ic("box")}</span>`;
+    return `<div class="phase ${cls}${open ? " open" : ""}" id="ph${Number(p.n)}" data-phase="${Number(p.n)}">
+      <div class="ph-head">${icon}<span class="n">Phase ${Number(p.n)}</span><span>${renderInline(p.name)}</span><span class="cnt">${m} / ${p.acs.length} criteria</span></div>
+      ${p.goal ? `<div class="ph-goal">${renderInline(p.goal)}</div>` : ""}
+      <ul class="acs">${p.acs.map(a => `<li${a.met ? ' class="met"' : ""}>${ic(a.met ? "boxed" : "box")}<span class="id">${esc(a.id || "")}</span><span>${renderInline(a.text)}</span></li>`).join("")}</ul>
+      <div class="ph-foot">${checkpointText(d, p)}${all && p.commit.sha ? ` · commit <span class="mono">${esc(p.commit.sha)}</span>` : ""}<br>${depsText(p)} · <a data-read="d-phase-${Number(p.n)}">read phase ${Number(p.n)} in the plan</a></div></div>`;
+  }).join("");
+  $("#p-done").innerHTML = d.completion ? renderMarkdown(d.completion) : `<p class="sub">None listed.</p>`;
+  $("#p-wsname").textContent = d.wsName;
+  $("#p-review").innerHTML = planReviewFact(d);
+  $("#p-phases").textContent = `${pr.phasesDone} of ${pr.phasesTotal} done`;
+  $("#p-acs").textContent = `${pr.acsMet} of ${pr.acsTotal} met`;
+  const cps = d.phases.filter(p => p.checkpoint).map(p => p.n);
+  $("#p-cps").textContent = cps.length ? `after ${words(cps)}` : "none named";
+  $("#p-git2").textContent = gitShort(d.tracked);
+  $("#p-changed").textContent = changed(d.changedAt);
+  $("#plog").innerHTML = logHtml(d);
+}
+
+function renderPlanDoc(d) {
+  // what comes before the first H2 renders first, without an entry in the contents
+  $("#doc").innerHTML = d.sections.map(sec => (sec.title == null ? renderMarkdown(sec.md)
+    : `<h2 id="d-${esc(sec.id)}">${renderInline(sec.title)}</h2>${renderMarkdown(sec.md)}`)).join("");
+  $("#toc").innerHTML = d.sections.filter(sec => sec.title != null)
+    .map(sec => `<a${sec.phase != null ? ' class="sub"' : ""} data-toc="d-${esc(sec.id)}">${renderInline(sec.title)}</a>`).join("");
+}
+
+function setPlanTab(v, tab) {
+  v.tab = tab;
+  const shown = v.d && v.d.format !== "loop-plan" ? "doc" : tab;
+  document.querySelectorAll("#plan .ptabs a").forEach(a => a.classList.toggle("on", a.dataset.ptab === shown));
+  $("#pane-progress").classList.toggle("on", shown === "progress");
+  $("#pane-doc").classList.toggle("on", shown === "doc");
+}
+
+function renderPlan(v) {
+  const d = v.d;
+  const isPlan = d.format === "loop-plan";
+  $("#p-body").hidden = false;
+  $("#p-gone").hidden = true;
+  $("#plan").classList.toggle("fallback", !isPlan);
+  $("#p-ws").textContent = d.wsName;
+  $("#p-title").innerHTML = inline(d.title);
+  $("#p-path").textContent = `.cross-review/plans/${d.file}`;
+  $("#p-git").textContent = gitLong(d.tracked);
+  $("#p-kind").textContent = isPlan ? `${d.progress.phasesTotal} phases · ${d.progress.acsTotal} acceptance criteria` : "markdown";
+  $("#p-note").hidden = isPlan;
+  $("#p-target").innerHTML = isPlan && d.target ? `Target: ${renderInline(d.target)}` : "";
+  renderPlanDoc(d);
+  if (isPlan) renderPlanProgress(v);
+  setPlanTab(v, v.tab);
+}
+
+function openPlan(r) {
+  if (pv && pv.ws === r.ws && pv.file === r.file) {
+    setPlanTab(pv, r.tab);
+    return;
+  }
+  const v = { ws: r.ws, file: r.file, tab: r.tab, d: null, sig: null, gone: false, seq: 0, opened: new Set(), closed: new Set() };
+  pv = v;
+  window.scrollTo(0, 0);
+  $("#p-ws").textContent = r.ws;
+  $("#p-title").textContent = r.file;
+  for (const id of ["#p-path", "#p-git", "#p-kind", "#p-target", "#p-steps", "#phases", "#doc", "#toc", "#plog", "#p-done"]) $(id).innerHTML = "";
+  $("#p-status").className = "status";
+  $("#p-status").innerHTML = "";
+  setPlanTab(v, r.tab);
+  reloadPlan(v);
+}
+
+/** Load the plan again; the reader's tab, open phases and scroll stay. */
+async function reloadPlan(v) {
+  const seq = ++v.seq;
+  const res = await fetch(`/api/plan?ws=${encodeURIComponent(v.ws)}&file=${encodeURIComponent(v.file)}`).catch(() => null);
+  if (pv !== v || seq !== v.seq || !res) return;
+  if (!res.ok) {
+    if (res.status !== 404) return;
+    // a plan that was never there goes back to the list; one that disappeared says so
+    if (!v.d) {
+      location.replace("#/plans");
+      return;
+    }
+    v.gone = true;
+    v.sig = null;
+    $("#p-body").hidden = true;
+    $("#p-gone").hidden = false;
+    return;
+  }
+  const d = await res.json();
+  if (pv !== v || seq !== v.seq) return;
+  v.gone = false;
+  if (d.sig === v.sig) return;
+  const first = !v.d;
+  const y = window.scrollY;
+  v.sig = d.sig;
+  v.d = d;
+  renderPlan(v);
+  if (!first) window.scrollTo(0, y);
+}
+
+/** A list payload arrived: reload the open plan when what its page shows changed. */
+function followPlan() {
+  if (!pv || !data) return;
+  const it = (data.plans || []).find(p => p.ws === pv.ws && p.file === pv.file);
+  if (it ? it.sig !== pv.sig : pv.d && !pv.gone) reloadPlan(pv);
+}
+
+const scrollToId = id => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+
+function onPlanClick(e) {
+  const v = pv;
+  if (!v) return;
+  const t = e.target;
+  const tab = t.closest("[data-ptab]");
+  if (tab) {
+    setPlanTab(v, tab.dataset.ptab);
+    history.replaceState(null, "", planHref(v.ws, v.file, tab.dataset.ptab));
+  }
+  const head = t.closest(".ph-head");
+  if (head) {
+    const n = Number(head.parentElement.dataset.phase);
+    const open = !head.parentElement.classList.contains("open");
+    if (open) {
+      v.opened.add(n);
+      v.closed.delete(n);
+    } else {
+      v.closed.add(n);
+      v.opened.delete(n);
+    }
+    head.parentElement.classList.toggle("open", open);
+  }
+  const jump = t.closest("[data-jump]");
+  if (jump) scrollToId(jump.dataset.jump);
+  const read = t.closest("[data-read]");
+  if (read) {
+    setPlanTab(v, "doc");
+    history.replaceState(null, "", planHref(v.ws, v.file, "doc"));
+    scrollToId(read.dataset.read);
+  }
+  const toc = t.closest("[data-toc]");
+  if (toc) scrollToId(toc.dataset.toc);
 }
 
 // ---------- session page ----------
@@ -639,7 +997,7 @@ const sv = { scope: "global", ws: null, draft: {}, touched: new Set(), refreshed
 let pendingSave = null; // a POST /api/settings in flight: the page reloads settings after it
 let settingsLoad = 0; // counts openSettings calls; only the latest one applies its answer
 
-const ALL_PATHS = ["reviewer", "model", "effort", "open_dashboard", ...SKILLS.flatMap(s => [`skills.${s}.model`, `skills.${s}.effort`])];
+const ALL_PATHS = ["reviewer", "model", "effort", "open_dashboard", "open_plans", "track_plans", ...SKILLS.flatMap(s => [`skills.${s}.model`, `skills.${s}.effort`])];
 const clone = x => JSON.parse(JSON.stringify(x || {}));
 const modelName = (slug, models = settings ? settings.models : catalogInfo.models) => {
   const m = slug && models ? models.find(x => x.slug === slug) : null;
@@ -695,6 +1053,7 @@ function resetDraft() {
   sv.draft = clone(savedConfig());
   sv.touched = new Set();
   $("#save-error").textContent = "";
+  $("#plans-warn").textContent = "";
 }
 
 /** The model a review would use here (for the effort levels and the help line). */
@@ -748,6 +1107,18 @@ function renderSettings() {
     ...(workspace ? [{ value: "", label: `Inherit — ${globalFollow ? "on" : "off"}`, selected: follow === undefined }] : []),
     { value: "on", label: "On — open each new review", selected: follow === true },
     { value: "off", label: "Off", selected: follow === false || (!workspace && follow !== true) },
+  ]);
+  const showPlans = d.open_plans;
+  $("#f-showplans").innerHTML = optionsHtml([
+    ...(workspace ? [{ value: "", label: `Inherit — ${settings.global.open_plans === true ? "on" : "off"}`, selected: showPlans === undefined }] : []),
+    { value: "on", label: "On — open each finished plan", selected: showPlans === true },
+    { value: "off", label: "Off", selected: showPlans === false || (!workspace && showPlans !== true) },
+  ]);
+  const track = d.track_plans;
+  $("#f-plans").innerHTML = optionsHtml([
+    ...(workspace ? [{ value: "", label: `Inherit — ${settings.global.track_plans === true ? "on" : "off"}`, selected: track === undefined }] : []),
+    { value: "off", label: "Off — git ignores plans (default)", selected: track === false || (!workspace && track !== true) },
+    { value: "on", label: "On — commit plans with the code", selected: track === true },
   ]);
 
   // Per skill
@@ -829,10 +1200,12 @@ function onSettingsChange(e) {
     return;
   }
   if (t.dataset.av !== undefined && t.type === "file") return uploadAvatar(t);
-  if (t.id === "f-follow") {
+  const onOff = { "f-follow": "open_dashboard", "f-showplans": "open_plans", "f-plans": "track_plans" };
+  if (Object.hasOwn(onOff, t.id)) {
+    // Off at the global level is the default: the key is dropped
     const v = t.value === "on" ? true : t.value === "off" ? (sv.scope === "workspace" ? false : undefined) : undefined;
-    setPath(sv.draft, "open_dashboard", v);
-    sv.touched.add("open_dashboard");
+    setPath(sv.draft, onOff[t.id], v);
+    sv.touched.add(onOff[t.id]);
   } else if (t.id === "f-reviewer-set") {
     setPath(sv.draft, "reviewer", t.value || undefined);
     sv.touched.add("reviewer");
@@ -904,7 +1277,8 @@ async function onSettingsClick(e) {
         if (same) $("#save-error").textContent = msg || "The settings could not be saved.";
         return;
       }
-      const saved = (await res.json()).config;
+      const answer = await res.json();
+      const saved = answer.config;
       // the saved file replaced the one that failed to load
       if (scope === "global") {
         settings.global = saved;
@@ -913,13 +1287,27 @@ async function onSettingsClick(e) {
         settings.workspaces[ws] = saved;
         delete settings.errors.workspaces[ws];
       }
+      const trackTouched = sv.touched.has("track_plans");
       if (same && JSON.stringify(sv.draft) === sent) resetDraft();
+      if (same) $("#plans-warn").textContent = gitignoreNotes(answer.gitignore, trackTouched);
       renderSettings();
     } finally {
       pendingSave = null;
       $("#save").disabled = false;
     }
   }
+}
+
+/** What a save did to each workspace's .gitignore that the user should know. */
+function gitignoreNotes(gitignore, trackTouched) {
+  const lines = [];
+  for (const [ws, g] of Object.entries(gitignore || {})) {
+    const name = (settings.names && own(settings.names, ws)) || ws;
+    if (g.warning) lines.push(`${name}: ${g.warning}`);
+    else if (g.result === "custom" && trackTouched) lines.push(`.cross-review/.gitignore of ${name} was edited by hand; it was not changed.`);
+    else if (g.result === "error") lines.push(`.cross-review/.gitignore of ${name} could not be written.`);
+  }
+  return lines.join("\n");
 }
 
 // ---------- data ----------
@@ -929,33 +1317,37 @@ function apply(payload) {
   skew = (payload.serverTime || Date.now() / 1000) - Date.now() / 1000;
   renderWhere();
   renderSessions();
+  renderPlans();
+  followPlan();
 }
 
 async function start() {
   document.querySelectorAll("[data-i]").forEach(el => el.insertAdjacentHTML("afterbegin", ic(el.dataset.i)));
-  const refilter = () => {
-    hist.offset = 0;
-    hist.back = [];
-    if (data) renderHistory();
-  };
-  for (const id of ["#f-ws", "#f-skill", "#f-result"]) $(id).addEventListener("change", refilter);
-  $("#f-search").addEventListener("input", refilter);
-  $("#h-pager").addEventListener("click", e => {
-    const a = e.target.closest("a[data-hpage]");
-    if (!a || !data) return;
-    if (Number(a.dataset.hpage) > 0) {
-      hist.back.push(hist.offset);
-      hist.offset += hist.shown;
-    } else {
-      hist.offset = hist.back.length ? hist.back.pop() : 0;
-    }
-    renderHistory();
+  // filtering goes back to the first page
+  for (const [pg, render, ids, search] of [[hist, () => renderHistory(), ["#f-ws", "#f-skill", "#f-result"], "#f-search"], [plansPage, () => renderPlans(), ["#pf-ws", "#pf-state"], "#pf-search"]]) {
+    const refilter = () => {
+      pg.offset = 0;
+      pg.back_ = [];
+      if (data) render();
+    };
+    for (const id of ids) $(id).addEventListener("change", refilter);
+    $(search).addEventListener("input", refilter);
+    $(pg.pager).addEventListener("click", e => {
+      const a = e.target.closest(`a[data-${pg.attr}]`);
+      if (!a || !data) return;
+      turnPage(pg, Number(a.getAttribute(`data-${pg.attr}`)));
+      render();
+    });
+  }
+  window.addEventListener("resize", () => {
+    if (data && $("#sessions").classList.contains("on")) renderHistory();
+    if (data && $("#plans").classList.contains("on")) renderPlans();
   });
-  window.addEventListener("resize", () => data && $("#sessions").classList.contains("on") && renderHistory());
   document.addEventListener("click", e => {
     const row = e.target.closest("tr[data-go]");
     if (row && !e.target.closest("a")) location.hash = row.dataset.go;
     if (e.target.closest("#detail")) onDetailClick(e);
+    if (e.target.closest("#plan")) onPlanClick(e);
     if (e.target.closest("#settings")) onSettingsClick(e);
   });
   $("#settings").addEventListener("change", onSettingsChange);

@@ -907,6 +907,7 @@ test("plans in the list: five states, review while a review-plan session is acti
     assert.deepEqual(p.plans.map(it => it.state), ["progress", "ready", "draft", "draft", "done", "doc"]);
     const ex = planOf(p, "harbor-app", "export-formats-plan.md");
     assert.deepEqual(ex.progress, { phasesDone: 2, phasesTotal: 5, acsMet: 9, acsTotal: 16, current: 3 });
+    assert.deepEqual(ex.bar, [1, 1, 0.5, 0, 0]);
     assert.equal(ex.format, "loop-plan");
     assert.equal(ex.planReview.session, "review-plan-20261012-002");
     assert.equal(ex.reviewSession, null);
@@ -915,7 +916,7 @@ test("plans in the list: five states, review while a review-plan session is acti
     assert.equal(ex.changedAt, Math.floor(fs.statSync(pl.files.progress).mtimeMs / 1000));
     assert.equal(ex.fileSig, `${fs.statSync(pl.files.progress).size}:${fs.statSync(pl.files.progress).mtimeMs}`);
     const doc = planOf(p, "harbor-app", "sync notes.md");
-    assert.deepEqual([doc.format, doc.title, doc.progress, doc.planReview, doc.tracked], ["markdown", "Notes on the sync protocol", null, null, null]);
+    assert.deepEqual([doc.format, doc.title, doc.progress, doc.planReview, doc.tracked, doc.bar], ["markdown", "Notes on the sync protocol", null, null, null, null]);
     assert.match(doc.searchText, /merge by paragraph/);
     for (const it of p.plans) for (const k of ["ws", "wsName", "file", "format", "title", "state", "progress", "planReview", "reviewSession", "tracked", "searchText", "changedAt", "fileSig", "sig"]) assert.ok(k in it, `${key(it)}: ${k}`);
 
@@ -1072,7 +1073,7 @@ test("settings keep each workspace's .gitignore in step with Plans in git; custo
     for (const ws of [harbor, orchard, inkwell, pl.atlas]) fs.writeFileSync(gi(ws), "*\n");
     let r = await post({ scope: "workspace", ws: "harbor-app", config: { track_plans: true } });
     assert.equal(r.status, 200, r.text);
-    assert.deepEqual(JSON.parse(r.text).gitignore, { "harbor-app": { result: "updated", blocked_by: null } });
+    assert.deepEqual(JSON.parse(r.text).gitignore, { "harbor-app": { result: "updated", blocked_by: null, warning: null } });
     assert.equal(read(harbor), GITIGNORE.track);
     assert.equal(read(inkwell), "*\n");
 
@@ -1092,9 +1093,12 @@ test("settings keep each workspace's .gitignore in step with Plans in git; custo
     }
     assert.equal(r.status, 200, r.text);
     const out = JSON.parse(r.text).gitignore;
-    assert.deepEqual(out["harbor-app"], { result: "unchanged", blocked_by: null });
-    assert.deepEqual(out["services/orchard-api"], { result: "custom", blocked_by: null });
-    assert.deepEqual(out.inkwell, { result: "updated", blocked_by: ".gitignore:1:.cross-review/" });
+    assert.deepEqual(out["harbor-app"], { result: "unchanged", blocked_by: null, warning: null });
+    assert.deepEqual(out["services/orchard-api"], { result: "custom", blocked_by: null, warning: null });
+    assert.deepEqual(out.inkwell, {
+      result: "updated", blocked_by: ".gitignore:1:.cross-review/",
+      warning: "Plans in git is on, but .gitignore:1:.cross-review/ ignores new plans in .cross-review/plans/. Change it to .cross-review/* and add !.cross-review/plans/.",
+    });
     if (canLock) assert.equal(out["atlas-notes"].result, "error");
     assert.equal(read(harbor), GITIGNORE.ignore);
     assert.equal(read(orchard), "custom\n");

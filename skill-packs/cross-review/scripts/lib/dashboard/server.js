@@ -21,7 +21,7 @@ import { findWorkspaces, isWorkspace, listSessions, sessionsDir, SCAN_DEPTH, SES
 import { discoveryFile, removeDiscoveryIfOwn, writeDiscovery } from "./discovery.js";
 import { AvatarError, avatarFile, listAvatars, removeAvatar, saveAvatar, AVATAR_MAX_BYTES } from "./avatars.js";
 import { ensureCrossReviewDir, globalConfigPath, readConfig, resolvePlanSettings, syncGitignore, validateConfig, workspaceConfigPath, writeConfig } from "../config.js";
-import { fillCommits, gitPlanFacts, listPlans, parsePlan, planProgress, planState, plansDir, summarizePlanText } from "../plans.js";
+import { fillCommits, gitPlanFacts, listPlans, parsePlan, planProgress, planState, plansDir, plansWarning, summarizePlanText } from "../plans.js";
 import { getReviewer } from "../reviewers/index.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -256,6 +256,8 @@ export function createListWatcher({ root, now = () => Math.floor(Date.now() / 10
         const item = {
           ws, wsName: names(abs, ws), file, format: entry.summary.format, title: entry.summary.title, state,
           progress: entry.summary.progress, planReview: entry.summary.planReview, reviewSession, tracked,
+          // each phase's share of met criteria, for the list's progress bar
+          bar: isPlan ? entry.parsed.phases.map(p => (p.acs.length ? p.acs.filter(a => a.met).length / p.acs.length : 0)) : null,
           searchText: entry.summary.searchText, changedAt: entry.changedAt, fileSig: entry.fileSig, sig,
         };
         plans.push(item);
@@ -664,11 +666,14 @@ export async function startDashboard({
       }
       watcher.forgetGit(abs);
       let blockedBy = null;
+      let warning = null;
       if (track && result !== "error") {
         const facts = gitPlanFacts(abs, []);
         if (facts.repo && facts.newPlansIgnored) blockedBy = facts.blockedBy || "a .gitignore rule";
+        // the runner's sentence, so loop-plan and Settings say the same thing
+        warning = plansWarning({ track, gitignore: result, facts });
       }
-      gitignore[ws] = { result, blocked_by: blockedBy };
+      gitignore[ws] = { result, blocked_by: blockedBy, warning };
     }
     return json(res, 200, { ok: true, config, gitignore });
   }

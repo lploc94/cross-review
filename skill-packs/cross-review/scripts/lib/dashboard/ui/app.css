@@ -197,3 +197,58 @@ input.other { display: none; width: 220px; flex: none; }
 input.other.on { display: inline-block; }
 #clear-ws.off { display: none; }
 #per-skill select { max-width: 220px; }
+
+/* plans: phases as segments, criteria as boxes (mockups/dashboard.html) */
+.gap-top { margin-top: 14px; }
+th.w-pstate { width: 170px; } th.w-pprog { width: 230px; } th.w-preview { width: 210px; } th.w-pchanged { width: 90px; }
+.st.draft, .st.doc { color: var(--muted); } .st.ready { color: var(--amber); } .st.progress { color: var(--blue); } .st.done { color: var(--green); }
+.status.progress { --c: var(--blue); } .status.draft, .status.doc { --c: var(--muted); } .status.done { --c: var(--green); } .status.ready { --c: var(--amber); }
+.pbar { display: flex; gap: 3px; max-width: 200px; margin-top: 3px; }
+.pbar i { flex: 1; height: 6px; border-radius: 1px; background: var(--rule); }
+.pbar i.done { background: var(--green); }
+.pbar i.part { background: linear-gradient(90deg, var(--blue) var(--p), var(--rule) var(--p)); }
+.steps .s.done, .steps .s.done b { color: var(--green); } .steps .s.progress, .steps .s.progress b { color: var(--blue); }
+.steps .s.todo, .steps .s.todo b { color: var(--muted); }
+.steps .s .i { width: 13px; height: 13px; vertical-align: -2px; margin-right: 3px; }
+.target { color: var(--soft); max-width: 780px; margin: 10px 0 0; }
+.phase { border-top: 1px solid var(--rule); padding: 11px 0; }
+.phase:last-child { border-bottom: 1px solid var(--rule); }
+.ph-head { display: flex; align-items: baseline; gap: 10px; cursor: pointer; }
+.ph-head .n { font: 600 15px var(--serif); white-space: nowrap; }
+.ph-head .cnt { margin-left: auto; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.phase.todo .ph-head { color: var(--soft); }
+.acs { list-style: none; margin: 8px 0 0; padding: 0 0 0 25px; font-size: 13.5px; display: none; }
+.phase.open .acs, .phase.open .ph-foot { display: block; }
+.acs li { display: flex; gap: 8px; padding: 3px 0; }
+.acs li .i { color: var(--muted); margin-top: 3px; flex: none; } .acs li.met .i { color: var(--green); }
+.acs .id { color: var(--muted); font: 12px/1.9 var(--mono); flex: none; width: 52px; }
+.ph-foot { display: none; padding-left: 25px; margin-top: 6px; font-size: 12.5px; color: var(--muted); }
+.ph-foot .st { vertical-align: -2px; }
+.plog > div { font-size: 13px; padding: 7px 0; border-bottom: 1px solid var(--rule2); }
+.plog .d { color: var(--muted); font-size: 12px; display: block; }
+.plog .k { font-weight: 600; margin-right: 4px; }
+.plog .k.decision { color: var(--plum); } .plog .k.discovery { color: var(--amber); }
+.ph-goal { color: var(--soft); font-size: 13px; padding-left: 25px; margin-top: 2px; }
+.ptabs { display: flex; gap: 24px; border-bottom: 1px solid var(--rule); margin: 18px 0 0; }
+.ptabs a { color: var(--soft); padding-bottom: 8px; cursor: pointer; }
+.ptabs a.on { color: var(--ink); font-weight: 500; box-shadow: inset 0 -2px 0 var(--ink); }
+.ptabs a:hover { text-decoration: none; color: var(--ink); }
+.ppane { display: none; } .ppane.on { display: block; }
+#plan.fallback .ptabs, #plan.fallback .target { display: none; }
+#plan.fallback #pane-doc { margin-top: 18px; }
+.fallback-note { color: var(--muted); margin: 14px 0 4px; }
+.done-when { font-size: 13px; } .done-when ul { padding-left: 18px; margin: 0; } .done-when li { margin: 4px 0; }
+li.task { list-style: none; display: flex; gap: 8px; margin-left: -18px; }
+li.task .i { color: var(--muted); margin-top: 3px; flex: none; } li.task.met .i { color: var(--green); }
+.warn-box { color: var(--amber); font-size: 13px; margin: 10px 0 0; white-space: pre-line; }
+.warn-box:empty { display: none; }
+/* the plan itself, rendered from its markdown */
+.doc { font-size: 14px; max-width: 760px; }
+.doc h2 { font: 600 19px var(--serif); margin: 34px 0 8px; padding-top: 6px; }
+.doc h2:first-child { margin-top: 18px; }
+.doc h3 { font: 600 13.5px var(--sans); margin: 18px 0 4px; color: var(--soft); }
+.doc p { margin: 6px 0; } .doc ul, .doc ol { margin: 6px 0; padding-left: 20px; } .doc li { margin: 3px 0; }
+.doc table { margin: 8px 0; font-size: 13px; } .doc td, .doc th { padding: 5px 8px; }
+.doc pre { margin: 8px 0; }
+.toc { font-size: 13px; } .toc a { display: block; color: var(--soft); padding: 2px 0; cursor: pointer; }
+.toc a.sub { padding-left: 12px; font-size: 12.5px; } .toc a:hover { color: var(--ink); }

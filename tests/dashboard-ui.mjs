@@ -10,9 +10,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { buildFixture, writeSession } from "./helpers/dashboard-fixture.js";
+import { spawnSync } from "node:child_process";
+
+import { PLANS, buildFixture, buildPlans, writePlan, writeSession } from "./helpers/dashboard-fixture.js";
 import { findChrome, launchChrome } from "./helpers/chrome.js";
 import { startDashboard } from "../skill-packs/cross-review/scripts/lib/dashboard/server.js";
+import { GITIGNORE } from "../skill-packs/cross-review/scripts/lib/config.js";
+import { parsePlan } from "../skill-packs/cross-review/scripts/lib/plans.js";
 
 const bin = findChrome();
 if (!bin) {
@@ -60,7 +64,7 @@ try {
 
   // header: logo, two nav entries with icons, Sessions on
   assert.ok(dom.logo, "logo icon in .name");
-  assert.deepEqual(dom.nav, [{ nav: "sessions", svg: true, on: true }, { nav: "settings", svg: true, on: false }]);
+  assert.deepEqual(dom.nav, [{ nav: "sessions", svg: true, on: true }, { nav: "plans", svg: true, on: false }, { nav: "settings", svg: true, on: false }]);
   assert.match(dom.where, /scanned 3 levels down · 3 workspaces · pack \d+\.\d+\.\d+$/);
 
   // In progress: one row per active session, each with a state mark and a skill icon
@@ -499,6 +503,8 @@ try {
     await d2.close();
   }
 
+  await plansChecks(browser);
+
   console.log(`dashboard-ui: ok (${dom.active.length} in progress, ${dom.history} of ${sessions.history.length} in history on the first page)`);
   console.log(`screenshots: ${shots}`);
 } finally {
@@ -506,4 +512,282 @@ try {
   await d.close();
   // Chrome helpers can still be writing into the profile for a moment after the kill
   fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+}
+
+// ---------- Plans (dashboard-plans plan, Phase 4) ----------
+
+async function plansChecks(browser) {
+  const GIT_ENV = { GIT_AUTHOR_NAME: "Invented", GIT_AUTHOR_EMAIL: "invented@example.invalid", GIT_COMMITTER_NAME: "Invented", GIT_COMMITTER_EMAIL: "invented@example.invalid" };
+  const git = (ws, ...args) => {
+    const r = spawnSync("git", ["-C", ws, ...args], { encoding: "utf8", env: { ...process.env, ...GIT_ENV } });
+    assert.equal(r.status, 0, `git ${args.join(" ")}: ${r.stderr}`);
+    return r.stdout.trim();
+  };
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  // scrolled to the element, or as far as the page goes
+  const reached = id => `(Math.abs(document.getElementById("${id}").getBoundingClientRect().top) < 40 || (window.scrollY > 0 && window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 2))`;
+  const t = Math.floor(Date.now() / 1000);
+  const planRoot = path.join(tmp, "plans");
+  const pfx = buildFixture(planRoot, { now: t, livePid: process.pid });
+  const ppl = buildPlans(pfx);
+  const { harbor, orchard, inkwell } = pfx.workspaces;
+  // harbor: a repo that keeps its plans, with phase 1's commit; orchard: a repo that ignores them
+  git(harbor, "init", "-q");
+  git(harbor, "commit", "-q", "--allow-empty", "-m", "feat(export): one row model behind CSV and JSON");
+  const sha1 = git(harbor, "log", "-1", "--format=%h");
+  git(orchard, "init", "-q");
+  fs.writeFileSync(path.join(orchard, ".cross-review", ".gitignore"), "*\n");
+  // the checkpoint session the Progress Log names
+  writeSession(path.join(harbor, ".cross-review", "sessions"), "review-impl-20261013-004", {
+    skill: "review-impl", mode: "branch", created: t - 9000, meta: "APPROVE", state: { ended_at: t - 8000, end_outcome: "finalized" },
+    inputs: ["BASE_BRANCH: a1b2c3d\n\n## USER_REQUEST\nInvented checkpoint after phase 1.\n"],
+    rounds: [{ status: "completed", started: t - 9000, elapsed: 60, review: "### VERDICT\n- Status: APPROVE\n- Reason: Invented.\n", acts: [] }],
+  });
+  // fallback documents: one with an intro, a table and two sections; one without a title
+  const notes = writePlan(pl(ppl), "notes.md", "# Sync notes\n\nAn invented opening line.\n\n## Options\n\n| Option | Cost |\n|---|---|\n| Merge | A diff |\n\n## Open questions\n\n- Tombstones?\n");
+  writePlan(pl(ppl), "untitled.md", "Only a line of invented text.\n");
+  function pl(x) {
+    return x.atlas;
+  }
+  const d5 = await startDashboard({ root: planRoot, port: 0, open: false, discoveryFile: null, catalog, tickMs: 300, rescanMs: 1000 });
+  const page = await browser.newPage(1400, 1300);
+  try {
+    const api = async p => (await fetch(`http://127.0.0.1:${d5.port}${p}`, { headers: { Authorization: `Bearer ${d5.token}` } })).json();
+    const list = await api("/api/sessions");
+    await page.goto(`${d5.url}#/plans`);
+    await page.waitFor(`document.getElementById("plans").classList.contains("on") && document.querySelectorAll("#plan-list tr[data-go]").length > 0`);
+    assert.equal(await page.evaluate(`document.querySelector('.top nav a.on').dataset.nav`), "plans");
+    const rows = await page.evaluate(`[...document.querySelectorAll("#plan-list tr[data-go]")].map(tr => ({
+      go: tr.dataset.go, st: tr.querySelector(".st").textContent.trim(), plan: tr.cells[1].textContent, prog: tr.cells[2].textContent,
+      bars: tr.querySelectorAll(".pbar i").length, done: tr.querySelectorAll(".pbar i.done").length, part: [...tr.querySelectorAll(".pbar i.part")].map(i => i.style.getPropertyValue("--p")),
+      review: tr.cells[3].textContent,
+    }))`);
+    assert.equal(rows.length, list.plans.length);
+    const row = file => rows.find(r => r.go.endsWith(`/${encodeURIComponent(file)}`));
+    const ex = row("export-formats-plan.md");
+    assert.equal(ex.st, "phase 3 of 5");
+    assert.deepEqual([ex.bars, ex.done, ex.part], [5, 2, ["50%"]]);
+    assert.match(ex.prog, /2 of 5 phases · 9 of 16 criteria/);
+    assert.match(ex.plan, /harbor-app · export-formats-plan\.md · in git/);
+    assert.match(ex.review, /approved.*review-plan-20261012-002/);
+    assert.equal(row("shared-notebooks-plan.md").st, "ready to start");
+    assert.match(row("shared-notebooks-plan.md").plan, /local only/);
+    assert.match(row("shared-notebooks-plan.md").prog, /2 phases · not started/);
+    assert.match(row("shared-notebooks-plan.md").review, /approved by you.*14 Oct/);
+    assert.equal(row("sync-offline-plan.md").st, "draft");
+    assert.match(row("sync-offline-plan.md").review, /not reviewed/);
+    assert.equal(row("search-by-date-plan.md").st, "done");
+    assert.match(row("search-by-date-plan.md").plan, /no git/);
+    const doc = row("sync notes.md");
+    assert.equal(doc.st, "document");
+    assert.match(doc.prog, /—\s*not a loop-plan file/);
+    assert.equal(doc.review.trim(), "—");
+    assert.equal(row("notes.md").st, "document");
+    // filters: state, and words only in the Target, only in a phase name, only in a document's body
+    const count = async (state, q) => page.evaluate(`(() => {
+      const s = document.getElementById("pf-state"); s.value = ${JSON.stringify(state)}; s.dispatchEvent(new Event("change"));
+      const q = document.getElementById("pf-search"); q.value = ${JSON.stringify(q)}; q.dispatchEvent(new Event("input"));
+      return [...document.querySelectorAll("#plan-list tr[data-go]")].map(tr => decodeURIComponent(tr.dataset.go.split("/").pop()));
+    })()`);
+    assert.deepEqual(await count("done", ""), ["search-by-date-plan.md"]);
+    assert.deepEqual((await count("doc", "")).sort(), ["notes.md", "sync notes.md", "untitled.md"]);
+    assert.deepEqual(await count("", "toolbar"), ["export-formats-plan.md"]);
+    assert.deepEqual(await count("", "streaming"), ["export-formats-plan.md"]);
+    assert.deepEqual(await count("", "paragraph"), ["sync notes.md"]);
+    await count("", "");
+    await page.screenshot(path.join(shots, "plans-1400.png"));
+
+    // a row opens its plan; the Plans tab stays lit
+    await page.evaluate(`document.querySelector('#plan-list tr[data-go$="export-formats-plan.md"] td').click()`);
+    await page.waitFor(`location.hash === "#/p/harbor-app/export-formats-plan.md" && document.querySelector("#phases .phase")`);
+    assert.equal(await page.evaluate(`document.querySelector('.top nav a.on').dataset.nav`), "plans");
+    const exportText = fs.readFileSync(ppl.files.progress, "utf8");
+    const metInFile = parsePlan(exportText).phases.reduce((n, p) => n + p.acs.filter(a => a.met).length, 0);
+    const prog = await page.evaluate(`({
+      title: document.getElementById("p-title").textContent, status: document.getElementById("p-status").className,
+      what: document.querySelector("#p-status .what").textContent.trim(), target: document.getElementById("p-target").textContent,
+      open: [...document.querySelectorAll("#phases .phase.open")].map(p => p.dataset.phase), met: document.querySelectorAll("#phases li.met").length,
+      steps: document.querySelectorAll("#p-steps .s[data-jump]").length,
+      foot1: document.querySelector('#phases .phase[data-phase="1"] .ph-foot').textContent, foot3: document.querySelector('#phases .phase[data-phase="3"] .ph-foot').textContent,
+      log: [...document.querySelectorAll("#plog > div")].map(e => ({ d: e.querySelector(".d")?.textContent || "", k: e.querySelector(".k")?.className || "" })),
+      link: document.querySelector('#plog a[href="#/s/harbor-app/review-impl-20261013-004"]')?.textContent,
+      acs: document.getElementById("p-acs").textContent, git: document.getElementById("p-git").textContent,
+      doneWhen: document.querySelectorAll("#p-done li").length,
+    })`);
+    assert.equal(prog.title, "CSV and JSON export");
+    assert.equal(prog.status, "status progress");
+    assert.match(prog.what, /^Phase 3 of 5 — Streaming large exports: 2 of 4 criteria met\.$/);
+    assert.match(prog.target, /toolbar/);
+    assert.deepEqual(prog.open, ["3"]);
+    assert.equal(prog.met, metInFile);
+    assert.equal(prog.steps, 5);
+    assert.match(prog.foot1, new RegExp(`commit ${sha1}`));
+    assert.match(prog.foot1, /review-impl-20261013-004/);
+    assert.doesNotMatch(prog.foot3, /commit/);
+    assert.equal(prog.log[0].d, "15 Oct");
+    assert.ok(prog.log.some(l => /decision/.test(l.k)) && prog.log.some(l => /discovery/.test(l.k)));
+    assert.equal(prog.link, "review-impl-20261013-004");
+    assert.equal(prog.acs, `${metInFile} of 16 met`);
+    assert.match(prog.git, /in git/);
+    assert.equal(prog.doneWhen, 2);
+    // the phase strip jumps to its phase; a closed phase opens on click
+    await page.evaluate(`document.querySelector('#p-steps .s[data-jump="ph5"]').click()`);
+    await page.waitFor(reached("ph5"));
+    await page.evaluate(`document.querySelector('#phases .phase[data-phase="1"] .ph-head').click()`);
+    assert.equal(await page.evaluate(`document.querySelector('#phases .phase[data-phase="1"]').classList.contains("open")`), true);
+    await page.screenshot(path.join(shots, "plan-progress-1400.png"));
+
+    // live: tick AC-3.3 on disk; the tab, the open phases and the scroll stay
+    await page.evaluate(`window.scrollTo(0, 260)`);
+    await sleep(800);
+    const y = await page.evaluate(`window.scrollY`);
+    assert.ok(y > 0);
+    fs.writeFileSync(ppl.files.progress, exportText.replace("- [ ] AC-3.3", "- [x] AC-3.3"));
+    await page.waitFor(`document.getElementById("p-acs").textContent === "${metInFile + 1} of 16 met"`);
+    assert.deepEqual(await page.evaluate(`({ open: [...document.querySelectorAll("#phases .phase.open")].map(p => p.dataset.phase), tab: document.querySelector(".ptabs a.on").dataset.ptab, y: window.scrollY })`),
+      { open: ["1", "3"], tab: "progress", y });
+
+    // the Plan tab: every H2 in order, contents, "read phase N", and the /plan route
+    await page.evaluate(`document.querySelector('.ptabs a[data-ptab="doc"]').click()`);
+    const sections = parsePlan(fs.readFileSync(ppl.files.progress, "utf8")).sections.filter(x => x.title);
+    assert.deepEqual(await page.evaluate(`[...document.querySelectorAll("#doc h2")].map(h => h.textContent)`), sections.map(x => x.title));
+    assert.equal(await page.evaluate(`document.querySelectorAll("#toc a").length`), sections.length);
+    assert.equal(await page.evaluate(`document.querySelectorAll("#toc a.sub").length`), 5);
+    await page.evaluate(`document.querySelector('#toc a[data-toc="d-capacity"]').click()`);
+    await page.waitFor(reached("d-capacity"));
+    await page.screenshot(path.join(shots, "plan-doc-1400.png"));
+    await page.evaluate(`document.querySelector('.ptabs a[data-ptab="progress"]').click()`);
+    await page.evaluate(`document.querySelector('#phases .phase[data-phase="3"] [data-read]').click()`);
+    await page.waitFor(`document.querySelector(".ptabs a.on").dataset.ptab === "doc" && location.hash.endsWith("/plan") && ${reached("d-phase-3")}`);
+    await page.evaluate(`location.hash = "#/p/inkwell/search-by-date-plan.md/plan"`);
+    await page.waitFor(`document.getElementById("p-title").textContent === "Search by date" && document.querySelector(".ptabs a.on").dataset.ptab === "doc" && document.querySelector("#doc h2")`);
+
+    // live with the file unchanged: a review-plan session on the draft plan, round 1 → 2 → ended
+    await page.evaluate(`location.hash = "#/p/harbor-app/sync-offline-plan.md"`);
+    await page.waitFor(`document.getElementById("p-title").textContent === "Offline drafts" && document.getElementById("p-status").className === "status draft"`);
+    await page.evaluate(`document.querySelector('.ptabs a[data-ptab="doc"]').click(); window.scrollTo(0, 200)`);
+    // a smooth scroll from the steps before can still land; the mark is where the page settles
+    await sleep(800);
+    const y2 = await page.evaluate(`window.scrollY`);
+    assert.ok(y2 > 0);
+    const review = (rounds, end) => writeSession(path.join(harbor, ".cross-review", "sessions"), "review-plan-20261016-009", {
+      skill: "review-plan", created: t - 300, inputs: [`PLAN_PATH: ${ppl.files.draft}\n`],
+      state: { pid: process.pid, pgid: process.pid, ...(end ? { ended_at: Math.floor(Date.now() / 1000), end_outcome: "finalized" } : {}) }, meta: end ? "REVISE" : null,
+      rounds: Array.from({ length: rounds }, (_, i) => (i === rounds - 1 && !end
+        ? { status: "running", started: t - 60, elapsed: 0, acts: [] }
+        : { status: "completed", started: t - 300 + i * 60, elapsed: 30, review: "### VERDICT\n- Status: REVISE\n- Reason: Invented.\n", acts: [] })),
+    });
+    review(1, false);
+    await page.waitFor(`document.getElementById("p-status").className === "status running" && /round 1/.test(document.getElementById("p-review").textContent)`);
+    review(2, false);
+    await page.waitFor(`/round 2/.test(document.getElementById("p-review").textContent)`);
+    review(2, true);
+    await page.waitFor(`document.getElementById("p-status").className === "status draft"`);
+    assert.deepEqual(await page.evaluate(`({ tab: document.querySelector(".ptabs a.on").dataset.ptab, y: window.scrollY })`), { tab: "doc", y: y2 });
+
+    // fallback documents
+    await page.evaluate(`location.hash = "#/p/atlas-notes/notes.md"`);
+    await page.waitFor(`document.getElementById("p-title").textContent === "Sync notes" && document.getElementById("plan").classList.contains("fallback")`);
+    const fb = await page.evaluate(`({
+      tabs: getComputedStyle(document.querySelector(".ptabs")).display, target: getComputedStyle(document.getElementById("p-target")).display,
+      note: !document.getElementById("p-note").hidden, kind: document.getElementById("p-kind").textContent,
+      first: document.querySelector("#doc").firstElementChild.tagName, intro: document.querySelector("#doc p").textContent,
+      h2: [...document.querySelectorAll("#doc h2")].map(h => h.textContent), toc: document.querySelectorAll("#toc a").length, table: !!document.querySelector("#doc table"),
+    })`);
+    assert.deepEqual(fb, { tabs: "none", target: "none", note: true, kind: "markdown", first: "P", intro: "An invented opening line.", h2: ["Options", "Open questions"], toc: 2, table: true });
+    await page.screenshot(path.join(shots, "plan-fallback-1400.png"));
+    await page.evaluate(`location.hash = "#/p/atlas-notes/untitled.md/plan"`);
+    await page.waitFor(`document.getElementById("p-title").textContent === "untitled.md"`);
+    await page.evaluate(`location.hash = "#/p/atlas-notes/notes.md"`);
+    await page.waitFor(`document.getElementById("p-title").textContent === "Sync notes"`);
+    fs.appendFileSync(notes, "\n## Plan schema\nloop-plan/v1\n\n## Phase 1: Write it down\n### Acceptance criteria\n- [ ] AC-1.1: The notes exist\n");
+    await page.waitFor(`!document.getElementById("plan").classList.contains("fallback") && getComputedStyle(document.querySelector(".ptabs")).display !== "none" && document.querySelector("#phases .phase")`);
+    // a plan that disappears, and a plan that never existed
+    fs.rmSync(notes);
+    await page.waitFor(`!document.getElementById("p-gone").hidden && document.getElementById("p-body").hidden`);
+    assert.match(await page.evaluate(`document.getElementById("p-gone").textContent`), /^This plan is no longer in \.cross-review\/plans\/\. Back to Plans$/);
+    await page.evaluate(`location.hash = "#/p/atlas-notes/never-plan.md"`);
+    await page.waitFor(`location.hash === "#/plans"`);
+
+    // no inline style but --p
+    assert.deepEqual(await page.evaluate(`[...document.querySelectorAll("[style]")].map(e => e.getAttribute("style")).filter(s => !/^--p: ?[0-9]+%;?$/.test(s))`), []);
+
+    // Settings: Plans in git and Follow plans
+    fs.writeFileSync(path.join(orchard, ".cross-review", ".gitignore"), "custom\n");
+    git(inkwell, "init", "-q");
+    fs.writeFileSync(path.join(inkwell, ".gitignore"), ".cross-review/\n");
+    await page.evaluate(`location.hash = "#/settings"`);
+    await page.waitFor(`document.getElementById("save").textContent === "Save global" && document.getElementById("f-plans").options.length === 2`);
+    await page.evaluate(`(() => {
+      for (const [id, v] of [["f-plans", "on"], ["f-showplans", "on"]]) { const s = document.getElementById(id); s.value = v; s.dispatchEvent(new Event("change", { bubbles: true })); }
+      document.getElementById("save").click();
+    })()`);
+    await page.waitFor(`/edited by hand/.test(document.getElementById("plans-warn").textContent)`);
+    const warn = await page.evaluate(`document.getElementById("plans-warn").textContent`);
+    assert.match(warn, /services\/orchard-api|orchard-api/);
+    assert.match(warn, /\.gitignore:1:\.cross-review\/.*Change it to \.cross-review\/\* and add !\.cross-review\/plans\//);
+    const globalFile = path.join(process.env.HOME, ".cross-review", "config.json");
+    const saved = JSON.parse(fs.readFileSync(globalFile, "utf8"));
+    assert.deepEqual([saved.open_plans, saved.track_plans], [true, true]);
+    assert.equal(fs.readFileSync(path.join(harbor, ".cross-review", ".gitignore"), "utf8"), GITIGNORE.track);
+    assert.equal(fs.readFileSync(path.join(orchard, ".cross-review", ".gitignore"), "utf8"), "custom\n");
+    await page.screenshot(path.join(shots, "settings-plans-1400.png"));
+    // a workspace inherits; choosing On and then Inherit again removes the key from its file
+    await page.evaluate(`location.hash = "#/settings/harbor-app"`);
+    await page.waitFor(`document.getElementById("save").textContent === "Save for harbor-app"`);
+    assert.deepEqual(await page.evaluate(`[document.getElementById("f-plans").selectedOptions[0].text, document.getElementById("f-showplans").selectedOptions[0].text]`), ["Inherit — on", "Inherit — on"]);
+    const wsFile = path.join(harbor, ".cross-review", "config.json");
+    const pick = async (id, v) => page.evaluate(`(() => { const s = document.getElementById("${id}"); s.value = "${v}"; s.dispatchEvent(new Event("change", { bubbles: true })); document.getElementById("save").click(); })()`);
+    await pick("f-showplans", "off");
+    for (let i = 0; i < 50 && !fs.existsSync(wsFile); i++) await sleep(100);
+    await page.waitFor(`!document.getElementById("save").disabled`);
+    assert.deepEqual(JSON.parse(fs.readFileSync(wsFile, "utf8")), { open_plans: false });
+    await pick("f-showplans", "");
+    for (let i = 0; i < 50 && fs.existsSync(wsFile); i++) await sleep(100);
+    assert.equal(fs.existsSync(wsFile), false, "Inherit removes the key (and the empty file)");
+    fs.rmSync(globalFile, { force: true });
+  } finally {
+    await d5.close();
+  }
+
+  // Thirty plans: pages fit a short window, Next and Previous; a tall window has no pager
+  const manyPlans = path.join(tmp, "many-plans");
+  for (let i = 0; i < 30; i++) {
+    const f = writePlan(path.join(manyPlans, "atlas"), `invented-${String(i).padStart(2, "0")}-plan.md`, PLANS.draft.replace(/^# .*$/m, `# Invented plan ${i}${i % 4 === 0 ? " with a much longer title that wraps onto a second line in the plan column of the list" : ""}`));
+    fs.utimesSync(f, t - i * 60, t - i * 60);
+  }
+  const d6 = await startDashboard({ root: manyPlans, port: 0, open: false, discoveryFile: null, catalog });
+  try {
+    const short = await browser.newPage(1400, 700);
+    await short.goto(`${d6.url}#/plans`);
+    await short.waitFor(`/ of 30/.test(document.getElementById("p-pager").textContent)`);
+    const p1 = await short.evaluate(`({ rows: document.querySelectorAll("#plan-list tr[data-go]").length, pager: document.getElementById("p-pager").textContent,
+      scrolls: document.documentElement.scrollHeight > window.innerHeight + 1, first: document.querySelector("#plan-list tr[data-go]").dataset.go })`);
+    assert.ok(p1.rows >= 3 && p1.rows < 30, JSON.stringify(p1));
+    assert.equal(p1.pager, `‹ Previous1–${p1.rows} of 30Next ›`);
+    assert.equal(p1.scrolls, false);
+    await short.evaluate(`document.querySelector('#p-pager a[data-ppage="1"]').click()`);
+    assert.match(await short.evaluate(`document.getElementById("p-pager").textContent`), new RegExp(`^‹ Previous${p1.rows + 1}–\\d+ of 30Next ›$`));
+    await short.evaluate(`document.querySelector('#p-pager a[data-ppage="-1"]').click()`);
+    assert.equal(await short.evaluate(`document.querySelector("#plan-list tr[data-go]").dataset.go`), p1.first);
+    const tall = await browser.newPage(1400, 4000);
+    await tall.goto(`${d6.url}#/plans`);
+    await tall.waitFor(`document.querySelectorAll("#plan-list tr[data-go]").length === 30`);
+    assert.equal(await tall.evaluate(`document.getElementById("p-pager").textContent`), "");
+  } finally {
+    await d6.close();
+  }
+
+  // No plans: the empty line
+  const noPlans = path.join(tmp, "no-plans");
+  fs.mkdirSync(path.join(noPlans, ".cross-review", "sessions"), { recursive: true });
+  const d7 = await startDashboard({ root: noPlans, port: 0, open: false, discoveryFile: null, catalog });
+  try {
+    const p = await browser.newPage(1400, 900);
+    await p.goto(`${d7.url}#/plans`);
+    await p.waitFor(`document.querySelector("#plan-list .empty")`);
+    assert.equal(await p.evaluate(`document.querySelector("#plan-list .empty").textContent.trim()`), "No plans yet. loop-plan writes them to .cross-review/plans/.");
+  } finally {
+    await d7.close();
+  }
 }

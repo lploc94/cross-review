@@ -10,7 +10,7 @@
 <body>
 <div class="top"><div class="wrap">
   <div class="name" data-i="logo">cross-review</div>
-  <nav><a href="#/" data-nav="sessions" data-i="list">Sessions</a><a href="#/settings" data-nav="settings" data-i="sliders">Settings</a></nav>
+  <nav><a href="#/" data-nav="sessions" data-i="list">Sessions</a><a href="#/plans" data-nav="plans" data-i="plans">Plans</a><a href="#/settings" data-nav="settings" data-i="sliders">Settings</a></nav>
   <div class="where" id="where"></div>
 </div></div>
 
@@ -66,6 +66,68 @@
   </div>
 </section>
 
+<section id="plans" class="view">
+  <h1>Plans</h1>
+  <div class="sub">Plans that loop-plan wrote into each workspace's <span class="mono">.cross-review/plans/</span>. Progress updates live as loop-implement ticks the acceptance criteria of each phase.</div>
+  <div class="filters gap-top">
+    <select id="pf-ws" aria-label="Workspace"><option value="">All workspaces</option></select>
+    <select id="pf-state" aria-label="State"><option value="">Any state</option><option value="progress">in progress</option><option value="ready">ready</option><option value="review">in review</option><option value="draft">draft</option><option value="done">done</option><option value="doc">document</option></select>
+    <input type="text" id="pf-search" placeholder="Search title, target, phases" aria-label="Search">
+  </div>
+  <table>
+    <thead><tr><th class="w-pstate">State</th><th>Plan</th><th class="w-pprog">Progress</th><th class="w-preview">Plan review</th><th class="num w-pchanged">Changed</th></tr></thead>
+    <tbody id="plan-list"></tbody>
+  </table>
+  <div class="pager" id="p-pager"></div>
+</section>
+
+<section id="plan" class="view">
+  <div class="crumbs"><a href="#/plans">Plans</a> / <span id="p-ws"></span></div>
+  <div id="p-body">
+  <h1 id="p-title"></h1>
+  <div class="meta"><span class="mono" id="p-path"></span><span id="p-git"></span><span id="p-kind"></span></div>
+  <p class="fallback-note" id="p-note" hidden>This file is not in the loop-plan format, so it is shown as a plain document: no phases or progress.</p>
+  <p class="target" id="p-target"></p>
+  <div class="ptabs"><a data-ptab="progress">Progress</a><a data-ptab="doc">Plan</a></div>
+
+  <div class="ppane" id="pane-progress">
+    <div id="p-status" class="status"></div>
+    <div class="steps" id="p-steps"></div>
+    <div class="grid">
+      <div id="phases"></div>
+      <aside>
+        <section>
+          <h3>Done when</h3>
+          <div class="done-when" id="p-done"></div>
+        </section>
+        <section class="facts">
+          <h3>Plan</h3>
+          <div><span>Workspace</span><span id="p-wsname"></span></div>
+          <div><span>Plan review</span><span id="p-review"></span></div>
+          <div><span>Phases</span><span id="p-phases"></span></div>
+          <div><span>Criteria</span><span id="p-acs"></span></div>
+          <div><span>Checkpoints</span><span id="p-cps"></span></div>
+          <div><span>Git</span><span id="p-git2"></span></div>
+          <div><span>Changed</span><span id="p-changed"></span></div>
+        </section>
+        <section>
+          <h3>Progress log</h3>
+          <div class="plog" id="plog"></div>
+        </section>
+      </aside>
+    </div>
+  </div>
+
+  <div class="ppane" id="pane-doc">
+    <div class="grid">
+      <article class="doc" id="doc"></article>
+      <aside><section><h3>Contents</h3><nav class="toc" id="toc"></nav></section></aside>
+    </div>
+  </div>
+  </div>
+  <p class="notfound" id="p-gone" hidden>This plan is no longer in .cross-review/plans/. <a href="#/plans">Back to Plans</a></p>
+</section>
+
 <section id="settings" class="view">
   <h1>Settings</h1>
   <div class="scope">
@@ -82,7 +144,10 @@
     <div>Model</div><div><select id="f-model-set" aria-label="Model"></select> <input type="text" id="f-model-other" class="other" placeholder="model name" aria-label="Model name"> <a id="refresh" data-i="refresh">refresh list</a><div class="help" id="model-help"></div></div>
     <div>Effort</div><div><select id="f-effort-set" aria-label="Effort"></select><div class="help">Only the levels the model supports.</div></div>
     <div>Follow reviews</div><div><select id="f-follow" aria-label="Follow reviews"></select><div class="help">When on, every review that starts opens here in your browser so you can watch it. Starts the dashboard if it is not running; it closes itself after 30 minutes with no page open.</div></div>
+    <div>Follow plans</div><div><select id="f-showplans" aria-label="Follow plans"></select><div class="help">When on, each plan loop-plan finishes opens here in your browser, on its Plan tab, so you can read it before you approve it. Starts the dashboard the same way as Follow reviews.</div></div>
+    <div>Plans in git</div><div><select id="f-plans" aria-label="Plans in git"></select><div class="help">Plans live in <span class="mono">.cross-review/plans/</span>. On adds an exception to <span class="mono">.cross-review/.gitignore</span> so loop-implement commits each plan with its phases; sessions and settings stay out of git. Turning it off later does not remove plans already committed: run <span class="mono">git rm --cached</span> on them.</div></div>
   </div>
+  <p class="warn-box" id="plans-warn"></p>
 
   <h2>Per skill</h2>
   <table>
