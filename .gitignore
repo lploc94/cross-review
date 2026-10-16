@@ -1,8 +1,9 @@
 # Claude Code local settings (per-machine, should not be shared)
 .claude/settings.local.json
 
-# Review session artifacts
-.cross-review/
+# Review session artifacts; .cross-review/.gitignore decides about plans (Plans in git)
+.cross-review/*
+!.cross-review/plans/
 
 # Node
 node_modules/
