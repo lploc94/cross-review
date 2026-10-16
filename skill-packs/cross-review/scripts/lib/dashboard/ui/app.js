@@ -331,7 +331,11 @@ function messageHtml(d, x) {
 export function roundGroups(thread) {
   const groups = [];
   for (const x of thread) {
-    if (x.kind === "ask" || x.kind === "reply" || !groups.length) groups.push({ round: null, items: [] });
+    const prev = groups[groups.length - 1];
+    // a round opens with the ask or the agent's reply; without them (a session that kept no
+    // inputs) the reviewer's next round opens it
+    const nextRound = prev && prev.round != null && x.who === "rv" && x.round != null && x.round !== prev.round;
+    if (x.kind === "ask" || x.kind === "reply" || !prev || nextRound) groups.push({ round: null, items: [] });
     const g = groups[groups.length - 1];
     if (g.round === null && x.round != null && x.who === "rv") g.round = x.round;
     g.items.unshift(x);

@@ -440,12 +440,26 @@ try {
       { status: "completed", started: manyNow - 300, elapsed: 1, review: "### VERDICT\n- Status: APPROVE\n- Reason: Invented approval.\n" },
     ],
   });
+  // A session without stored inputs (no ask, no replies): each reviewer round still gets its
+  // own label, newest on top
+  writeSession(path.join(blankRoot, "quill", ".cross-review", "sessions"), "review-impl-20261015-502", {
+    skill: "review-impl", mode: "branch", created: manyNow - 900, meta: "APPROVE",
+    state: { caller: { name: "  ", title: "   ", version: "1.0.0" } },
+    rounds: [
+      { status: "completed", started: manyNow - 900, elapsed: 1, review: "### ISSUE-1: Invented defect\n- Category: bug\n- Severity: low\n- Location: `src/a.js:1`\n- Problem: Invented.\n- Suggested fix: Invented.\n\n### VERDICT\n- Status: REVISE\n- Reason: Invented.\n" },
+      { status: "completed", started: manyNow - 800, elapsed: 1, review: "### ISSUE-2: Another invented defect\n- Category: bug\n- Severity: low\n- Location: `src/b.js:2`\n- Problem: Invented.\n- Suggested fix: Invented.\n\n### VERDICT\n- Status: REVISE\n- Reason: Invented.\n" },
+      { status: "completed", started: manyNow - 700, elapsed: 1, review: "### VERDICT\n- Status: APPROVE\n- Reason: Invented approval.\n" },
+    ],
+  });
   const d4 = await startDashboard({ root: blankRoot, port: 0, open: false, discoveryFile: null, catalog });
   const blank = await browser.newPage(1400, 900);
   try {
     await blank.goto(`${d4.url}#/s/quill/review-impl-20261015-500`);
     await blank.waitFor(`document.querySelectorAll("#thread .m").length > 0 && document.querySelector("#thread .mark.ag")`);
     assert.equal(await blank.evaluate(`document.querySelector("#thread .mark.ag img").alt`), "AG");
+    await blank.evaluate(`location.hash = "#/s/quill/review-impl-20261015-502"`);
+    await blank.waitFor(`document.querySelectorAll("#thread .m").length === 3`);
+    assert.deepEqual(await blank.evaluate(`[...document.querySelectorAll("#thread .round-label")].map(e => e.textContent)`), ["ROUND 3", "ROUND 2", "ROUND 1"]);
     await blank.evaluate(`location.hash = "#/s/__proto__/review-impl-20261015-501"`);
     await blank.waitFor(`document.querySelector("#thread .mark.ag img")?.alt === "I"`);
     await blank.evaluate(`location.hash = "#/settings"`);
