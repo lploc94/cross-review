@@ -34,6 +34,7 @@ node test-default-timeout.js && node test-stall-recovery.js && node test-timeout
 H=$(mktemp -d) && HOME="$H" CODEX_HOME="$H/.codex" node bin/cross-review.js && node tests/install-check.mjs "$H"
 node skill-packs/cross-review/scripts/review-runner.js version     # runner version
 node tests/dashboard-ui.mjs                                         # dashboard in headless Chrome (CHROME=<path>)
+node docs/screenshots.mjs                                           # README pictures (docs/images/) from the invented fixture
 node skill-packs/cross-review/scripts/review-runner.js dashboard --root <temp fixture dir>   # dashboard by hand
 ```
 

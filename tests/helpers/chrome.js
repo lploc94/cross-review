@@ -83,8 +83,9 @@ export async function launchChrome(bin, userDataDir) {
           await new Promise(r => setTimeout(r, 100));
         }
       },
-      async screenshot(file) {
-        const { data } = await call("Page.captureScreenshot", { format: "png", captureBeyondViewport: true });
+      /** The whole page, or with fullPage false only what the window shows. */
+      async screenshot(file, { fullPage = true } = {}) {
+        const { data } = await call("Page.captureScreenshot", { format: "png", captureBeyondViewport: fullPage });
         fs.writeFileSync(file, Buffer.from(data, "base64"));
       },
     };

@@ -2,6 +2,8 @@
 
 Cross-model review skills for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and [OpenAI Codex CLI](https://github.com/openai/codex): the agent you work with orchestrates, and a second model reviews its plans, code and reasoning. The reviewer today is the Codex CLI; the runner selects reviewers through one adapter per CLI (`scripts/lib/reviewers/`), so others can be added.
 
+![A review session in the dashboard: the reviewer's rounds, the agent's replies, the issue ledger](docs/images/session.png)
+
 Seven skills (Claude Code: `/name`, Codex: `$name`):
 - `loop-plan` — write a phased, code-grounded implementation plan for large, multi-feature work
 - `loop-implement` — execute an approved loop plan phase by phase with TDD, checkpoint reviews, and commits
@@ -70,6 +72,12 @@ Name a model or effort when you ask for a review (or in a plan's review checkpoi
 cross-review dashboard                             # the command the installer writes to ~/.local/bin
 npx github:lploc94/cross-review dashboard          # without installing, and on Windows
 ```
+
+![Sessions: reviews in progress and the history](docs/images/sessions.png)
+
+| Plans: a plan's progress | Settings |
+| --- | --- |
+| ![A plan's phases, criteria and progress log](docs/images/plan.png) | ![Reviewer, model and effort per level and per skill](docs/images/settings.png) |
 
 Starts a local web page and opens it in your browser. It lists the review sessions and plans in the folder you start it from and up to 3 levels below. Options: `--root <dir>` scans another folder, `--port <n>` picks the port (default: a random free one), `--no-open` only prints the link, `--idle-exit <s>` stops the server after that many seconds with no page open.
 
