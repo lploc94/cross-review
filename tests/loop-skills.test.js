@@ -14,8 +14,10 @@ const PLAN_HEADINGS = [
   "## Review checkpoints", "## Plan Review", "## Phase 1:", "## Completion Criteria", "## Progress Log",
 ];
 
+const RUNNER = "/invented/home/.claude/skills/cross-review/scripts/review-runner.js";
+
 function render(skill, client) {
-  return renderSkillTemplate(PACK, skill, { client });
+  return renderSkillTemplate(PACK, skill, { client, runnerPath: RUNNER });
 }
 
 function lineCount(text) {
@@ -26,6 +28,33 @@ test("both clients are known and an unknown client is rejected", () => {
   assert.deepEqual(Object.keys(CLIENTS).sort(), ["claude", "codex"]);
   assert.throws(() => render("loop-plan", "cursor"), /unknown client/i);
   assert.throws(() => renderSkillTemplate(PACK, "loop-plan", {}), /\{\{CLIENT_/);
+  for (const skill of ["loop-plan", "loop-implement"]) {
+    assert.throws(() => renderSkillTemplate(PACK, skill, { client: "claude" }), /\{\{RUNNER_PATH/, `${skill} needs the runner path`);
+  }
+});
+
+test("loop-plan writes plans where the runner's plans command says and opens them when finished", () => {
+  for (const client of Object.keys(CLIENTS)) {
+    const text = render("loop-plan", client);
+    assert.ok(text.includes(`node "${RUNNER}" plans --working-dir "$PWD"`), `${client}: plans command`);
+    assert.ok(/plans --working-dir "\$PWD" --finished/.test(text), `${client}: --finished at handoff`);
+    assert.ok(/`dir`/.test(text) && /\.cross-review\/plans\//.test(text), `${client}: writes into the printed dir`);
+    assert.ok(!/plan\.md` in the repository unless/.test(text), `${client}: no longer "in the repository"`);
+    assert.ok(/CONFIG_INVALID/.test(text) && /`tracked`/.test(text) && /`warning`/.test(text) && /`dashboard_url`/.test(text), `${client}: errors, git state and the dashboard link`);
+  }
+});
+
+test("loop-implement finds plans with the plans command, ticks criteria, and stages the plan only when git keeps it", () => {
+  for (const client of Object.keys(CLIENTS)) {
+    const text = render("loop-implement", client);
+    const admission = text.slice(text.indexOf("## Admission"), text.indexOf("## Per-phase loop"));
+    assert.ok(admission.includes(`node "${RUNNER}" plans --working-dir "$PWD"`), `${client}: admission runs plans`);
+    assert.ok(/format: "loop-plan"/.test(admission) && /`markdown`/.test(admission), `${client}: only loop-plan plans run`);
+    assert.ok(/`- \[x\]`/.test(text), `${client}: ticks met criteria`);
+    assert.ok((text.match(/git check-ignore -q/g) || []).length >= 1 && /exits 1/.test(text) && /exits 0/.test(text), `${client}: staging rule`);
+    const final = text.slice(text.indexOf("## Finalization"), text.indexOf("## Stop conditions"));
+    assert.ok(/git check-ignore/.test(final), `${client}: the same rule at finalization`);
+  }
 });
 
 test("loop-plan template lists the plan headings in order", () => {

@@ -27,7 +27,7 @@ Only when the plan sets or depends on a limit:
 
 ## Plan contract
 
-Write a descriptively named `<kebab-case-summary>-plan.md` in the repository unless the user specifies another descriptive path; the name identifies the work (for example `migrate-auth-tokens-plan.md`), never a generic `plan.md`.
+Run `node "{{RUNNER_PATH}}" plans --working-dir "$PWD"`: it creates `.cross-review/plans/`, keeps its `.gitignore` in step with the user's "Plans in git" setting, and prints JSON. Write a descriptively named `<kebab-case-summary>-plan.md` into the printed `dir` unless the user specifies another descriptive path; if the command fails (for example `CONFIG_INVALID`), tell the user instead of choosing another place. The name identifies the work (for example `migrate-auth-tokens-plan.md`), never a generic `plan.md`.
 
 Use this exact top-level order:
 
@@ -100,7 +100,7 @@ Every phase must describe code evidence, the observable contract, production obl
 Stop briefly three times; the goal is that the user understands, not that they read a lot:
 1. After discovery: restate the target, what is out of scope, and the assumptions; invite correction.
 2. After spikes, before writing phases: the main design decisions, especially patch versus standard and breaking changes.
-3. Handoff: the implementation story in plain words, the review checkpoints, remaining risks, the exact plan path, phase count, and review status. Ask whether to run `{{CLIENT_SKILL}}review-plan` or whether the user approves directly, and invite correction before `{{CLIENT_SKILL}}loop-implement` starts.
+3. Handoff: first run `node "{{RUNNER_PATH}}" plans --working-dir "$PWD" --finished <plan file>`. Then give the implementation story in plain words, the review checkpoints, remaining risks, the exact plan path and whether git keeps it (that plan's `tracked`; repeat any `warning` word for word), the `dashboard_url` when there is one (a `dashboard_error` is one line, then go on), phase count, and review status. Ask whether to run `{{CLIENT_SKILL}}review-plan` or whether the user approves directly, and invite correction before `{{CLIENT_SKILL}}loop-implement` starts.
 
 Present each decision on its own, in the user's language, explaining any term you must use:
 1. Context: what this part of the system does today, in 1–3 sentences.

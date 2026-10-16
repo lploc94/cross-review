@@ -9,7 +9,7 @@ Execute the approved `loop-plan/v1` plan from the next incomplete phase through 
 
 ## Admission
 
-1. Locate the user-specified descriptively named `*-plan.md`, or a unique repository plan with `Plan schema: loop-plan/v1` and an incomplete phase. Do not rely on a generic `plan.md`; if only that exists, ask the user to rename it. With no plan, direct the user to `{{CLIENT_SKILL}}loop-plan`.
+1. Locate the user-specified descriptively named `*-plan.md`; otherwise run `node "{{RUNNER_PATH}}" plans --working-dir "$PWD"` and take the one plan it lists with `format: "loop-plan"` and an incomplete phase. Never run a `markdown` file from that list, and do not search the rest of the repository. Do not rely on a generic `plan.md`; if only that exists, ask the user to rename it. With no plan, direct the user to `{{CLIENT_SKILL}}loop-plan`.
 2. `Plan Review` must read `APPROVE` with its source: `review-plan <session id>` or `user <date>`. `pending`, `REVISE`, or an approval without a source is not approval; offer `{{CLIENT_SKILL}}review-plan`. If the plan was materially edited after approval, other than progress lines and dated user-approved changes, ask.
 3. Read {{CLIENT_INSTRUCTIONS}}/repository instructions; inspect `git status`, diffs, and recent commits. Preserve unrelated user changes; never reset or revert them. Start at the first incomplete phase whose dependencies are complete.
 
@@ -22,7 +22,7 @@ For each phase, in order:
 3. Implement the complete production obligations through the real integration path (errors, state transitions, persistence, concurrency, invariants the phase names), minimal and project-consistent. Plan limits come with their stated soft handling.
 4. Run each AC's narrow command, then the phase gates. Smoke-test only where the plan asks.
 5. Inspect the staged diff once: phase-owned files only, no secrets, no leftovers of renamed or removed names.
-6. Commit once with the planned message, together with the phase's progress line in the plan's `Progress Log`: result, AC evidence, and any deviation from the plan, plus a `Discovery:` line with evidence for each surprise that shaped the work. Never amend, force, skip hooks, or create an empty commit.
+6. Commit once with the planned message. In the plan, tick `- [x]` each of the phase's acceptance criteria that is met (an unmet one stays `- [ ]`, its reason in the progress line) and write the phase's progress line in `Progress Log`: result, AC evidence, and any deviation from the plan, plus a `Discovery:` line with evidence for each surprise that shaped the work. Stage the plan only when `git check-ignore -q <plan>` exits 1; when it exits 0, git ignores the plan: update it in place, do not stage it, and do not treat that as an error. Never amend, force, skip hooks, or create an empty commit.
 7. If the plan lists this phase as a review checkpoint, run `{{CLIENT_SKILL}}review-impl` with the model the plan names, if any. The review skill governs how findings are handled. Then report the phase and move on.
 8. If the reviewer cannot run (not installed, auth, quota, repeated errors), self-review the checkpoint's diff against the review-impl criteria (plan/target, deviations, defects, project rules), fix what you find, record `self-review (reviewer unavailable: <reason>)` in the progress line, never as a review approval, and continue. At the next checkpoint, try the reviewer again on the whole diff since the last real review; while it still fails, keep self-reviewing the same way.
 
@@ -43,7 +43,7 @@ Plan changes:
 3. Self-audit integration over the cumulative diff and commit history: cross-phase interfaces and state boundaries.
 4. Run the plan's final review checkpoint with `{{CLIENT_SKILL}}review-impl` on the cumulative diff; if the reviewer cannot run, self-review as in step 8 of the per-phase loop.
 5. Fix defects from steps 3–4 with a narrow regression test first, then the affected phase gates. Each fix still meets the plan's criteria and changes only what the defect needs; check what depends on the changed code and other places with the same pattern, since fixes are the main source of new bugs; rerun the full suite and the end-to-end scenario only once the fixes are in. Ask before any material scope the audit uncovers; do not hide it in a repair commit.
-6. Update `Completion Criteria` in the final commit. Verify the worktree is clean apart from recorded unrelated changes.
+6. Update `Completion Criteria` in the final commit, staging the plan by the same `git check-ignore` rule. Verify the worktree is clean apart from recorded unrelated changes.
 
 ## Stop conditions and reporting
 

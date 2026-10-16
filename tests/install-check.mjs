@@ -86,7 +86,7 @@ for (const [root, client] of [[claudeRoot, "claude"], [agentsRoot, "codex"]]) {
     const fm = text.match(/^---\n([\s\S]*?)\n---\n/);
     check(fm && new RegExp(`^name: ${skill}$`, "m").test(fm[1]) && /^description: \S/m.test(fm[1]), `${client}: ${skill} front matter lacks name/description`);
     check(!text.includes("{{"), `${client}: ${skill} has an unrendered placeholder`);
-    if (RUNNER_SKILLS.includes(skill)) check(text.includes(`node "${runner}"`), `${client}: ${skill} does not point at the installed runner`);
+    check(text.includes(`node "${runner}"`), `${client}: ${skill} does not point at the installed runner`);
   }
   for (const skill of [...SKILLS, "cross-review"]) {
     for (const f of walk(path.join(root, skill))) {
@@ -110,6 +110,20 @@ for (const skill of PLAIN_SKILLS) {
   check(!/(^|[\s`(])\/(loop|review)-/.test(text), `codex: ${skill} uses slash commands`);
   check(text.includes("$review-") || text.includes("$loop-"), `codex: ${skill} lacks $skill references`);
   check(fs.existsSync(path.join(agentsRoot, skill, "agents", "openai.yaml")), `codex: ${skill} lacks agents/openai.yaml`);
+}
+
+// The loop skills' plans command runs from the install (HOME is the install's home, never the real one)
+{
+  const ws = fs.mkdtempSync(path.join(home, "plans-check-"));
+  try {
+    const out = JSON.parse(execFileSync(process.execPath, [runner, "plans", "--working-dir", ws], { encoding: "utf8", env: { ...process.env, HOME: home } }));
+    check(out.dir === path.join(fs.realpathSync(ws), ".cross-review", "plans") && fs.existsSync(out.dir), `plans: unexpected dir ${out.dir}`);
+    check(Array.isArray(out.plans), "plans: no plans list");
+  } catch (e) {
+    failures.push(`plans: the installed runner failed: ${e.message}`);
+  } finally {
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
 }
 
 // The earlier pack's copies are gone from Codex's deprecated skills root

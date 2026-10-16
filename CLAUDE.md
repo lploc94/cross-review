@@ -5,7 +5,7 @@ This repository provides a single-command installer (`npx github:lploc94/cross-r
 ## Project Overview
 
 `cross-review` provides six skills: four review skills, where a second model (the reviewer; Codex CLI today) reviews the orchestrator's work, and two plain planning/execution skills (Claude Code: `/name`, Codex: `$name`):
-- `loop-plan` — write a phased, code-grounded implementation plan (`loop-plan/v1`)
+- `loop-plan` — write a phased, code-grounded implementation plan (`loop-plan/v1`) into `<workspace>/.cross-review/plans/`
 - `loop-implement` — execute an approved loop plan phase by phase with TDD, checkpoint reviews, and commits
 - `review-plan` — debate plans before implementation
 - `review-impl` — review uncommitted changes, unpushed commits, or a branch before commit/push/merge
@@ -46,7 +46,7 @@ Never test the installer against the real HOME; use a temporary `HOME` and `CODE
 `bin/cross-review.js` with `bin/lib/render-skill.js`:
 1. Runtime guard: Node.js >= 22; `--auto` adds a block to `~/.claude/CLAUDE.md` that runs review-plan/review-impl automatically after any plan/implementation; `-full` only prints a notice
 2. Stage the shared runtime (runner, `lib/`, `mcp-server.js`, `package.json`, lock) and run `npm ci --omit=dev` in it
-3. Render every SKILL.md template. Review skills get `{{PROTOCOL_CORE}}`, `{{PROTOCOL_VARIANT}}` (from `shared/protocol/`) and `{{RUNNER_PATH}}`; loop skills get `{{CLIENT_*}}` values per client. Any leftover `{{` fails the install
+3. Render every SKILL.md template. Review skills get `{{PROTOCOL_CORE}}`, `{{PROTOCOL_VARIANT}}` (from `shared/protocol/`) and `{{RUNNER_PATH}}`; loop skills get `{{CLIENT_*}}` values per client and `{{RUNNER_PATH}}` (for the `plans` command). Any leftover `{{` fails the install
 4. Verify the runner (`node review-runner.js version`)
 5. Atomic swap in both skill roots with full rollback; delete the old `codex-review` pack (runtime and skills, ownership checked) and this pack's copies in `$CODEX_HOME/skills`
 6. Remove the old `codex-review` MCP registration when it points at that pack's runtime, then register MCP server `cross-review` (Claude: `claude mcp remove` + `add -s user`, `REVIEW_WAIT_DEFAULT_S=270`; Codex: `codex mcp add`, `REVIEW_WAIT_DEFAULT_S=270` and `tool_timeout_sec = 300`). Skipped with a warning when `npm ci` failed
@@ -61,7 +61,7 @@ skill-packs/cross-review/
 ├── scripts/
 │   ├── review-runner.js               ← runner CLI (stdlib only)
 │   ├── mcp-server.js                 ← MCP stdio server: review_begin/wait/reply/end
-│   └── lib/                          ← parse.js, review-core.js (the four verbs), config.js (review settings), reviewers/ (one adapter per reviewer CLI)
+│   └── lib/                          ← parse.js, review-core.js (the four verbs), config.js (review and plan settings), plans.js (plans and the `plans` command), reviewers/ (one adapter per reviewer CLI)
 │       └── dashboard/                ← server.js (node:http, SSE), scan.js, model.js, follow.js, avatars.js, discovery.js, ui/ (static page, no build)
 └── skills/
     ├── review-plan/, review-impl/, review-think/, review-pr/
@@ -96,11 +96,15 @@ Besides the prompts and outputs, a session keeps what the dashboard needs to ret
 
 ### Review settings
 
-`lib/config.js` reads `~/.cross-review/config.json` (global) and `<working_dir>/.cross-review/config.json` (workspace): `{reviewer?, model?, effort?, open_dashboard?, skills?: {<skill>: {model?, effort?}}}`; unknown keys are errors. Each key resolves on its own, first match wins: requested (`review_begin`/`--model`/`--effort`) · `workspace:<skill>` · `workspace` · `global:<skill>` · `global` · default (reviewer `codex`, the reviewer's own model, effort `high`). `open_dashboard` reads workspace then global, default `false`. A broken file fails `begin` with `CONFIG_INVALID` before any session is created. With `open_dashboard: true`, `begin` opens the session in the dashboard (`lib/dashboard/follow.js`: reuse the running one from `~/.cross-review/dashboard.json`, else start one with `--idle-exit 1800`) and returns `dashboard_url` or `dashboard_error`; it never fails because of it.
+`lib/config.js` reads `~/.cross-review/config.json` (global) and `<working_dir>/.cross-review/config.json` (workspace): `{reviewer?, model?, effort?, open_dashboard?, skills?: {<skill>: {model?, effort?}}}`; unknown keys are errors. Each key resolves on its own, first match wins: requested (`review_begin`/`--model`/`--effort`) · `workspace:<skill>` · `workspace` · `global:<skill>` · `global` · default (reviewer `codex`, the reviewer's own model, effort `high`). `open_dashboard` reads workspace then global, default `false`. A broken file fails `begin` with `CONFIG_INVALID` before any session is created. Two plan settings sit in the same files, global and workspace only (`resolvePlanSettings`; workspace, then global, default `false`): `track_plans` (Plans in git) and `open_plans` (Follow plans). With `open_dashboard: true`, `begin` opens the session in the dashboard (`lib/dashboard/follow.js`: reuse the running one from `~/.cross-review/dashboard.json`, else start one with `--idle-exit 1800`) and returns `dashboard_url` or `dashboard_error`; it never fails because of it.
+
+### Plans
+
+`lib/plans.js` owns plans: `loop-plan` writes `<workspace>/.cross-review/plans/<name>-plan.md`, and the runner's `plans` command creates that folder, keeps `.cross-review/.gitignore` in step with `track_plans` (`*` or `*` + `!plans/` + `!plans/**`; a hand-edited file is left alone and reported as `custom`), and prints each plan's summary. A `.md` file with `## Plan schema` `loop-plan/v1` is a plan (`format: "loop-plan"`: phases, criteria ticked `- [x]` by `loop-implement`, Plan Review, Progress Log); any other `.md` file there is `format: "markdown"`, shown as a plain document. Whether git keeps a plan comes from `git check-ignore` (never the setting); a root `.gitignore` rule that still ignores new plans is reported as `blocked_by` with a `warning`. A phase's commit SHA is the one commit in the last 2000 whose subject is the phase's planned message. `loop-implement` stages the plan only when `git check-ignore -q` exits 1. `--finished <file>` with `open_plans` on opens the plan's Plan tab through `lib/dashboard/follow.js`.
 
 ### Dashboard
 
-`review-runner.js dashboard` (or `npx github:lploc94/cross-review dashboard`) serves a local page on `127.0.0.1` (random port 20000–30000, per-run token in cookie or Bearer, Host check, Origin check on writes). It scans `--root` (default cwd) and 3 levels below for `.cross-review/sessions/` and only reads sessions; it writes `~/.cross-review/dashboard.json` (port, token, pid), the settings files, and avatars in `~/.cross-review/avatars/`. Routes are hash routes (`#/`, `#/s/<ws>/<session>[/ISSUE-N]`, `#/settings[/<ws>]`); updates arrive over SSE (`/api/stream?view=list|session`). The model list comes from the reviewer adapter (`codex debug models`, then `--bundled`, else none). The UI follows `mockups/dashboard.html`: system fonts only, Lucide icons (ISC, `ui/LICENSE-lucide.txt`), no brand logos.
+`review-runner.js dashboard` (or `npx github:lploc94/cross-review dashboard`) serves a local page on `127.0.0.1` (random port 20000–30000, per-run token in cookie or Bearer, Host check, Origin check on writes). It scans `--root` (default cwd) and 3 levels below for `.cross-review/sessions/` or `.cross-review/plans/` and only reads sessions and plans (git commands it runs are read-only); it writes `~/.cross-review/dashboard.json` (port, token, pid), the settings files, `.cross-review/.gitignore` when Plans in git is saved, and avatars in `~/.cross-review/avatars/`. Routes are hash routes (`#/`, `#/s/<ws>/<session>[/ISSUE-N]`, `#/plans`, `#/p/<ws>/<file>[/plan]`, `#/settings[/<ws>]`); updates arrive over SSE (`/api/stream?view=list|session`). The model list comes from the reviewer adapter (`codex debug models`, then `--bundled`, else none). The UI follows `mockups/dashboard.html`: system fonts only, Lucide icons (ISC, `ui/LICENSE-lucide.txt`), no brand logos.
 
 ### Key Design Decisions
 
@@ -125,6 +129,7 @@ Besides the prompts and outputs, a session keeps what the dashboard needs to ret
 | `end <session_dir> [--outcome consensus\|stalemate]` | (none) | JSON: `{ status: "ended", finalized, verdict }` |
 | `version` | (none) | Plain text: `15` |
 | `dashboard [--root D] [--port N] [--no-open] [--idle-exit S]` | (none) | Serves the dashboard; prints its link |
+| `plans --working-dir D [--finished F]` | (none) | JSON: `{ dir, track_plans, gitignore, git, warning?, plans, dashboard_url?, dashboard_error? }` |
 | `init --skill-name X --working-dir Y [--reviewer R]` | (none) | Plain text: `SESSION:/path` |
 | `start <session_dir> [--model] [--effort] [--timeout] [--sandbox]` | Prompt on stdin | JSON: `{ status, session_dir, round }` |
 | `resume <session_dir> [--model] [--effort] [--timeout]` | Prompt on stdin | JSON: `{ status, session_dir, round, thread_id }` |
@@ -154,6 +159,11 @@ Besides the prompts and outputs, a session keeps what the dashboard needs to ret
 - `skill-packs/` is the single source of truth for templates, runtime and prompts.
 
 ## Breaking Changes
+
+### pack 10.2.0: plans in `.cross-review/plans/`
+- **Plans move**: `loop-plan` writes new plans to `<workspace>/.cross-review/plans/` (it runs `plans --working-dir` first); `loop-implement` finds them there with the same command and never runs a plain markdown file. Plans already elsewhere stay where they are and are not shown on the dashboard; give their path to `loop-implement` to keep using them.
+- **Not committed by default**: the folder is git-ignored like the rest of `.cross-review/`; `loop-implement` stages the plan only when git does not ignore it, and ticks the criteria it meets (`- [x]`) in each phase commit. `track_plans: true` (Plans in git) adds the exception.
+- **Settings** `track_plans` and `open_plans`; **new command** `plans`; the dashboard scans folders that have only `.cross-review/plans/`; `manifest.json` 10.2.0.
 
 ### v15 / pack 10.1.0: dashboard and review settings
 - **Settings**: `begin` reads `~/.cross-review/config.json` and `<working_dir>/.cross-review/config.json` for reviewer, model and effort when they are not passed; a broken file fails with `CONFIG_INVALID`. The protocol rule is now "Pass `model` or `effort` only when the user names one or the plan's review checkpoint does; otherwise omit them".

@@ -254,7 +254,7 @@ try {
     for (const [target, client] of [[claudeTarget, 'claude'], [agentsTarget, 'codex']]) {
       const skillDestDir = path.join(target.staging, skill);
       fs.mkdirSync(skillDestDir, { recursive: true });
-      const rendered = renderSkillTemplate(skillPackDir, skill, isRunnerSkill ? renderOpts : { client });
+      const rendered = renderSkillTemplate(skillPackDir, skill, isRunnerSkill ? renderOpts : { ...renderOpts, client });
       fs.writeFileSync(path.join(skillDestDir, 'SKILL.md'), rendered, 'utf8');
     }
     if (isRunnerSkill) {
