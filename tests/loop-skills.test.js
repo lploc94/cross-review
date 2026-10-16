@@ -38,6 +38,7 @@ test("loop-plan writes plans where the runner's plans command says and opens the
     const text = render("loop-plan", client);
     assert.ok(text.includes(`node "${RUNNER}" plans --working-dir "$PWD"`), `${client}: plans command`);
     assert.ok(/plans --working-dir "\$PWD" --finished/.test(text), `${client}: --finished at handoff`);
+    assert.ok(/for a plan the user put elsewhere, run `git check-ignore -q <plan>` instead/.test(text), `${client}: a plan outside dir skips --finished`);
     assert.ok(/`dir`/.test(text) && /\.cross-review\/plans\//.test(text), `${client}: writes into the printed dir`);
     assert.ok(!/plan\.md` in the repository unless/.test(text), `${client}: no longer "in the repository"`);
     assert.ok(/CONFIG_INVALID/.test(text) && /`tracked`/.test(text) && /`warning`/.test(text) && /`dashboard_url`/.test(text), `${client}: errors, git state and the dashboard link`);

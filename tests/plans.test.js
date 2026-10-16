@@ -406,3 +406,50 @@ test("CLI plans: errors", () => {
     assert.equal("dashboard_url" in out || "dashboard_error" in out, false);
   }
 });
+
+// ---------- review-impl-20261016-002 round 1 ----------
+
+test("a symlinked plans folder lists nothing, and the CLI refuses it", () => {
+  const outside = dir("outside");
+  fs.writeFileSync(path.join(outside, "outside-plan.md"), EXPORT);
+  const ws = dir("linked-plans");
+  fs.mkdirSync(path.join(ws, ".cross-review"));
+  fs.symlinkSync(outside, plansDir(ws));
+  assert.deepEqual(listPlans(ws), []);
+  for (const args of [[], ["--finished", "outside-plan.md"]]) {
+    const r = runPlans("--working-dir", ws, ...args);
+    assert.equal(r.status, 1, args.join(" "));
+    assert.equal(r.stdout, "");
+    assert.match(r.stderr, /plans is not a folder/);
+  }
+});
+
+test("fences close only on a bare delimiter: an opening fence inside an example stays inside", () => {
+  const text = [
+    "# Demo", "## Plan schema", "loop-plan/v1", "## Design",
+    "````markdown", "```javascript", "## Phase 9: Example only", "### Acceptance criteria", "- [x] AC-9.1: Example", "```", "````",
+    "```js", "```not-a-close", "## Phase 8: Also inside", "```  ",
+    "## Phase 1: Actual", "### Acceptance criteria", "- [ ] AC-1.1: Actual",
+  ].join("\n");
+  const parsed = parsePlan(text);
+  assert.deepEqual(parsed.phases.map(p => p.name), ["Actual"]);
+  assert.equal(planState(parsed), "draft");
+  assert.equal(isLoopPlan("```\n```js\n## Plan schema\nloop-plan/v1\n```\n"), false);
+});
+
+test("a phase's commit message: the first code element in order; a fence is literal text", () => {
+  const phase = commit => parsePlan(["# Demo", "## Phase 1: A", "### Acceptance criteria", "- [x] AC-1.1: done", "### Commit", ...commit].join("\n")).phases[0];
+  const fenced = phase(["```text", "fix: handle `null` input", "```"]);
+  assert.equal(fenced.commit.message, "fix: handle `null` input");
+  assert.equal(fillCommits({ phases: [fenced] }, { commits: new Map([["fix: handle `null` input", "abc1234"]]) }).phases[0].commit.sha, "abc1234");
+  assert.equal(phase(["`feat(a): one`", "```", "feat(a): two", "```"]).commit.message, "feat(a): one");
+  assert.equal(phase(["Then:", "```", "feat(a): two", "```", "or `feat(a): three`"]).commit.message, "feat(a): two");
+});
+
+test("headings keep a # that is part of the text; a closing run after a space is dropped", () => {
+  const parsed = parsePlan("# Migrate to C#\n\n## Plan schema ##\nloop-plan/v1\n\n## Phase 1: Port the F# parser\n### Acceptance criteria #\n- [ ] AC-1.1: x\n");
+  assert.equal(parsed.title, "Migrate to C#");
+  assert.equal(parsed.schema, "loop-plan/v1");
+  assert.equal(parsed.phases[0].name, "Port the F# parser");
+  assert.equal(parsed.phases[0].acs.length, 1);
+});

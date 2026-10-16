@@ -31,10 +31,12 @@ export function isPlanFileName(name) {
     && Buffer.byteLength(name, "utf8") <= NAME_MAX_BYTES;
 }
 
-/** The plan files of `ws`: regular files (not symlinks) with a plan file name, sorted. */
+/** The plan files of `ws`: regular files (not symlinks) with a plan file name, sorted. A plans
+ * folder that is itself a symlink has none. */
 export function listPlans(ws) {
   let entries;
   try {
+    if (!fs.lstatSync(plansDir(ws)).isDirectory()) return [];
     entries = fs.readdirSync(plansDir(ws), { withFileTypes: true });
   } catch {
     return [];
@@ -44,15 +46,17 @@ export function listPlans(ws) {
 
 // ---------- markdown structure ----------
 
-/** Lines with whether each sits inside a ``` or ~~~ fence (the fence lines count as inside). */
+const FENCE = /^\s*(`{3,}|~{3,})/;
+/** Lines with whether each sits inside a ``` or ~~~ fence (the fence lines count as inside). A
+ * fence closes only on a line of its delimiter, at least as long, and nothing else. */
 function scanLines(text) {
   const out = [];
   let fence = null;
   for (const line of String(text).replace(/\r\n?/g, "\n").split("\n")) {
-    const m = line.match(/^\s*(`{3,}|~{3,})/);
+    const m = line.match(FENCE);
     if (fence) {
       out.push({ line, fenced: true });
-      if (m && m[1][0] === fence[0] && m[1].length >= fence.length) fence = null;
+      if (m && m[1][0] === fence[0] && m[1].length >= fence.length && !line.slice(m[0].length).trim()) fence = null;
     } else if (m) {
       fence = m[1];
       out.push({ line, fenced: true });
@@ -65,7 +69,7 @@ function scanLines(text) {
 
 /** Split at headings of `level` outside fences: [{ title, lines }], the first with title null. */
 function splitAt(lines, level) {
-  const re = new RegExp(`^#{${level}}\\s+(.+?)\\s*#*\\s*$`);
+  const re = new RegExp(`^#{${level}}\\s+(.+?)(?:\\s+#+)?\\s*$`);
   const parts = [{ title: null, lines: [] }];
   for (const l of lines) {
     const m = !l.fenced && l.line.match(re);
@@ -130,15 +134,24 @@ function parsePhase(n, name, lines) {
     acs.push({ id: id ? id[1] : null, text: id ? m[2].slice(id[0].length) : m[2], met: m[1] !== " " });
   }
   const review = subs.review ? joinLines(subs.review) : "";
-  const commitText = subs.commit ? joinLines(subs.commit) : "";
-  const code = commitText.match(/`([^`\n]+)`/) || commitText.match(/^\s*```[^\n]*\n([^\n]+)/);
+  // the first code element in order: a code span, or the first line of a fence (taken literally)
+  let message = null;
+  for (const l of subs.commit || []) {
+    if (l.fenced) {
+      if (!FENCE.test(l.line) && l.line.trim()) message = l.line.trim();
+    } else {
+      const span = l.line.match(/`([^`\n]+)`/);
+      if (span) message = span[1].trim();
+    }
+    if (message) break;
+  }
   return {
     n, name,
     goal: subs.goal ? firstParagraph(subs.goal) : null,
     dependencies: subs.dependencies ? joinLines(subs.dependencies).trim() || null : null,
     acs,
     checkpoint: /review-impl/.test(review) && !/^\s*None\b/.test(review) ? "review-impl" : null,
-    commit: { message: code ? code[1].trim() : null, sha: null },
+    commit: { message, sha: null },
   };
 }
 
@@ -173,7 +186,7 @@ export function parsePlan(text) {
   let title = null;
   let h1 = -1;
   lines.some((l, i) => {
-    const m = !l.fenced && l.line.match(/^#\s+(.+?)\s*#*\s*$/);
+    const m = !l.fenced && l.line.match(/^#\s+(.+?)(?:\s+#+)?\s*$/);
     if (m) [title, h1] = [m[1], i];
     return Boolean(m);
   });
@@ -368,7 +381,15 @@ export async function runPlansCli(argv) {
     throw e;
   }
   const dir = plansDir(ws);
-  fs.mkdirSync(dir, { recursive: true });
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+  } catch {}
+  // a link would put plans outside the workspace; listPlans shows none there either
+  let isDir = false;
+  try {
+    isDir = fs.lstatSync(dir).isDirectory();
+  } catch {}
+  if (!isDir) return fail(`${dir} is not a folder`);
   const gitignore = syncGitignore(ws, settings.track_plans.value);
   const files = listPlans(ws);
 
