@@ -89,7 +89,12 @@
   .mark { flex: none; width: 30px; height: 30px; border-radius: 3px; color: #fff; font: 600 12px/30px var(--sans); text-align: center; }
   .mark.rv { background: var(--rust); } .mark.ag { background: var(--blue); } .mark.us { background: var(--green); }
   .mark img { width: 100%; height: 100%; object-fit: cover; border-radius: 3px; display: block; }
-  .m .mark:has(img) { background: none; }
+  /* in the thread each avatar sits in a rounded square frame, tinted like its bubble */
+  .m .mark { width: 40px; height: 40px; border-radius: 8px; line-height: 40px; }
+  .m .mark:has(img) { background: var(--sheet); border: 1px solid var(--rule); padding: 3px; }
+  .m.r .mark:has(img) { background: #f2f4fb; border-color: #dfe4f3; }
+  .m.us .mark:has(img) { background: #f1f6f2; border-color: #d9e7dd; }
+  .m .mark img { border-radius: 5px; }
   #avatars .mark { display: inline-block; vertical-align: middle; margin-right: 10px; }
   #avatars td { vertical-align: middle; }
   #avatars-block { display: none; } #avatars-block.on { display: block; }

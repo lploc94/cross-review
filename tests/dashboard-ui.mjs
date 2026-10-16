@@ -389,6 +389,11 @@ try {
   await page.waitFor(`document.querySelector("#thread .m.us .mark img")`);
   assert.match(await page.evaluate(`document.querySelector("#thread .m.us .mark img").getAttribute("src")`), /^avatars\/you\?v=\d+$/);
   assert.match(await page.evaluate(`document.querySelector("#thread .mark.rv img").getAttribute("src")`), /^avatars\/reviewer\.png$/);
+  // each avatar in the thread sits in a 40px rounded square frame
+  for (const who of ["rv", "ag", "us"]) {
+    const frame = await page.evaluate(`(() => { const s = getComputedStyle(document.querySelector("#thread .mark.${who}")); return [s.width, s.height, s.borderRadius, s.borderTopWidth, s.borderTopStyle]; })()`);
+    assert.deepEqual(frame, ["40px", "40px", "8px", "1px", "solid"], who);
+  }
 
   // Many finished sessions whose titles wrap differently: every page fits the window, Older
   // always moves forward, Newer comes back to the same rows
