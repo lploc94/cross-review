@@ -14,7 +14,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderSkillTemplate } from './lib/render-skill.js';
 
-// `npx github:lploc94/cross-review dashboard`: run the dashboard from the package itself; no install step runs
+// `npx @tlelabs/cross-review dashboard`: run the dashboard from the package itself; no install step runs
 if (process.argv[2] === 'dashboard') {
   const { runDashboardCli } = await import('../skill-packs/cross-review/scripts/lib/dashboard/server.js');
   process.exit(await runDashboardCli(process.argv.slice(3)));
@@ -426,7 +426,7 @@ try {
   console.log(`  Claude Code:   ${claudeSkillsRoot}`);
   console.log(`  Codex:         ${agentsSkillsRoot}`);
   console.log(`  MCP server:    ${registered.length ? `registered with ${registered.join(' and ')}` : 'not registered (runner CLI fallback)'}`);
-  console.log(`  Command:       ${command.written ? `${commandPath} (cross-review dashboard)` : 'npx github:lploc94/cross-review dashboard'}`);
+  console.log(`  Command:       ${command.written ? `${commandPath} (cross-review dashboard)` : 'npx @tlelabs/cross-review dashboard'}`);
   if (command.note) console.warn(`  Note: ${command.note}`);
   console.log('');
   console.log('Skills (Claude Code: /name, Codex: $name):');
@@ -495,7 +495,7 @@ try {
 
     if (updated === null) {
       console.log('');
-      console.log('Optional: npx github:lploc94/cross-review --auto');
+      console.log('Optional: npx @tlelabs/cross-review --auto');
       console.log('  Has Claude Code use the review-plan and review-impl skills automatically (block in ~/.claude/CLAUDE.md)');
     } else {
       fs.mkdirSync(claudeDir, { recursive: true });

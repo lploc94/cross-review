@@ -726,12 +726,12 @@ async function updateChecks(browser) {
     await page.waitFor(`document.getElementById("updates-block").classList.contains("on") && /Not checked yet/.test(document.getElementById("update-help").textContent)`);
     assert.equal(await page.evaluate(`document.getElementById("f-updates").checked`), false, "off by default");
     assert.equal(await page.evaluate(`document.getElementById("update-link").textContent`), "Update");
-    // Check now: Checking… while GitHub is asked, then the newer version, here and in the footer
+    // Check now: Checking… while npm is asked, then the newer version, here and in the footer
     await page.evaluate(`document.getElementById("check-update").click()`);
     await page.waitFor(`document.getElementById("update-help").textContent === "Checking…" && document.getElementById("check-update").disabled`);
     answer("99.0.0");
     await page.waitFor(`/Version 99\\.0\\.0 is out/.test(document.getElementById("update-help").textContent)`);
-    assert.match(await help(), /you have \d+\.\d+\.\d+\. Run npx github:lploc94\/cross-review to update\.$/);
+    assert.match(await help(), /you have \d+\.\d+\.\d+\. Run npx @tlelabs\/cross-review@latest to update\.$/);
     assert.deepEqual(await page.evaluate(`(() => { const a = document.getElementById("update-link"); return [a.textContent, a.classList.contains("new")]; })()`), ["Update available: 99.0.0", true]);
     await page.screenshot(path.join(shots, "settings-updates-1400.png"));
     // the tick saves to the global file; a workspace has no Updates block

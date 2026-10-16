@@ -381,7 +381,7 @@
     <div class="form">
       <div>Check for updates</div><div><label class="check"><input type="checkbox" id="f-updates"> When the dashboard starts, at most every 3 days</label> <button class="plain" id="check-update">Check now</button><div class="help" id="update-help">You have the latest version, 10.2.0 (checked 2 hours ago).</div></div>
     </div>
-    <p class="sub" style="font-size:12.5px">A check reads the pack's version on GitHub; nothing about you or your sessions is sent.</p>
+    <p class="sub" style="font-size:12.5px">A check reads the latest version on npm; nothing about you or your sessions is sent.</p>
   </div>
 
   <div class="actions">
@@ -391,7 +391,7 @@
   <div class="save-state" id="save-state" role="status"></div>
 </section>
 </main>
-<footer class="site-foot"><div class="wrap">cross-review 10.2.0 · <a href="https://github.com/lploc94/cross-review" target="_blank" rel="noopener noreferrer">GitHub</a> · <a href="https://github.com/lploc94/cross-review#reinstall--update" id="update-link" target="_blank" rel="noopener noreferrer">Update</a> · <a href="https://github.com/lploc94/cross-review/issues" target="_blank" rel="noopener noreferrer">Report a problem</a></div></footer>
+<footer class="site-foot"><div class="wrap">cross-review 10.3.0 · <a href="https://github.com/lploc94/cross-review" target="_blank" rel="noopener noreferrer">GitHub</a> · <a href="https://github.com/lploc94/cross-review#reinstall--update" id="update-link" target="_blank" rel="noopener noreferrer">Update</a> · <a href="https://github.com/lploc94/cross-review/issues" target="_blank" rel="noopener noreferrer">Report a problem</a></div></footer>
 
 <script>
 // ---------------- icons: one line set, 24px grid, drawn with currentColor ----------------
@@ -760,7 +760,7 @@ document.getElementById("check-update").onclick = () => {
   const help = document.getElementById("update-help"), link = document.getElementById("update-link");
   help.textContent = "Checking…";
   setTimeout(() => {
-    help.textContent = "Version 10.3.0 is out; you have 10.2.0. Run npx github:lploc94/cross-review to update.";
+    help.textContent = "Version 10.4.0 is out; you have 10.3.0. Run npx @tlelabs/cross-review@latest to update.";
     link.textContent = "Update available: 10.3.0"; link.classList.add("new");
   }, 600);
 };

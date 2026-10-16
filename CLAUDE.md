@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-This repository provides a single-command installer (`npx github:lploc94/cross-review`) that installs the `cross-review` skill pack for Claude Code (`~/.claude/skills/`) and Codex (`~/.agents/skills/`), and registers its MCP server with both.
+This repository provides a single-command installer (`npx @tlelabs/cross-review`, npm package `@tlelabs/cross-review`) that installs the `cross-review` skill pack for Claude Code (`~/.claude/skills/`) and Codex (`~/.agents/skills/`), and registers its MCP server with both.
 
 ## Project Overview
 
@@ -16,7 +16,8 @@ The project was called `codex-review` (repo `lploc94/codex_skill`, skills `codex
 
 ## Distribution Model
 
-- Single command install: `npx github:lploc94/cross-review`
+- Single command install: `npx @tlelabs/cross-review` (npm); `npx github:lploc94/cross-review` installs the default branch
+- One version number: `package.json` `version` equals `skill-packs/cross-review/manifest.json` `version` (a test checks it); `files` leaves out `skill-packs/cross-review/node_modules`
 - Installs to `~/.claude/skills/` (skills + shared runtime in `cross-review/`) and `~/.agents/skills/` (Codex copies)
 - Runtime dependencies (`@modelcontextprotocol/sdk`, `zod`) are installed with `npm ci --omit=dev` from the committed lock file into `~/.claude/skills/cross-review/node_modules`
 - Removes this pack's old copies from Codex's deprecated `$CODEX_HOME/skills`; foreign skills there are left in place
@@ -107,7 +108,7 @@ Besides the prompts and outputs, a session keeps what the dashboard needs to ret
 
 ### Dashboard
 
-`review-runner.js dashboard` (or `cross-review dashboard`, or `npx github:lploc94/cross-review dashboard`) serves a local page on `127.0.0.1` (random port 20000–30000, per-run token in cookie or Bearer, Host check, Origin check on writes). It scans `--root` (default cwd) and 3 levels below for `.cross-review/sessions/` or `.cross-review/plans/` and only reads sessions and plans (git commands it runs are read-only); it writes `~/.cross-review/dashboard.json` (port, token, pid), the settings files, `.cross-review/.gitignore` when Plans in git is saved, avatars in `~/.cross-review/avatars/`, the model list in `~/.cross-review/models.json`, and the last update check in `~/.cross-review/update.json`. Its one network request is the update check (`lib/dashboard/update.js`: the pack's `manifest.json` on GitHub's main branch): at start when the global `check_updates` is true and the last answer is over 3 days old or failed, and on Check now (`POST /api/update/check`); `/api/update` reports it and the footer shows a newer version. Routes are hash routes (`#/`, `#/s/<ws>/<session>[/ISSUE-N]`, `#/plans`, `#/p/<ws>/<file>[/plan]`, `#/settings[/<ws>]`); updates arrive over SSE (`/api/stream?view=list|session`). The model list comes from the reviewer adapter (`codex debug models`, then `--bundled`, else none), asked at start: the list the last run saved answers `/api/settings` at once (`modelsRefreshing: true`), `/api/models` waits for the new one, and a failed ask keeps the saved list; only a first run with none waits. The UI follows `mockups/dashboard.html`: system fonts only, Lucide icons (ISC, `ui/LICENSE-lucide.txt`), the owl mascot (`ui/avatars/reviewer.png`) as logo and tab icon, no brand logos (the footer links to GitHub in plain text).
+`review-runner.js dashboard` (or `cross-review dashboard`, or `npx @tlelabs/cross-review dashboard`) serves a local page on `127.0.0.1` (random port 20000–30000, per-run token in cookie or Bearer, Host check, Origin check on writes). It scans `--root` (default cwd) and 3 levels below for `.cross-review/sessions/` or `.cross-review/plans/` and only reads sessions and plans (git commands it runs are read-only); it writes `~/.cross-review/dashboard.json` (port, token, pid), the settings files, `.cross-review/.gitignore` when Plans in git is saved, avatars in `~/.cross-review/avatars/`, the model list in `~/.cross-review/models.json`, and the last update check in `~/.cross-review/update.json`. Its one network request is the update check (`lib/dashboard/update.js`: `https://registry.npmjs.org/@tlelabs/cross-review/latest`): at start when the global `check_updates` is true and the last answer is over 3 days old or failed, and on Check now (`POST /api/update/check`); `/api/update` reports it and the footer shows a newer version. Routes are hash routes (`#/`, `#/s/<ws>/<session>[/ISSUE-N]`, `#/plans`, `#/p/<ws>/<file>[/plan]`, `#/settings[/<ws>]`); updates arrive over SSE (`/api/stream?view=list|session`). The model list comes from the reviewer adapter (`codex debug models`, then `--bundled`, else none), asked at start: the list the last run saved answers `/api/settings` at once (`modelsRefreshing: true`), `/api/models` waits for the new one, and a failed ask keeps the saved list; only a first run with none waits. The UI follows `mockups/dashboard.html`: system fonts only, Lucide icons (ISC, `ui/LICENSE-lucide.txt`), the owl mascot (`ui/avatars/reviewer.png`) as logo and tab icon, no brand logos (the footer links to GitHub in plain text).
 
 ### Key Design Decisions
 
@@ -162,6 +163,11 @@ Besides the prompts and outputs, a session keeps what the dashboard needs to ret
 - `skill-packs/` is the single source of truth for templates, runtime and prompts.
 
 ## Breaking Changes
+
+### pack 10.3.0: npm package `@tlelabs/cross-review`
+- **Install** with `npx @tlelabs/cross-review` (update: `@latest`); `npx github:lploc94/cross-review` still works. The installer and Settings print the npm command.
+- **One version**: `package.json` goes from `5.0.0` to the manifest's version, `10.3.0`.
+- **Update check** reads the latest version on npm instead of the manifest on GitHub's `main`; its errors say npm. Installs of 10.2.0 keep reading GitHub, which stays in step.
 
 ### pack 10.2.0: plans in `.cross-review/plans/`
 - **Plans move**: `loop-plan` writes new plans to `<workspace>/.cross-review/plans/` (it runs `plans --working-dir` first); `loop-implement` finds them there with the same command and never runs a plain markdown file. Plans already elsewhere stay where they are and are not shown on the dashboard; give their path to `loop-implement` to keep using them.

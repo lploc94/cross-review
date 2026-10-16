@@ -153,7 +153,7 @@ function renderUpdate() {
   if (!u) help.textContent = "";
   else if (u.checking) help.textContent = "Checking…";
   else if (u.error) help.textContent = `You have ${u.current}. The last check failed${u.checked_at ? ` ${ago(u.checked_at)}` : ""}: ${u.error}.`;
-  else if (u.available) help.textContent = `Version ${u.latest} is out; you have ${u.current}. Run npx github:lploc94/cross-review to update.`;
+  else if (u.available) help.textContent = `Version ${u.latest} is out; you have ${u.current}. Run npx @tlelabs/cross-review@latest to update.`;
   else if (u.latest) help.textContent = `You have the latest version, ${u.current} (checked ${ago(u.checked_at)}).`;
   else help.textContent = `You have ${u.current}. Not checked yet.`;
 }

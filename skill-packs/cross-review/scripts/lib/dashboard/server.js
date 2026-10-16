@@ -531,7 +531,7 @@ function deniedHtml() {
  * ({listModels, defaultModel, cliInfo}; default: the Codex adapter's), catalogCache (the file that
  * keeps the model list between runs; default ~/.cross-review/models.json for the Codex adapter,
  * none for an injected catalog; null: none), latestVersion (async () => the newest pack version;
- * default: the manifest on GitHub), updateCache (default ~/.cross-review/update.json).
+ * default: the latest version on npm), updateCache (default ~/.cross-review/update.json).
  */
 export async function startDashboard({
   root = process.cwd(), port = null, open = false, idleExitSeconds = null,

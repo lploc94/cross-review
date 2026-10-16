@@ -9,7 +9,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { validateConfig } from "../skill-packs/cross-review/scripts/lib/config.js";
 import { startDashboard } from "../skill-packs/cross-review/scripts/lib/dashboard/server.js";
-import { fetchLatestVersion, isNewer, UPDATE_TTL_S } from "../skill-packs/cross-review/scripts/lib/dashboard/update.js";
+import { fetchLatestVersion, isNewer, UPDATE_TTL_S, UPDATE_URL } from "../skill-packs/cross-review/scripts/lib/dashboard/update.js";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const INSTALLED = JSON.parse(fs.readFileSync(path.join(REPO, "skill-packs", "cross-review", "manifest.json"), "utf8")).version;
@@ -75,7 +75,11 @@ test("check_updates: a config key that must be true or false", () => {
   assert.deepEqual(validateConfig({ check_updates: "yes" }), ["check_updates: must be true or false"]);
 });
 
-test("fetchLatestVersion: the manifest's version; a bad answer throws a short reason", async () => {
+test("the check reads the latest version of @tlelabs/cross-review on npm", () => {
+  assert.equal(UPDATE_URL, "https://registry.npmjs.org/@tlelabs/cross-review/latest");
+});
+
+test("fetchLatestVersion: the registry answer's version; a bad answer throws a short reason", async () => {
   const answers = { "/ok": [200, JSON.stringify({ name: "cross-review", version: "10.9.1" })], "/missing": [404, "Not Found"], "/odd": [200, JSON.stringify({ version: "latest" })] };
   const server = http.createServer((req, res) => {
     const [status, body] = answers[req.url];
@@ -85,9 +89,9 @@ test("fetchLatestVersion: the manifest's version; a bad answer throws a short re
   const base = `http://127.0.0.1:${server.address().port}`;
   try {
     assert.equal(await fetchLatestVersion({ url: `${base}/ok` }), "10.9.1");
-    await assert.rejects(fetchLatestVersion({ url: `${base}/missing` }), /GitHub answered 404/);
-    await assert.rejects(fetchLatestVersion({ url: `${base}/odd` }), /no version/);
-    await assert.rejects(fetchLatestVersion({ url: "http://127.0.0.1:1/none" }), /could not be reached/);
+    await assert.rejects(fetchLatestVersion({ url: `${base}/missing` }), /^Error: npm answered 404$/);
+    await assert.rejects(fetchLatestVersion({ url: `${base}/odd` }), /^Error: npm has no version$/);
+    await assert.rejects(fetchLatestVersion({ url: "http://127.0.0.1:1/none" }), /^Error: npm could not be reached$/);
   } finally {
     server.close();
   }

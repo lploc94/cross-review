@@ -1,5 +1,7 @@
 <h1 align="center"><b>Cross Review</b></h1>
 
+<p align="center"><a href="https://cross-review.tlelabs.com">cross-review.tlelabs.com</a> · <a href="https://www.npmjs.com/package/@tlelabs/cross-review">npm</a></p>
+
 Cross-model review skills for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and [OpenAI Codex CLI](https://github.com/openai/codex): the agent you work with orchestrates, and a second model reviews its plans, code and reasoning. The reviewer today is the Codex CLI; the runner selects reviewers through one adapter per CLI (`scripts/lib/reviewers/`), so others can be added.
 
 ![A review session in the dashboard: the reviewer's rounds, the agent's replies, the issue ledger](docs/images/session.png)
@@ -23,8 +25,10 @@ This project was called **codex-review** (`lploc94/codex_skill`, skills `codex-p
 ## Install
 
 ```bash
-npx github:lploc94/cross-review
+npx @tlelabs/cross-review
 ```
+
+From GitHub instead: `npx github:lploc94/cross-review`.
 
 ### What it does
 1. Installs the skills for Claude Code into `~/.claude/skills/` and for Codex into `~/.agents/skills/`
@@ -43,13 +47,13 @@ codex mcp get cross-review
 
 ### Reinstall / Update
 ```bash
-npx github:lploc94/cross-review
+npx @tlelabs/cross-review@latest
 ```
 Re-running is safe: the MCP registration is replaced, not duplicated.
 
 ### Automatic reviews (optional)
 ```bash
-npx github:lploc94/cross-review --auto
+npx @tlelabs/cross-review --auto
 ```
 Adds a block to `~/.claude/CLAUDE.md` that has Claude Code use the `review-plan` skill after it finishes any plan and the `review-impl` skill after it finishes any implementation, without asking first. This applies to every plan and implementation, not only `loop-plan` and `loop-implement`. It skips trivial changes, reviews a loop skill already ran, and reviews you asked it to skip. The other skills are never run automatically. Idempotent — safe to re-run. Every install, with or without `--auto`, refreshes a block that is already there, including one written by the old codex-review pack.
 
@@ -70,7 +74,7 @@ Name a model or effort when you ask for a review (or in a plan's review checkpoi
 
 ```bash
 cross-review dashboard                             # the command the installer writes to ~/.local/bin
-npx github:lploc94/cross-review dashboard          # without installing, and on Windows
+npx @tlelabs/cross-review dashboard               # without installing, and on Windows
 ```
 
 ![Sessions: reviews in progress and the history](docs/images/sessions.png)
@@ -87,7 +91,7 @@ Starts a local web page and opens it in your browser. It lists the review sessio
 - **Follow reviews**: when on, every review that starts opens its page in your browser, starting the dashboard if it is not running; that dashboard closes itself after 30 minutes with no page open.
 - **Follow plans**: when on, each plan `loop-plan` finishes opens on its Plan tab the same way, so you can read it before you approve it.
 - **Plans in git**: off by default. On adds an exception for `plans/` to `.cross-review/.gitignore`, so `loop-implement` commits the plan with each phase; sessions and settings stay out of git. A root `.gitignore` that ignores `.cross-review/` itself overrides that exception: change it to `.cross-review/*` and add `!.cross-review/plans/` (the dashboard and `loop-plan` warn when this happens). Turning it off later does not remove plans already committed: run `git rm --cached` on them.
-- **Check for updates**: off by default. When on, the dashboard reads the pack's version on GitHub when it starts, at most every 3 days, and the footer says when a newer one is out; **Check now** asks at any time. Nothing about you or your sessions is sent.
+- **Check for updates**: off by default. When on, the dashboard reads the latest version on npm when it starts, at most every 3 days, and the footer says when a newer one is out; **Check now** asks at any time. Nothing about you or your sessions is sent.
 - **Avatars**: pick an image for you, the reviewer and each agent (PNG, JPEG, WebP or GIF, up to 1 MB). Images stay in `~/.cross-review/avatars/`.
 
 The server listens on `127.0.0.1` only. The link it prints carries a per-run token that every request needs, so other web pages cannot read your sessions or change settings.
