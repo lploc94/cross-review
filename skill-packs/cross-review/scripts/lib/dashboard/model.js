@@ -222,7 +222,7 @@ export function readSession(dir) {
 
 // ---------- classification ----------
 
-function verdictOf(final) {
+export function verdictOf(final) {
   const review = final && final.review;
   if (final && final.convergence && final.convergence.stalemate) return "STALEMATE";
   return (review && ((review.verdict && review.verdict.status) || review.suggested_status)) || null;

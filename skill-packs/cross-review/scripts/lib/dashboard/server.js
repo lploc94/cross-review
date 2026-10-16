@@ -1,8 +1,9 @@
 // Local dashboard server: one page and a small JSON/SSE API over node:http, bound to
 // 127.0.0.1 and guarded by a per-run token, a Host check and an Origin check on writes.
-// It only reads session files; it writes ~/.cross-review/dashboard.json, the review
-// settings (~/.cross-review/config.json, <workspace>/.cross-review/config.json) and the
-// avatars in ~/.cross-review/avatars/.
+// It only reads session and plan files (its git commands are read-only); it writes
+// ~/.cross-review/dashboard.json, the settings (~/.cross-review/config.json,
+// <workspace>/.cross-review/config.json), <workspace>/.cross-review/.gitignore when Plans in git
+// is saved, and the avatars in ~/.cross-review/avatars/.
 //
 //   startDashboard({root, port, open, idleExitSeconds}) → {url, port, token, root, close(), closed}
 //   runDashboardCli(argv) → exit code (the `dashboard` command)
@@ -15,11 +16,12 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-import { classify, readSession, roundActivity } from "./model.js";
+import { classify, inputValues, readSession, roundActivity, verdictOf } from "./model.js";
 import { findWorkspaces, isWorkspace, listSessions, sessionsDir, SCAN_DEPTH, SESSION_ID_RE } from "./scan.js";
 import { discoveryFile, removeDiscoveryIfOwn, writeDiscovery } from "./discovery.js";
 import { AvatarError, avatarFile, listAvatars, removeAvatar, saveAvatar, AVATAR_MAX_BYTES } from "./avatars.js";
-import { ensureCrossReviewDir, globalConfigPath, readConfig, validateConfig, workspaceConfigPath, writeConfig } from "../config.js";
+import { ensureCrossReviewDir, globalConfigPath, readConfig, resolvePlanSettings, syncGitignore, validateConfig, workspaceConfigPath, writeConfig } from "../config.js";
+import { fillCommits, gitPlanFacts, listPlans, parsePlan, planProgress, planState, plansDir, summarizePlanText } from "../plans.js";
 import { getReviewer } from "../reviewers/index.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -119,7 +121,10 @@ export function createListWatcher({ root, now = () => Math.floor(Date.now() / 10
   const scanned = new Map(); // ws key → absolute path
   const registered = new Map();
   const cache = new Map(); // session dir → { sig, parsed }
+  const planCache = new Map(); // plan file → { fileSig, changedAt, parsed, summary }
+  const gitCache = new Map(); // workspace path → { key, scan, facts }
   const subs = new Set();
+  let planIndex = new Map(); // `${ws}\0${file}` → what /api/plan needs, from the last build
   let lastScan = 0;
   let timer = null;
 
@@ -155,6 +160,114 @@ export function createListWatcher({ root, now = () => Math.floor(Date.now() / 10
     return parsed;
   }
 
+  /** The plan's parsed text, re-read only when its size or mtime changed; null when unreadable. */
+  function planFor(file) {
+    let st;
+    try {
+      st = fs.statSync(file);
+    } catch {
+      planCache.delete(file);
+      return null;
+    }
+    const fileSig = `${st.size}:${st.mtimeMs}`;
+    const hit = planCache.get(file);
+    if (hit && hit.fileSig === fileSig) return hit;
+    let text;
+    try {
+      text = fs.readFileSync(file, "utf8");
+    } catch {
+      planCache.delete(file);
+      return null;
+    }
+    const entry = { fileSig, changedAt: Math.floor(st.mtimeMs / 1000), parsed: parsePlan(text), summary: summarizePlanText(path.dirname(path.dirname(path.dirname(file))), path.basename(file), text) };
+    planCache.set(file, entry);
+    return entry;
+  }
+
+  /** Git facts of a workspace's plans: again on each rescan, when its plan files change, or after a settings save. */
+  function gitFor(abs, files, entries) {
+    const key = files.map((f, i) => `${f}:${entries[i] ? entries[i].fileSig : "-"}`).join("|");
+    const hit = gitCache.get(abs);
+    if (hit && hit.key === key && hit.scan === lastScan) return hit.facts;
+    const facts = gitPlanFacts(abs, files);
+    gitCache.set(abs, { key, scan: lastScan, facts });
+    return facts;
+  }
+
+  /** realpath of each plan an active review-plan session works on → { id, round, status }. */
+  function plansUnderReview(sessions) {
+    const out = new Map();
+    for (const { parsed, summary, abs } of sessions) {
+      if (parsed.skill !== "review-plan" || summary.group !== "active") continue;
+      const v = inputValues(parsed.rounds[0] && parsed.rounds[0].input, parsed.skill, parsed.state.skills_dir);
+      if (!v.PLAN_PATH) continue;
+      let real;
+      try {
+        real = fs.realpathSync(path.resolve(parsed.state.working_dir || abs, String(v.PLAN_PATH).trim()));
+      } catch {
+        continue;
+      }
+      const had = out.get(real);
+      if (!had || (summary.since || 0) > had.since) out.set(real, { id: summary.id, round: summary.round, status: summary.state, since: summary.since || 0 });
+    }
+    return out;
+  }
+
+  const PLAN_ORDER = { progress: 0, review: 0, ready: 1, draft: 2, done: 3, doc: 4 };
+
+  function buildPlans(wsMap, names, sessionsByWs) {
+    const all = [...sessionsByWs.values()].flatMap(m => [...m.values()]);
+    const reviewing = plansUnderReview(all);
+    const plans = [];
+    const index = new Map();
+    const seen = new Set();
+    for (const [ws, abs] of wsMap) {
+      const files = listPlans(abs);
+      if (!files.length) {
+        gitCache.delete(abs);
+        continue;
+      }
+      const entries = files.map(f => planFor(path.join(plansDir(abs), f)));
+      const facts = gitFor(abs, files, entries);
+      const here = sessionsByWs.get(ws) || new Map();
+      files.forEach((file, i) => {
+        const entry = entries[i];
+        if (!entry) return;
+        const full = path.join(plansDir(abs), file);
+        seen.add(full);
+        const tracked = facts.repo ? !facts.ignored.has(file) : null;
+        const isPlan = entry.summary.format === "loop-plan";
+        let real = full;
+        try {
+          real = fs.realpathSync(full);
+        } catch {}
+        const review = isPlan ? reviewing.get(real) || null : null;
+        const state = isPlan ? planState(entry.parsed, { reviewing: Boolean(review) }) : "doc";
+        const reviewSession = review && state === "review" ? { id: review.id, round: review.round } : null;
+        const filled = isPlan ? fillCommits(entry.parsed, facts) : null;
+        const named = entry.parsed.sessionIds.filter(id => here.has(id)).map(id => here.get(id));
+        // everything the plan page shows, so a review or a commit refreshes it with the file unchanged
+        const sig = JSON.stringify([
+          entry.fileSig, tracked, state,
+          reviewSession ? `${review.id}:${review.round}:${review.status}` : null,
+          named.map(x => `${x.summary.id}:${x.summary.label}:${x.summary.round}`),
+          filled ? filled.phases.map(p => p.commit.sha) : null,
+        ]);
+        const item = {
+          ws, wsName: names(abs, ws), file, format: entry.summary.format, title: entry.summary.title, state,
+          progress: entry.summary.progress, planReview: entry.summary.planReview, reviewSession, tracked,
+          searchText: entry.summary.searchText, changedAt: entry.changedAt, fileSig: entry.fileSig, sig,
+        };
+        plans.push(item);
+        index.set(`${ws}\0${file}`, { item, full, parsed: filled || entry.parsed, named });
+      });
+    }
+    for (const file of planCache.keys()) if (!seen.has(file)) planCache.delete(file);
+    plans.sort((a, b) => PLAN_ORDER[a.state] - PLAN_ORDER[b.state] || b.changedAt - a.changedAt || a.ws.localeCompare(b.ws) || a.file.localeCompare(b.file));
+    planIndex = index;
+    return plans;
+  }
+
   function build() {
     const t = now();
     const wsMap = workspaces();
@@ -164,9 +277,13 @@ export function createListWatcher({ root, now = () => Math.floor(Date.now() / 10
     const active = [];
     const history = [];
     const seen = new Set();
+    const sessionsByWs = new Map(); // ws → id → { parsed, summary, abs }
+    const nameOf = (abs, ws) => (names.get(path.basename(abs)) > 1 ? ws : path.basename(abs));
     for (const [ws, abs] of wsMap) {
-      const name = names.get(path.basename(abs)) > 1 ? ws : path.basename(abs);
+      const name = nameOf(abs, ws);
       list.push({ ws, name, path: abs });
+      const here = new Map();
+      sessionsByWs.set(ws, here);
       for (const dir of listSessions(abs)) {
         seen.add(dir);
         const parsed = parsedFor(dir);
@@ -178,14 +295,16 @@ export function createListWatcher({ root, now = () => Math.floor(Date.now() / 10
           continue;
         }
         (summary.group === "active" ? active : history).push({ ...summary, ws, wsName: name });
+        here.set(summary.id, { parsed, summary, abs });
       }
     }
+    const plans = buildPlans(wsMap, nameOf, sessionsByWs);
     for (const dir of cache.keys()) if (!seen.has(dir)) cache.delete(dir);
     const byId = (a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0);
     active.sort((a, b) => (b.since || 0) - (a.since || 0) || byId(a, b));
     history.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0) || byId(a, b));
     list.sort((a, b) => a.ws.localeCompare(b.ws));
-    return { root: realRoot, rootDisplay: tildePath(realRoot), depth, version, workspaces: list, active, history };
+    return { root: realRoot, rootDisplay: tildePath(realRoot), depth, version, workspaces: list, active, history, plans };
   }
 
   function send(sub, payload, json) {
@@ -250,6 +369,36 @@ export function createListWatcher({ root, now = () => Math.floor(Date.now() / 10
       // Only what the list shows: a real folder in the sessions dir, never a symlink
       const dir = path.join(sessionsDir(abs), id);
       return listSessions(abs).includes(dir) && fs.existsSync(path.join(dir, "state.json")) ? dir : null;
+    },
+    /**
+     * One plan for /api/plan, or null when the workspace is unknown or the file is not one of
+     * its plans (listPlans: plain .md files of the plans folder, never a link or a folder).
+     */
+    plan(ws, file) {
+      if (typeof ws !== "string" || typeof file !== "string") return null;
+      let abs = workspaces().get(ws);
+      if (!abs && Date.now() - lastScan > REQUEST_SCAN_AGE_MS) {
+        rescan();
+        abs = workspaces().get(ws);
+      }
+      if (!abs || !listPlans(abs).includes(file)) return null;
+      build();
+      const hit = planIndex.get(`${ws}\0${file}`);
+      if (!hit) return null;
+      const { item, full, parsed, named } = hit;
+      const base = { format: item.format, ws, wsName: item.wsName, file, path: full, tracked: item.tracked, changedAt: item.changedAt, sig: item.sig };
+      if (item.format !== "loop-plan") return { ...base, title: item.title, sections: parsed.sections };
+      return {
+        ...base, ...parsed, title: item.title, progress: planProgress(parsed), state: item.state, reviewSession: item.reviewSession,
+        sessions: named.map(({ parsed: p, summary }) => {
+          const last = [...p.rounds].reverse().find(r => verdictOf(r.final));
+          return { id: summary.id, skill: summary.skill, state: summary.state, verdict: last ? verdictOf(last.final) : null, href: `#/s/${encodeURIComponent(ws)}/${summary.id}` };
+        }),
+      };
+    },
+    /** Forget a workspace's git facts (after its .gitignore changed). */
+    forgetGit(abs) {
+      gitCache.delete(abs);
     },
     /** Absolute path of a workspace key, or null. */
     workspacePath(ws) {
@@ -503,7 +652,28 @@ export async function startDashboard({
     const errors = validateConfig(body.config);
     if (errors.length) return fail(res, 400, errors.join("; "));
     if (body.scope === "workspace") ensureCrossReviewDir(watcher.workspacePath(body.ws));
-    return json(res, 200, { ok: true, config: writeConfig(file, body.config) });
+    const config = writeConfig(file, body.config);
+    // Plans in git: the saved level's workspaces get the .gitignore their resolved value asks for
+    const targets = body.scope === "workspace" ? [[body.ws, watcher.workspacePath(body.ws)]] : [...watcher.workspaceMap()];
+    const gitignore = Object.create(null);
+    for (const [ws, abs] of targets) {
+      let result;
+      let track = false;
+      try {
+        track = resolvePlanSettings(abs).track_plans.value;
+        result = syncGitignore(abs, track);
+      } catch {
+        result = "error";
+      }
+      watcher.forgetGit(abs);
+      let blockedBy = null;
+      if (track && result !== "error") {
+        const facts = gitPlanFacts(abs, []);
+        if (facts.repo && facts.newPlansIgnored) blockedBy = facts.blockedBy || "a .gitignore rule";
+      }
+      gitignore[ws] = { result, blocked_by: blockedBy };
+    }
+    return json(res, 200, { ok: true, config, gitignore });
   }
 
   // ----- avatars -----
@@ -762,6 +932,14 @@ export async function startDashboard({
         if (!parsed) return fail(res, 404, "no such session");
         const { detail } = classify(parsed, { now: watcher.now(), isAlive: watcher.isAlive });
         return json(res, 200, { ...detail, ws, wsName: watcher.wsName(ws), serverTime: watcher.now() });
+      }
+      case "/api/plan": {
+        const ws = url.searchParams.get("ws");
+        const file = url.searchParams.get("file");
+        if (!ws || !file) return fail(res, 400, "ws and file are required");
+        const plan = watcher.plan(ws, file);
+        if (!plan) return fail(res, 404, "no such plan");
+        return json(res, 200, { ...plan, serverTime: watcher.now() });
       }
       case "/api/activity":
         return activityPage(res, url);

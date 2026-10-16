@@ -3,7 +3,7 @@
 // `dashboard` command. Every server runs on a temp fixture root, never on a real folder.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import http from "node:http";
 import net from "node:net";
@@ -11,7 +11,8 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { buildFixture, writeSession } from "./helpers/dashboard-fixture.js";
+import { buildFixture, buildPlans, writePlan, writeSession } from "./helpers/dashboard-fixture.js";
+import { GITIGNORE } from "../skill-packs/cross-review/scripts/lib/config.js";
 import { findWorkspaces } from "../skill-packs/cross-review/scripts/lib/dashboard/scan.js";
 import { startDashboard, createListWatcher } from "../skill-packs/cross-review/scripts/lib/dashboard/server.js";
 
@@ -822,6 +823,270 @@ test("avatars: a real PNG is stored and served byte for byte; renamed text, over
     assert.equal((await request(d.port, "/api/avatars/agent%3Aclaude-code", { method: "DELETE", headers: { Cookie: `cr_token=${d.token}` } })).status, 403);
   } finally {
     fs.rmSync(path.join(process.env.HOME, ".cross-review", "avatars"), { recursive: true, force: true });
+    await d.close();
+  }
+});
+
+// ---------- plans (dashboard-plans plan, Phase 3) ----------
+
+async function servePlans(opts = {}) {
+  const root = mk("plans-root");
+  const fx = buildFixture(root, { now: nowS(), livePid: process.pid });
+  const pl = buildPlans(fx);
+  const d = await startDashboard({ root, port: 0, open: false, discoveryFile: null, ...opts });
+  return { root, fx, pl, d };
+}
+const planOf = (p, ws, file) => p.plans.find(x => x.ws === ws && x.file === file);
+const planUrl = (ws, file) => `/api/plan?ws=${encodeURIComponent(ws)}&file=${encodeURIComponent(file)}`;
+const GIT_ENV = { GIT_AUTHOR_NAME: "Invented", GIT_AUTHOR_EMAIL: "invented@example.invalid", GIT_COMMITTER_NAME: "Invented", GIT_COMMITTER_EMAIL: "invented@example.invalid" };
+const git = (ws, ...args) => {
+  const r = spawnSync("git", ["-C", ws, ...args], { encoding: "utf8", env: { ...process.env, ...GIT_ENV } });
+  assert.ok(r.status === 0 || args[0] === "check-ignore", `git ${args.join(" ")}: ${r.stderr}`);
+  return r;
+};
+/** A review-plan session on `planPath`: rounds running/completed as given, ended with `meta`. */
+function reviewPlanOn(ws, id, planPath, { rounds = 1, running = true, meta = null } = {}) {
+  const t = nowS();
+  const list = [];
+  for (let i = 1; i <= rounds; i++) {
+    const last = i === rounds;
+    list.push(last && running
+      ? { status: "running", started: t - 60, elapsed: 0, acts: [] }
+      : { status: "completed", started: t - 600 + i * 60, elapsed: 30, review: "### VERDICT\n- Status: REVISE\n- Reason: Invented.\n", acts: [] });
+  }
+  return writeSession(path.join(ws, ".cross-review", "sessions"), id, {
+    skill: "review-plan", created: t - 600, inputs: [`PLAN_PATH: ${planPath}\n\n## USER_REQUEST\nInvented plan review.\n`],
+    state: { pid: process.pid, pgid: process.pid, ...(meta ? { ended_at: t, end_outcome: "finalized" } : {}) }, rounds: list, meta,
+  });
+}
+/** A review-impl session that waits for the agent (REVISE), or approved and finalized. */
+function implSession(ws, id, approved) {
+  const t = nowS();
+  return writeSession(path.join(ws, ".cross-review", "sessions"), id, {
+    skill: "review-impl", mode: "branch", created: t - 900, inputs: ["BASE_BRANCH: a1b2c3d\n\n## USER_REQUEST\nInvented checkpoint.\n"],
+    state: approved ? { ended_at: t, end_outcome: "finalized" } : {}, meta: approved ? "APPROVE" : null,
+    rounds: [
+      { status: "completed", started: t - 900, elapsed: 60, review: "### VERDICT\n- Status: REVISE\n- Reason: Invented.\n", acts: [] },
+      ...(approved ? [{ status: "completed", started: t - 300, elapsed: 60, review: "### VERDICT\n- Status: APPROVE\n- Reason: Invented.\n", acts: [] }] : []),
+    ],
+  });
+}
+
+test("plans: a workspace with only plans is listed with its plan", async () => {
+  const { d } = await servePlans();
+  try {
+    const p = await getJson(d, "/api/sessions");
+    assert.ok(p.workspaces.some(w => w.ws === "atlas-notes"));
+    const it = planOf(p, "atlas-notes", "kế-hoạch.md");
+    assert.equal(it.title, "Tag colours");
+    assert.equal(it.wsName, "atlas-notes");
+    assert.equal(it.state, "draft");
+    assert.equal([...p.active, ...p.history].some(s => s.ws === "atlas-notes"), false);
+  } finally {
+    await d.close();
+  }
+});
+
+test("plans in the list: five states, review while a review-plan session is active, fields and order", async () => {
+  const { d, fx, pl, root } = await servePlans();
+  try {
+    // within a group, the newest change first
+    const t = Date.now() / 1000;
+    fs.utimesSync(pl.files.draft, t - 500, t - 500);
+    fs.utimesSync(pl.files.pending, t - 100, t - 100);
+    let p = await getJson(d, "/api/sessions");
+    const key = it => `${it.ws}/${it.file}`;
+    assert.deepEqual(p.plans.map(key), [
+      "harbor-app/export-formats-plan.md",
+      "services/orchard-api/shared-notebooks-plan.md",
+      "atlas-notes/kế-hoạch.md",
+      "harbor-app/sync-offline-plan.md",
+      "inkwell/search-by-date-plan.md",
+      "harbor-app/sync notes.md",
+    ]);
+    assert.deepEqual(p.plans.map(it => it.state), ["progress", "ready", "draft", "draft", "done", "doc"]);
+    const ex = planOf(p, "harbor-app", "export-formats-plan.md");
+    assert.deepEqual(ex.progress, { phasesDone: 2, phasesTotal: 5, acsMet: 9, acsTotal: 16, current: 3 });
+    assert.equal(ex.format, "loop-plan");
+    assert.equal(ex.planReview.session, "review-plan-20261012-002");
+    assert.equal(ex.reviewSession, null);
+    assert.equal(ex.tracked, null); // the fixture root is not a git repo
+    assert.match(ex.searchText, /csv and json export/);
+    assert.equal(ex.changedAt, Math.floor(fs.statSync(pl.files.progress).mtimeMs / 1000));
+    assert.equal(ex.fileSig, `${fs.statSync(pl.files.progress).size}:${fs.statSync(pl.files.progress).mtimeMs}`);
+    const doc = planOf(p, "harbor-app", "sync notes.md");
+    assert.deepEqual([doc.format, doc.title, doc.progress, doc.planReview, doc.tracked], ["markdown", "Notes on the sync protocol", null, null, null]);
+    assert.match(doc.searchText, /merge by paragraph/);
+    for (const it of p.plans) for (const k of ["ws", "wsName", "file", "format", "title", "state", "progress", "planReview", "reviewSession", "tracked", "searchText", "changedAt", "fileSig", "sig"]) assert.ok(k in it, `${key(it)}: ${k}`);
+
+    // a running review-plan session whose PLAN_PATH reaches the plan through a symlinked parent
+    fs.symlinkSync(pl.atlas, path.join(root, "atlas-link"));
+    const elsewhere = path.join(root, "elsewhere");
+    writePlan(elsewhere, "kế-hoạch.md", "# Not this one\n");
+    reviewPlanOn(fx.workspaces.orchard, "review-plan-20261016-001", path.join(root, "atlas-link", ".cross-review", "plans", "kế-hoạch.md"));
+    reviewPlanOn(fx.workspaces.orchard, "review-plan-20261016-002", path.join(elsewhere, ".cross-review", "plans", "kế-hoạch.md"));
+    p = await getJson(d, "/api/sessions");
+    let it = planOf(p, "atlas-notes", "kế-hoạch.md");
+    assert.equal(it.state, "review");
+    assert.deepEqual(it.reviewSession, { id: "review-plan-20261016-001", round: 1 });
+    assert.equal(p.plans[1].file, "kế-hoạch.md", "review sorts with progress");
+    // the session ends: the plan's own state again
+    reviewPlanOn(fx.workspaces.orchard, "review-plan-20261016-001", path.join(root, "atlas-link", ".cross-review", "plans", "kế-hoạch.md"), { running: false, meta: "REVISE" });
+    p = await getJson(d, "/api/sessions");
+    it = planOf(p, "atlas-notes", "kế-hoạch.md");
+    assert.deepEqual([it.state, it.reviewSession], ["draft", null]);
+  } finally {
+    await d.close();
+  }
+});
+
+test("plans live: a ticked criterion, review rounds, a session's result and phase commits change sig", async () => {
+  const { d, fx, pl } = await servePlans({ tickMs: 150, rescanMs: 300 });
+  const harbor = fx.workspaces.harbor;
+  git(harbor, "init", "-q");
+  const s = sse(d.port, "/api/stream?view=list", bearer(d));
+  const item = (e, file) => planOf(e.json, "harbor-app", file);
+  try {
+    let cur = item(await s.next(e => e.event === "sessions"), "export-formats-plan.md");
+    // tick AC-3.3: progress, fileSig and sig all change on the next tick
+    fs.writeFileSync(pl.files.progress, fs.readFileSync(pl.files.progress, "utf8").replace("- [ ] AC-3.3", "- [x] AC-3.3"));
+    let next = item(await s.next(e => e.event === "sessions" && item(e, "export-formats-plan.md").progress.acsMet === 10, 2000), "export-formats-plan.md");
+    assert.notEqual(next.fileSig, cur.fileSig);
+    assert.notEqual(next.sig, cur.sig);
+    cur = next;
+
+    // the plan file stays the same from here on
+    const draft = () => item({ json: s.events[s.events.length - 1].json }, "sync-offline-plan.md");
+    const sigChange = async (file, pred) => {
+      const before = item({ json: s.events[s.events.length - 1].json }, file);
+      const ev = await s.next(e => e.event === "sessions" && item(e, file).sig !== before.sig && pred(item(e, file)), 3000);
+      const after = item(ev, file);
+      assert.equal(after.fileSig, before.fileSig, `${file}: the file did not change`);
+      return after;
+    };
+    const syncPath = pl.files.draft;
+    reviewPlanOn(harbor, "review-plan-20261016-003", syncPath);
+    let it = await sigChange("sync-offline-plan.md", x => x.state === "review");
+    assert.deepEqual(it.reviewSession, { id: "review-plan-20261016-003", round: 1 });
+    reviewPlanOn(harbor, "review-plan-20261016-003", syncPath, { rounds: 2 });
+    it = await sigChange("sync-offline-plan.md", x => x.reviewSession && x.reviewSession.round === 2);
+    reviewPlanOn(harbor, "review-plan-20261016-003", syncPath, { rounds: 2, running: false, meta: "REVISE" });
+    it = await sigChange("sync-offline-plan.md", x => x.state === "draft");
+    assert.ok(draft());
+
+    // a review-impl session named in the Progress Log changes its result
+    implSession(harbor, "review-impl-20261013-004", false);
+    await sigChange("export-formats-plan.md", () => true);
+    implSession(harbor, "review-impl-20261013-004", true);
+    await sigChange("export-formats-plan.md", () => true);
+
+    // a commit whose subject is phase 1's planned message: its SHA after the rescan
+    git(harbor, "commit", "-q", "--allow-empty", "-m", "feat(export): one row model behind CSV and JSON");
+    const sha = git(harbor, "log", "-1", "--format=%h").stdout.trim();
+    await sigChange("export-formats-plan.md", () => true);
+    let detail = await getJson(d, planUrl("harbor-app", "export-formats-plan.md"));
+    assert.equal(detail.phases[0].commit.sha, sha);
+    assert.equal(detail.phases[1].commit.sha, null);
+    git(harbor, "commit", "-q", "--allow-empty", "-m", "feat(export): one row model behind CSV and JSON");
+    await sigChange("export-formats-plan.md", () => true);
+    detail = await getJson(d, planUrl("harbor-app", "export-formats-plan.md"));
+    assert.equal(detail.phases[0].commit.sha, null, "a subject in two commits has no SHA");
+  } finally {
+    s.close();
+    await d.close();
+  }
+});
+
+test("/api/plan: the plan, its real sessions, markdown documents, and 404 for anything outside the plans folder", async () => {
+  const { d, fx, pl } = await servePlans();
+  const harbor = fx.workspaces.harbor;
+  const plans = path.join(harbor, ".cross-review", "plans");
+  implSession(harbor, "review-impl-20261013-004", true);
+  fs.symlinkSync(pl.files.draft, path.join(plans, "linked-plan.md"));
+  fs.mkdirSync(path.join(plans, "folder.md"));
+  fs.writeFileSync(path.join(harbor, ".cross-review", "x.md"), "# Outside\n");
+  writePlan(harbor, "scratch.md", "Just a line, no headings.\n");
+  try {
+    const p = await getJson(d, "/api/sessions");
+    const x = await getJson(d, planUrl("harbor-app", "export-formats-plan.md"));
+    assert.equal(x.format, "loop-plan");
+    assert.deepEqual([x.ws, x.wsName, x.file, x.path, x.tracked], ["harbor-app", "harbor-app", "export-formats-plan.md", pl.files.progress, null]);
+    assert.equal(x.sig, planOf(p, "harbor-app", "export-formats-plan.md").sig);
+    assert.equal(typeof x.changedAt, "number");
+    assert.equal(x.title, "CSV and JSON export");
+    assert.equal(x.phases.length, 5);
+    assert.deepEqual(x.progress, { phasesDone: 2, phasesTotal: 5, acsMet: 9, acsTotal: 16, current: 3 });
+    assert.equal(x.state, "progress");
+    assert.equal(x.reviewSession, null);
+    assert.ok(x.sections.some(sec => sec.id === "phase-3") && x.log.length && x.planReview.verdict === "APPROVE");
+    // review-plan-20261012-002 is named in the plan but has no session here
+    assert.deepEqual(x.sessions, [{ id: "review-impl-20261013-004", skill: "review-impl", state: "approve", verdict: "APPROVE", href: "#/s/harbor-app/review-impl-20261013-004" }]);
+
+    for (const [ws, file] of [["atlas-notes", "kế-hoạch.md"], ["harbor-app", "sync notes.md"]]) assert.equal((await request(d.port, planUrl(ws, file), { headers: bearer(d) })).status, 200, file);
+    const doc = await getJson(d, planUrl("harbor-app", "sync notes.md"));
+    assert.equal(doc.format, "markdown");
+    assert.equal(doc.title, "Notes on the sync protocol");
+    assert.deepEqual(doc.sections.map(sec => sec.title), [null, "Options"]);
+    for (const k of ["phases", "progress", "log", "planReview"]) assert.equal(k in doc, false, k);
+    const one = await getJson(d, planUrl("harbor-app", "scratch.md"));
+    assert.equal(one.sections.length, 1);
+    assert.equal(one.title, "scratch.md");
+
+    for (const [ws, file] of [["nowhere", "export-formats-plan.md"], ["harbor-app", "../x.md"], ["harbor-app", "a/b.md"], ["harbor-app", "%2e%2e%2fx.md"], ["harbor-app", "linked-plan.md"], ["harbor-app", "folder.md"], ["harbor-app", "missing-plan.md"]]) {
+      assert.equal((await request(d.port, planUrl(ws, file), { headers: bearer(d) })).status, 404, `${ws} ${file}`);
+    }
+    assert.equal((await request(d.port, "/api/plan?ws=harbor-app", { headers: bearer(d) })).status, 400);
+    assert.equal((await request(d.port, "/api/plan?file=x.md", { headers: bearer(d) })).status, 400);
+  } finally {
+    await d.close();
+  }
+});
+
+test("settings keep each workspace's .gitignore in step with Plans in git; custom files and parent rules are reported", async () => {
+  const { d, fx, pl } = await servePlans({ catalog: CATALOG });
+  const gi = ws => path.join(ws, ".cross-review", ".gitignore");
+  const read = ws => (fs.existsSync(gi(ws)) ? fs.readFileSync(gi(ws), "utf8") : null);
+  const post = body => request(d.port, "/api/settings", { method: "POST", headers: { ...originOf(d), "Content-Type": "application/json" }, body });
+  const { harbor, orchard, inkwell } = fx.workspaces;
+  const globalFile = path.join(process.env.HOME, ".cross-review", "config.json");
+  try {
+    for (const ws of [harbor, orchard, inkwell, pl.atlas]) fs.writeFileSync(gi(ws), "*\n");
+    let r = await post({ scope: "workspace", ws: "harbor-app", config: { track_plans: true } });
+    assert.equal(r.status, 200, r.text);
+    assert.deepEqual(JSON.parse(r.text).gitignore, { "harbor-app": { result: "updated", blocked_by: null } });
+    assert.equal(read(harbor), GITIGNORE.track);
+    assert.equal(read(inkwell), "*\n");
+
+    // global on: every workspace without its own value; harbor set to false stays ignored
+    assert.equal((await post({ scope: "workspace", ws: "harbor-app", config: { track_plans: false } })).status, 200);
+    assert.equal(read(harbor), GITIGNORE.ignore);
+    fs.writeFileSync(gi(orchard), "custom\n");
+    git(inkwell, "init", "-q");
+    fs.writeFileSync(path.join(inkwell, ".gitignore"), ".cross-review/\n");
+    const atlasDir = path.join(pl.atlas, ".cross-review");
+    const canLock = process.getuid && process.getuid() !== 0;
+    if (canLock) fs.chmodSync(atlasDir, 0o500);
+    try {
+      r = await post({ scope: "global", config: { track_plans: true } });
+    } finally {
+      if (canLock) fs.chmodSync(atlasDir, 0o755);
+    }
+    assert.equal(r.status, 200, r.text);
+    const out = JSON.parse(r.text).gitignore;
+    assert.deepEqual(out["harbor-app"], { result: "unchanged", blocked_by: null });
+    assert.deepEqual(out["services/orchard-api"], { result: "custom", blocked_by: null });
+    assert.deepEqual(out.inkwell, { result: "updated", blocked_by: ".gitignore:1:.cross-review/" });
+    if (canLock) assert.equal(out["atlas-notes"].result, "error");
+    assert.equal(read(harbor), GITIGNORE.ignore);
+    assert.equal(read(orchard), "custom\n");
+    assert.equal(read(inkwell), GITIGNORE.track);
+    assert.deepEqual(JSON.parse(fs.readFileSync(globalFile, "utf8")), { track_plans: true });
+    // what git says, not the setting: the parent rule still ignores the plan
+    assert.equal(git(inkwell, "check-ignore", "-q", ".cross-review/plans/search-by-date-plan.md").status, 0);
+    const p = await getJson(d, "/api/sessions");
+    assert.equal(planOf(p, "inkwell", "search-by-date-plan.md").tracked, false);
+  } finally {
+    fs.rmSync(globalFile, { force: true });
     await d.close();
   }
 });

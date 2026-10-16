@@ -290,6 +290,48 @@ export function buildFixture(root, { now = Math.floor(Date.now() / 1000), livePi
   return { root, now, workspaces: { harbor, orchard, inkwell }, sessions: s };
 }
 
+// ---------- invented plans ----------
+
+const PLAN_FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures");
+export const EXPORT_PLAN = fs.readFileSync(path.join(PLAN_FIXTURES, "export-formats-plan.md"), "utf8");
+export const SYNC_PLAN = fs.readFileSync(path.join(PLAN_FIXTURES, "sync-offline-plan.md"), "utf8");
+const retitle = (text, title) => text.replace(/^# .*$/m, `# ${title}`);
+const approve = text => text.replace(/^pending$/m, "APPROVE (user, 2026-10-14)");
+export const PLANS = {
+  progress: EXPORT_PLAN,
+  draft: SYNC_PLAN,
+  pending: retitle(SYNC_PLAN, "Tag colours"),
+  ready: retitle(approve(SYNC_PLAN), "Shared notebooks"),
+  done: retitle(approve(SYNC_PLAN).replace(/- \[ \] AC-/g, "- [x] AC-"), "Search by date"),
+  doc: "# Notes on the sync protocol\n\nWhy last writer wins loses edits.\n\n## Options\n\n| Option | Cost |\n|---|---|\n| Merge by paragraph | A diff per save |\n",
+};
+
+export function writePlan(ws, file, text) {
+  const dir = path.join(ws, ".cross-review", "plans");
+  fs.mkdirSync(dir, { recursive: true });
+  const file_ = path.join(dir, file);
+  fs.writeFileSync(file_, text);
+  return file_;
+}
+
+/**
+ * Invented plans in five states across three workspaces of `fx` (buildFixture's result), plus
+ * `atlas-notes`, a workspace with plans and no sessions. Returns { atlas, files }.
+ */
+export function buildPlans(fx) {
+  const { harbor, orchard, inkwell } = fx.workspaces;
+  const atlas = path.join(fx.root, "atlas-notes");
+  const files = {
+    progress: writePlan(harbor, "export-formats-plan.md", PLANS.progress),
+    draft: writePlan(harbor, "sync-offline-plan.md", PLANS.draft),
+    doc: writePlan(harbor, "sync notes.md", PLANS.doc),
+    ready: writePlan(orchard, "shared-notebooks-plan.md", PLANS.ready),
+    done: writePlan(inkwell, "search-by-date-plan.md", PLANS.done),
+    pending: writePlan(atlas, "kế-hoạch.md", PLANS.pending),
+  };
+  return { atlas, files };
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const dir = process.argv[2];
   if (!dir) {

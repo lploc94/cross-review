@@ -1,6 +1,9 @@
-// Markdown from session files (reviews, requests, replies) as HTML. Everything is escaped
-// first; only the tags built here appear: headings, paragraphs, lists, code spans and
-// fences, bold, italics, and links to http(s) addresses. No raw HTML passes through.
+// Markdown from session and plan files (reviews, requests, replies, plans) as HTML. Everything
+// is escaped first; only the tags built here appear: headings, paragraphs, lists, task lists,
+// tables, code spans and fences, bold, italics, and links to http(s) addresses. No raw HTML
+// passes through.
+
+import { ic } from "./icons.js";
 
 const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 export const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ESC[c]);
@@ -29,6 +32,31 @@ export function renderInline(text) {
   return out.join("");
 }
 
+const TASK = /^\[([ xX])\]\s+(.*)$/;
+const listItem = x => {
+  const t = x.match(TASK);
+  if (!t) return `<li>${renderInline(x)}</li>`;
+  const met = t[1] !== " ";
+  return `<li class="task${met ? " met" : ""}">${ic(met ? "boxed" : "box")}<span>${renderInline(t[2])}</span></li>`;
+};
+
+const TABLE_DIVIDER = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
+/** The cells of a `| a | b |` line; a pipe inside a code span does not split. */
+function tableCells(line) {
+  const cells = [];
+  let cur = "";
+  let code = false;
+  for (const c of line.trim().replace(/^\|/, "").replace(/\|$/, "")) {
+    if (c === "`") code = !code;
+    if (c === "|" && !code) {
+      cells.push(cur.trim());
+      cur = "";
+    } else cur += c;
+  }
+  cells.push(cur.trim());
+  return cells;
+}
+
 /** A block of markdown → HTML. */
 export function renderMarkdown(text) {
   const lines = String(text ?? "").replace(/\r\n?/g, "\n").split("\n");
@@ -40,27 +68,44 @@ export function renderMarkdown(text) {
     para = [];
   };
   const flushList = () => {
-    if (list) html.push(`<${list.tag}>${list.items.map(x => `<li>${renderInline(x)}</li>`).join("")}</${list.tag}>`);
+    if (list) html.push(`<${list.tag}>${list.items.map(listItem).join("")}</${list.tag}>`);
     list = null;
   };
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    const fence = line.match(/^\s*(```|~~~)/);
+    const fence = line.match(/^\s*(`{3,}|~{3,})/);
     if (fence) {
       flushPara();
       flushList();
+      // it closes on its own delimiter, at least as long, with nothing after it
+      const closes = l => {
+        const m = l.trim().match(/^(`{3,}|~{3,})\s*$/);
+        return Boolean(m) && m[1][0] === fence[1][0] && m[1].length >= fence[1].length;
+      };
       const body = [];
-      for (i++; i < lines.length && !lines[i].trim().startsWith(fence[1]); i++) body.push(lines[i]);
+      for (i++; i < lines.length && !closes(lines[i]); i++) body.push(lines[i]);
       html.push(`<pre><code>${esc(body.join("\n"))}</code></pre>`);
       continue;
     }
-    const h = line.match(/^(#{1,6})\s+(.*?)\s*#*\s*$/);
+    const h = line.match(/^(#{1,6})\s+(.*?)(?:\s+#+)?\s*$/);
     if (h) {
       flushPara();
       flushList();
       // inside a message, # and ## read as h3: the page already has h1/h2
       const n = Math.max(3, h[1].length);
       html.push(`<h${n}>${renderInline(h[2])}</h${n}>`);
+      continue;
+    }
+    if (line.includes("|") && i + 1 < lines.length && lines[i + 1].includes("-") && TABLE_DIVIDER.test(lines[i + 1])) {
+      flushPara();
+      flushList();
+      const head = tableCells(line);
+      // a ragged row is padded with empty cells or cut to the header's width
+      const row = (cells, tag) => `<tr>${head.map((_, j) => `<${tag}>${renderInline(cells[j] ?? "")}</${tag}>`).join("")}</tr>`;
+      const body = [];
+      for (i += 2; i < lines.length && lines[i].trim() && lines[i].includes("|"); i++) body.push(row(tableCells(lines[i]), "td"));
+      i--;
+      html.push(`<table><thead>${row(head, "th")}</thead><tbody>${body.join("")}</tbody></table>`);
       continue;
     }
     const ul = line.match(/^\s*[-*+]\s+(.*)$/);

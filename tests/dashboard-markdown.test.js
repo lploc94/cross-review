@@ -43,3 +43,37 @@ test("renderField: one line stays inline; several lines (fenced code) render as 
   assert.match(html, /<pre><code>if \(ready\) \{\n  commit\(\);\n\}<\/code><\/pre>/);
   assert.ok(!html.includes("``"));
 });
+
+test("tables: header, divider, body; cells escaped and inline; ragged rows padded or cut", () => {
+  const html = renderMarkdown("Before\n| Decision | Reason |\n|---|:--|\n| Dates in `UTC` | <script>x</script> |\n| only one |\n| a | b | extra |\nafter");
+  assert.match(html, /<p>Before<\/p><table><thead><tr><th>Decision<\/th><th>Reason<\/th><\/tr><\/thead><tbody>/);
+  assert.match(html, /<tr><td>Dates in <code>UTC<\/code><\/td><td>&lt;script&gt;x&lt;\/script&gt;<\/td><\/tr>/);
+  assert.match(html, /<tr><td>only one<\/td><td><\/td><\/tr>/);
+  assert.match(html, /<tr><td>a<\/td><td>b<\/td><\/tr><\/tbody><\/table><p>after<\/p>/);
+  assert.doesNotMatch(html, /extra|<script/);
+  // a pipe line without a divider is text; a pipe inside a code span does not split the cell
+  assert.doesNotMatch(renderMarkdown("| not | a table |\nplain"), /<table/);
+  assert.match(renderMarkdown("| A | B |\n|---|---|\n| `x|y` | z |"), /<td><code>x\|y<\/code><\/td><td>z<\/td>/);
+});
+
+test("task lists: - [ ] and - [x] become li.task with a box icon; other items stay plain", () => {
+  const html = renderMarkdown("- [ ] AC-1.1: open `a<b>`\n- [x] AC-1.2: done\n- [X] AC-1.3: done too\n- plain");
+  const items = html.match(/<li[^>]*>.*?<\/li>/g);
+  assert.equal(items.length, 4);
+  assert.match(items[0], /^<li class="task"><svg class="i "[^>]*>.*<\/svg><span>AC-1\.1: open <code>a&lt;b&gt;<\/code><\/span><\/li>$/);
+  assert.doesNotMatch(items[0], /m9 12 2 2 4-4/);
+  assert.match(items[1], /^<li class="task met"><svg[^>]*>.*m9 12 2 2 4-4.*<\/svg><span>AC-1\.2: done<\/span><\/li>$/);
+  assert.match(items[2], /^<li class="task met">/);
+  assert.equal(items[3], "<li>plain</li>");
+});
+
+test("a fence holding pipes and task boxes stays a fence", () => {
+  const html = renderMarkdown("```\n| A | B |\n|---|---|\n- [x] AC-9.1\n```");
+  assert.doesNotMatch(html, /<table|class="task"/);
+  assert.match(html, /<pre><code>\| A \| B \|\n\|---\|---\|\n- \[x\] AC-9\.1<\/code><\/pre>/);
+});
+
+test("a fence closes only on a bare delimiter at least as long; a heading keeps a # in its text", () => {
+  const html = renderMarkdown("````markdown\n```js\n## inside\n```\n````\nafter\n\n~~~\n~~~ not a close\n~~~  \n### Port to C# ##");
+  assert.match(html, /^<pre><code>```js\n## inside\n```<\/code><\/pre><p>after<\/p><pre><code>~~~ not a close<\/code><\/pre><h3>Port to C#<\/h3>$/);
+});
