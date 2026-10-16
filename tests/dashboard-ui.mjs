@@ -18,6 +18,12 @@ import { startDashboard } from "../skill-packs/cross-review/scripts/lib/dashboar
 import { GITIGNORE } from "../skill-packs/cross-review/scripts/lib/config.js";
 import { parsePlan } from "../skill-packs/cross-review/scripts/lib/plans.js";
 
+/** A saved settings file with Codex's fields (written under reviewers.codex) read at the top level. */
+const savedCodex = file => {
+  const c = JSON.parse(fs.readFileSync(file, "utf8"));
+  return { ...c, ...((c.reviewers && c.reviewers.codex) || {}) };
+};
+
 const bin = findChrome();
 if (!bin) {
   console.error("dashboard-ui: no Chrome found; set CHROME=<path>");
@@ -277,7 +283,7 @@ try {
   assert.equal(await page.evaluate(`document.getElementById("save-state").textContent`), "Saved");
   await page.screenshot(path.join(shots, "settings-saved-1400.png"));
   const globalFile = path.join(process.env.HOME, ".cross-review", "config.json");
-  assert.deepEqual(JSON.parse(fs.readFileSync(globalFile, "utf8")), { open_dashboard: true, skills: { "review-impl": { model: "model-b" } } });
+  assert.deepEqual(JSON.parse(fs.readFileSync(globalFile, "utf8")), { open_dashboard: true, reviewers: { codex: { skills: { "review-impl": { model: "model-b" } } } } });
 
   // A workspace: inherits the global values, no avatars, saves to its own file
   await page.evaluate(`location.hash = "#/settings/harbor-app"`);
@@ -295,7 +301,7 @@ try {
   await page.evaluate(`(() => { const e = document.getElementById("f-effort-set"); e.value = "low"; e.dispatchEvent(new Event("change", { bubbles: true })); })()`);
   const wsFile = path.join(fx.workspaces.harbor, ".cross-review", "config.json");
   for (let i = 0; i < 50 && !fs.existsSync(wsFile); i++) await new Promise(r => setTimeout(r, 100));
-  assert.deepEqual(JSON.parse(fs.readFileSync(wsFile, "utf8")), { effort: "low" });
+  assert.deepEqual(JSON.parse(fs.readFileSync(wsFile, "utf8")), { reviewers: { codex: { effort: "low" } } });
   await page.screenshot(path.join(shots, "settings-workspace-1400.png"));
   // Clear this workspace asks first, then saves the empty level (which removes the file)
   await page.evaluate(`(() => { window.confirm = () => false; document.getElementById("clear-ws").click(); })()`);
@@ -323,10 +329,10 @@ try {
   await page.waitFor(`typeof window.releaseSave2 === "function"`);
   assert.equal(await page.evaluate(`document.getElementById("save-state").textContent`), "Saving…");
   await page.evaluate(`(() => { const e = document.getElementById("f-effort-set"); e.value = "xhigh"; e.dispatchEvent(new Event("change", { bubbles: true })); })()`);
-  assert.equal(JSON.parse(fs.readFileSync(globalFile, "utf8")).effort, "low", "the second change waits for the first save");
+  assert.equal(savedCodex(globalFile).effort, "low", "the second change waits for the first save");
   await page.evaluate(`window.releaseSave2()`);
   await page.waitFor(SAVED);
-  assert.equal(JSON.parse(fs.readFileSync(globalFile, "utf8")).effort, "xhigh");
+  assert.equal(savedCodex(globalFile).effort, "xhigh");
   assert.match(await page.evaluate(`document.getElementById("preview").textContent`), /"effort": "xhigh"/);
 
   // A save whose answer cannot be read does not strand the change queued behind it; a last
@@ -349,7 +355,7 @@ try {
   await page.evaluate(`(() => { const e = document.getElementById("f-effort-set"); e.value = "high"; e.dispatchEvent(new Event("change", { bubbles: true })); const b = window.breakBody; window.breakBody = null; b(); })()`);
   await page.waitFor(SAVED);
   assert.equal(await page.evaluate(`window.posts`), 2);
-  assert.equal(JSON.parse(fs.readFileSync(globalFile, "utf8")).effort, "high");
+  assert.equal(savedCodex(globalFile).effort, "high");
   await page.evaluate(`(() => { const e = document.getElementById("f-effort-set"); e.value = "xhigh"; e.dispatchEvent(new Event("change", { bubbles: true })); })()`);
   await page.waitFor(`typeof window.breakBody === "function"`);
   await page.evaluate(`(() => { const b = window.breakBody; window.breakBody = null; b(); })()`);
@@ -378,7 +384,7 @@ try {
   await page.evaluate(`window.releaseSave()`);
   await page.waitFor(`document.getElementById("preview-title").textContent === "Show inkwell/.cross-review/config.json"`);
   await page.waitFor(`document.getElementById("preview").textContent.trim() === "{}" && document.querySelector("#f-effort-set option").textContent === "Inherit — medium"`);
-  assert.equal(JSON.parse(fs.readFileSync(globalFile, "utf8")).effort, "medium");
+  assert.equal(savedCodex(globalFile).effort, "medium");
   await page.evaluate(`(() => { const f = document.getElementById("f-follow"); f.value = "off"; f.dispatchEvent(new Event("change", { bubbles: true })); })()`);
   const inkFile = path.join(fx.workspaces.inkwell, ".cross-review", "config.json");
   for (let i = 0; i < 50 && !fs.existsSync(inkFile); i++) await new Promise(r => setTimeout(r, 100));
@@ -530,7 +536,7 @@ try {
     await blank.evaluate(`(() => { const e = document.getElementById("f-effort-set"); e.value = "low"; e.dispatchEvent(new Event("change", { bubbles: true })); })()`);
     for (let i = 0; i < 50 && fs.readFileSync(quillFile, "utf8").includes("broken"); i++) await new Promise(r => setTimeout(r, 100));
     await blank.waitFor(SAVED);
-    assert.deepEqual(JSON.parse(fs.readFileSync(quillFile, "utf8")), { effort: "low" });
+    assert.deepEqual(JSON.parse(fs.readFileSync(quillFile, "utf8")), { reviewers: { codex: { effort: "low" } } });
     assert.equal(await blank.evaluate(`document.getElementById("settings-error").textContent`), "");
   } finally {
     await d4.close();
@@ -610,17 +616,18 @@ async function settingsAtOnceChecks(browser) {
     // field touched meanwhile
     const globalFile = path.join(process.env.HOME, ".cross-review", "config.json");
     const before = JSON.parse(fs.readFileSync(globalFile, "utf8"));
+    const beforeEffort = savedCodex(globalFile).effort;
     const fresh = await browser.newPage(1400, 1000);
     try {
       await fresh.goto(`${d8.url}#/`);
       await fresh.waitFor(`performance.getEntriesByType("resource").some(e => e.name.endsWith("/api/settings") && e.responseEnd > 0)`);
-      fs.writeFileSync(globalFile, JSON.stringify({ ...before, effort: "xhigh" }));
+      fs.writeFileSync(globalFile, JSON.stringify({ ...before, reviewers: { ...before.reviewers, codex: { ...(before.reviewers && before.reviewers.codex), effort: "xhigh" } } }));
       await fresh.evaluate(holdLoad);
       await fresh.evaluate(`location.hash = "#/settings"`);
       await fresh.waitFor(`typeof window.releaseLoad === "function"`);
       assert.equal(await fresh.evaluate(`document.querySelectorAll("#per-skill tr").length`), 4, "the form is filled while the load is held");
       assert.equal(await fresh.evaluate(`document.getElementById("preview-title").textContent`), "Show ~/.cross-review/config.json");
-      assert.match(await fresh.evaluate(`document.getElementById("preview").textContent`), new RegExp(`"effort": "${before.effort}"`));
+      assert.match(await fresh.evaluate(`document.getElementById("preview").textContent`), new RegExp(`"effort": "${beforeEffort}"`));
       assert.ok(await fresh.evaluate(`${options}.includes("Model A")`));
       await fresh.evaluate(`(() => { const f = document.getElementById("f-showplans"); f.value = "on"; f.dispatchEvent(new Event("change", { bubbles: true })); window.releaseLoad(); })()`);
       await fresh.waitFor(`/"effort": "xhigh"/.test(document.getElementById("preview").textContent)`);
@@ -639,7 +646,7 @@ async function settingsAtOnceChecks(browser) {
       await page.evaluate(`location.hash = "#/settings"`);
       await page.waitFor(`typeof window.releaseLoad === "function"`);
       await page.evaluate(`(() => { const e = document.getElementById("f-effort-set"); e.value = "low"; e.dispatchEvent(new Event("change", { bubbles: true })); })()`);
-      for (let i = 0; i < 50 && JSON.parse(fs.readFileSync(globalFile, "utf8")).effort !== "low"; i++) await new Promise(r => setTimeout(r, 100));
+      for (let i = 0; i < 50 && savedCodex(globalFile).effort !== "low"; i++) await new Promise(r => setTimeout(r, 100));
       await page.waitFor(SAVED);
       await page.evaluate(`(async () => { window.releaseLoad(); await new Promise(r => setTimeout(r, 400)); })()`);
       assert.equal(await page.evaluate(`document.getElementById("f-effort-set").value`), "low");
@@ -700,10 +707,10 @@ async function otherModelChecks(browser) {
     await page.waitFor(SAVED);
     const other = await page.evaluate(`(() => { const o = document.getElementById("f-model-other"); return { on: o.classList.contains("on"), value: o.value, focused: document.activeElement === o }; })()`);
     assert.deepEqual(other, { on: true, value: "model-half", focused: true });
-    assert.equal(JSON.parse(fs.readFileSync(globalFile, "utf8")).model, undefined, "the half-typed name is not saved");
+    assert.equal(savedCodex(globalFile).model, undefined, "the half-typed name is not saved");
     await page.evaluate(`(() => { const o = document.getElementById("f-model-other"); o.value = "model-whole"; o.dispatchEvent(new Event("change", { bubbles: true })); })()`);
     await page.waitFor(SAVED);
-    assert.equal(JSON.parse(fs.readFileSync(globalFile, "utf8")).model, "model-whole");
+    assert.equal(savedCodex(globalFile).model, "model-whole");
   } finally {
     fs.writeFileSync(globalFile, before);
     await d10.close();
@@ -737,7 +744,7 @@ async function updateChecks(browser) {
     // the tick saves to the global file; a workspace has no Updates block
     await page.evaluate(`(() => { const c = document.getElementById("f-updates"); c.checked = true; c.dispatchEvent(new Event("change", { bubbles: true })); })()`);
     await page.waitFor(SAVED);
-    assert.equal(JSON.parse(fs.readFileSync(globalFile, "utf8")).check_updates, true);
+    assert.equal(savedCodex(globalFile).check_updates, true);
     await page.evaluate(`location.hash = "#/settings/quarry"`);
     await page.waitFor(`document.getElementById("preview-title").textContent === "Show quarry/.cross-review/config.json"`);
     assert.equal(await page.evaluate(`document.getElementById("updates-block").classList.contains("on")`), false);

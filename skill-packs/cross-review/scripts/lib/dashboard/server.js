@@ -781,7 +781,7 @@ export async function startDashboard({
       }
       gitignore[ws] = { result, blocked_by: blockedBy, warning };
     }
-    return json(res, 200, { ok: true, config, gitignore });
+    return json(res, 200, { ok: true, config: codexAtTop(config), gitignore });
   }
 
   // ----- avatars -----

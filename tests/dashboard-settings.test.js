@@ -163,7 +163,8 @@ test("through the server: a save with `touched` changes only those fields in the
     // written in the per-reviewer form: Codex's fields under reviewers.codex
     const want = { reviewers: { codex: { effort: "medium", model: "model-x", skills: { "review-pr": { effort: "low" }, "review-impl": { model: "model-b" } } } } };
     assert.deepEqual(JSON.parse(fs.readFileSync(globalFile, "utf8")), want, "untouched open_plans is not written; the file's own fields stay");
-    assert.deepEqual(JSON.parse(answer).config, want);
+    // the answer is what the page shows: Codex's fields at the top level, as it reads them
+    assert.deepEqual(JSON.parse(answer).config, want.reviewers.codex);
     // clearing a touched field removes it
     r = await post({ scope: "global", config: {}, touched: ["model"] });
     assert.equal(r.status, 200);
