@@ -69,6 +69,8 @@ export async function launchChrome(bin, userDataDir) {
       return r.result.value;
     };
     return {
+      /** A DevTools Protocol command to this page. */
+      call,
       goto: url => call("Page.navigate", { url }),
       evaluate,
       /** Poll an expression until it is truthy. */

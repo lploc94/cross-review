@@ -45,12 +45,12 @@ Chỉ ba font OFL được xuất hiện trong video: `build.mjs` kiểm tra m�
 ## 4. Pipeline (trong `video/`, chạy lại được ở mỗi bản phát hành)
 
 - `video/build.mjs`: một lệnh làm hết, không cần sửa dashboard.
-  - Tải ba font OFL từ `github.com/google/fonts` với SHA-256 cố định, vào thư mục cache bị git bỏ qua. Font không được commit và site không tải font nào.
+  - Tải ba font OFL từ `github.com/google/fonts` với SHA-256 cố định (`video/fonts.mjs`), vào thư mục cache bị git bỏ qua. Font không được commit và site không tải font nào.
   - Cảnh terminal là một trang HTML (`video/terminal.html`) tự chạy theo kịch bản, render bằng JetBrains Mono.
   - Cảnh dashboard: `demo/build.mjs` dựng demo dashboard (giao diện thật, dữ liệu ghi từ dashboard thật chạy trên dự án bịa, HOME tạm), như trên landing; video phát nó nhanh hơn (`DEMO_SPEED`) từ trang phiên review tới khi approve. Font được chèn qua CDP (`Page.setBypassCSP` + `@font-face`).
   - Quay bằng CDP screencast: terminal ở viewport 1280×627 tỉ lệ 1.5, dashboard ở 1100×539 tỉ lệ 1920/1100 (chữ to hơn), cùng ra 1920×940 cộng thanh chú thích 140 px. ffmpeg ghép thành 30 fps đều, thêm chú thích, thẻ mở đầu, thẻ kết và chuyển cảnh mờ.
   - Không thêm dependency npm nào: Chrome, ffmpeg và Node có sẵn (cùng cách với `docs/screenshots.mjs`).
-- Ảnh README (`docs/screenshots.mjs`), ảnh dashboard trên site và `og.png` của site được chụp lại bằng cùng các font OFL.
+- Ảnh README (`docs/screenshots.mjs`, cùng `video/fonts.mjs` và cùng phép kiểm font), bản sao của chúng trong `src/assets/dashboard/` của site, và `og.png` của site (`scripts/og.mjs` bên tlelabs) được chụp bằng cùng các font OFL.
 
 ## 5. Landing
 

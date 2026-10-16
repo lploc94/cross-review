@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // The README's dashboard pictures: the dashboard in headless Chrome on the invented test
 // fixture (no real sessions or projects), under a temporary HOME so the path reads ~/projects.
+// Text is drawn with the OFL fonts of video/fonts.mjs, never the system fonts the page asks for.
 //
 //   node docs/screenshots.mjs        (CHROME=<path> to pick the browser)
 
@@ -11,6 +12,7 @@ import { fileURLToPath } from "node:url";
 
 import { buildFixture, buildPlans } from "../tests/helpers/dashboard-fixture.js";
 import { findChrome, launchChrome } from "../tests/helpers/chrome.js";
+import { oflFontCss, checkFonts } from "../video/fonts.mjs";
 
 const OUT = path.join(path.dirname(fileURLToPath(import.meta.url)), "images");
 const bin = findChrome();
@@ -35,6 +37,7 @@ const catalog = {
   cliInfo: async () => ({ version: "codex-cli", loggedIn: true }),
 };
 const d = await startDashboard({ root, port: 0, open: false, discoveryFile: null, catalog, latestVersion: async () => null });
+const css = await oflFontCss();
 const browser = await launchChrome(bin, path.join(tmp, "profile"));
 const id = key => path.basename(fx.sessions[key]);
 const ws = key => encodeURIComponent(path.relative(root, path.dirname(path.dirname(path.dirname(fx.sessions[key])))));
@@ -48,10 +51,14 @@ try {
   fs.mkdirSync(OUT, { recursive: true });
   for (const [file, hash, ready] of SHOTS) {
     const page = await browser.newPage(1400, 920);
+    // the dashboard's CSP would refuse the inlined fonts; the bypass is for these pictures only
+    await page.call("Page.setBypassCSP", { enabled: true });
+    await page.call("Page.addScriptToEvaluateOnNewDocument", { source: `document.addEventListener("DOMContentLoaded", () => { const s = document.createElement("style"); s.textContent = ${JSON.stringify(css)}; document.head.append(s); });` });
     await page.goto(`${d.url}${hash}`);
-    await page.waitFor(ready);
+    await page.waitFor(`document.fonts.status === "loaded" && (${ready})`);
     // images and the live clock settle
     await new Promise(r => setTimeout(r, 600));
+    await checkFonts(page.call, file);
     await page.screenshot(path.join(OUT, file), { fullPage: false });
     console.log(`wrote docs/images/${file}`);
   }
