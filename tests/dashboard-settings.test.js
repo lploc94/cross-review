@@ -144,3 +144,41 @@ test("through the server: with no catalog, changing Follow reviews keeps effort 
     await d.close();
   }
 });
+
+test("through the server: a save with `touched` changes only those fields in the file as it is now; bad paths are refused", async () => {
+  const root = path.join(tmp, "root-touched");
+  fs.mkdirSync(path.join(root, ".cross-review", "sessions"), { recursive: true });
+  const globalFile = path.join(process.env.HOME, ".cross-review", "config.json");
+  fs.mkdirSync(path.dirname(globalFile), { recursive: true });
+  const d = await startDashboard({ root, port: 0, open: false, discoveryFile: null,
+    catalog: { listModels: async () => null, defaultModel: () => null, cliInfo: async () => ({ version: null, loggedIn: false }) } });
+  const post = body => fetch(`http://127.0.0.1:${d.port}/api/settings`, { method: "POST", headers: { Authorization: `Bearer ${d.token}`, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  try {
+    // the page loaded { effort: "high" }; meanwhile the file gained a model and a per-skill effort
+    fs.writeFileSync(globalFile, JSON.stringify({ effort: "high", model: "model-x", skills: { "review-pr": { effort: "low" } } }));
+    const form = { effort: "medium", open_plans: true, skills: { "review-impl": { model: "model-b" } } };
+    let r = await post({ scope: "global", config: form, touched: ["effort", "skills.review-impl.model"] });
+    const answer = await r.text();
+    assert.equal(r.status, 200, answer);
+    const want = { effort: "medium", model: "model-x", skills: { "review-pr": { effort: "low" }, "review-impl": { model: "model-b" } } };
+    assert.deepEqual(JSON.parse(fs.readFileSync(globalFile, "utf8")), want, "untouched open_plans is not written; the file's own fields stay");
+    assert.deepEqual(JSON.parse(answer).config, want);
+    // clearing a touched field removes it
+    r = await post({ scope: "global", config: {}, touched: ["model"] });
+    assert.equal(r.status, 200);
+    assert.equal(JSON.parse(fs.readFileSync(globalFile, "utf8")).model, undefined);
+    // a broken file is replaced by the touched fields
+    fs.writeFileSync(globalFile, "{ broken");
+    r = await post({ scope: "global", config: { effort: "low" }, touched: ["effort"] });
+    assert.equal(r.status, 200);
+    assert.deepEqual(JSON.parse(fs.readFileSync(globalFile, "utf8")), { effort: "low" });
+    for (const touched of [["__proto__"], ["skills.__proto__.model"], ["skills.review-impl.reviewer"], "effort", [1]]) {
+      r = await post({ scope: "global", config: { effort: "high" }, touched });
+      assert.equal(r.status, 400, JSON.stringify(touched));
+    }
+    assert.deepEqual(JSON.parse(fs.readFileSync(globalFile, "utf8")), { effort: "low" }, "refused saves change nothing");
+  } finally {
+    fs.rmSync(globalFile, { force: true });
+    await d.close();
+  }
+});

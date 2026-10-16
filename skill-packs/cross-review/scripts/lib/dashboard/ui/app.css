@@ -198,6 +198,11 @@ th.right, td.right { text-align: right; }
 .actions .push { margin-right: auto; }
 .error { color: var(--red); font-size: 13px; margin: 6px 0 0; }
 .error:empty { display: none; }
+/* settings save as you change them: this note shows that they did */
+.save-state { position: fixed; right: 24px; bottom: 20px; display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 4px; border: 1px solid var(--rule); background: var(--sheet); color: var(--soft); font-size: 13px; box-shadow: 0 2px 8px rgba(28, 27, 25, .08); opacity: 0; pointer-events: none; transition: opacity .2s; }
+.save-state.on { opacity: 1; }
+.save-state.saved { color: var(--green); }
+.save-state.failed { color: var(--red); border-color: #e9c9c4; }
 input.other { display: none; width: 220px; flex: none; }
 input.other.on { display: inline-block; }
 #clear-ws.off { display: none; }

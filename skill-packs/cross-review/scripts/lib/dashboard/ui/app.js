@@ -1003,7 +1003,7 @@ let catalogInfo = { models: null, codexDefault: null }; // for model names on se
 let avatars = { keys: [], parties: [] };
 let avatarStamp = Date.now();
 const sv = { scope: "global", ws: null, draft: {}, touched: new Set(), refreshed: false };
-let pendingSave = null; // a POST /api/settings in flight: the page reloads settings after it
+let pendingSave = null; // saves queued or in flight (see saveSoon): the page reloads settings after them
 let settingsLoad = 0; // counts openSettings calls; only the latest one applies its answer
 let savesStarted = 0; // counts saves sent; a settings load that saw one start meanwhile is asked again
 
@@ -1109,7 +1109,6 @@ function redrawFacts() {
 function resetDraft() {
   sv.draft = clone(savedConfig());
   sv.touched = new Set();
-  $("#save-error").textContent = "";
   $("#plans-warn").textContent = "";
 }
 
@@ -1143,9 +1142,12 @@ function renderSettings() {
   const codexDefault = settings.codexDefault ? `Codex default (${modelName(settings.codexDefault)})` : "Codex default";
   const inhModel = inheritedValue({ global: settings.global, workspace: workspaceHere(), skill: null, key: "model" });
   const modelInherit = workspace ? `Inherit — ${inhModel ? modelName(inhModel) : "Codex default"}` : codexDefault;
+  const other = $("#f-model-other");
+  // a name being typed under Other… stays open until the field is left
+  const typing = other.classList.contains("on") && document.activeElement === other;
   $("#f-model-set").innerHTML = optionsHtml(modelOptions({ catalog: settings.models, saved: d.model, inherited: modelInherit, codexDefault: settings.codexDefault }));
   $("#f-model-set").dataset.path = "model";
-  const other = $("#f-model-other");
+  if (typing) $("#f-model-set").value = OTHER;
   other.classList.toggle("on", $("#f-model-set").value === OTHER);
   const em = effectiveModel();
   const desc = settings.models && settings.models.find(m => m.slug === em);
@@ -1199,7 +1201,6 @@ function renderSettings() {
   $("#avatars-block").classList.toggle("on", !workspace);
   renderAvatarTable();
   $("#clear-ws").classList.toggle("off", !workspace);
-  $("#save").textContent = workspace ? `Save for ${name}` : "Save global";
 }
 
 // ----- avatars -----
@@ -1287,6 +1288,7 @@ function onSettingsChange(e) {
     return;
   }
   renderSettings();
+  saveSoon();
 }
 
 async function onSettingsClick(e) {
@@ -1305,54 +1307,82 @@ async function onSettingsClick(e) {
     }
     return;
   }
-  if (t.id === "discard") {
-    resetDraft();
-    renderSettings();
-  } else if (t.id === "clear-ws") {
+  if (t.id === "clear-ws") {
+    const name = settings.names[sv.ws] || sv.ws;
+    if (!confirm(`Clear every setting saved for ${name}? It then follows the global settings.`)) return;
     sv.draft = {};
     sv.touched = new Set(ALL_PATHS);
     renderSettings();
-  } else if (t.id === "save") {
-    // One save at a time: answers cannot arrive out of order
-    if (pendingSave) return;
-    // The reader may switch scope or keep editing while this saves: the answer updates the
-    // level it was sent for, and resets the form only when it still shows exactly what was sent
-    const scope = sv.scope;
-    const ws = sv.ws;
-    const draft = sv.draft;
-    const sent = JSON.stringify(draft);
-    const config = mergeForm(savedConfig(), draft, sv.touched);
-    const body = scope === "global" ? { scope: "global", config } : { scope: "workspace", ws, config };
-    $("#save").disabled = true;
-    savesStarted++;
-    pendingSave = fetch("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-    try {
-      const res = await pendingSave.catch(() => null);
-      const same = sv.scope === scope && sv.ws === ws && sv.draft === draft;
-      if (!res || !res.ok) {
-        const msg = res ? (await res.json().catch(() => ({}))).error : null;
-        if (same) $("#save-error").textContent = msg || "The settings could not be saved.";
-        return;
-      }
-      const answer = await res.json();
-      const saved = answer.config;
-      // the saved file replaced the one that failed to load
-      if (scope === "global") {
-        settings.global = saved;
-        settings.errors.global = undefined;
-      } else {
-        settings.workspaces[ws] = saved;
-        delete settings.errors.workspaces[ws];
-      }
-      const trackTouched = sv.touched.has("track_plans");
-      if (same && JSON.stringify(sv.draft) === sent) resetDraft();
-      if (same) $("#plans-warn").textContent = gitignoreNotes(answer.gitignore, trackTouched);
-      renderSettings();
-    } finally {
-      pendingSave = null;
-      $("#save").disabled = false;
-    }
+    saveSoon();
   }
+}
+
+// ----- saving -----
+// Every change saves at once. Saves go out one at a time, in order; a change made while one is
+// out waits for it, and a newer change at the same level replaces one still waiting (it holds
+// every field touched since the form last matched the file).
+
+const saveQueue = [];
+const saveFailed = new Map(); // level → why its last save failed
+let saveStateTimer = null;
+const levelOf = (scope, ws) => (scope === "global" ? "global" : `ws:${ws}`);
+
+function saveSoon() {
+  const job = { scope: sv.scope, ws: sv.ws, draft: sv.draft, sent: JSON.stringify(sv.draft), touched: new Set(sv.touched) };
+  savesStarted++;
+  const waiting = saveQueue.findIndex(j => j.scope === job.scope && j.ws === job.ws);
+  if (waiting >= 0) saveQueue[waiting] = job; else saveQueue.push(job);
+  showSaveState("saving");
+  if (!pendingSave) pendingSave = drainSaves();
+}
+
+async function drainSaves() {
+  try {
+    while (saveQueue.length) {
+      const job = saveQueue.shift();
+      // an answer cut off after its headers fails this save only; the ones queued behind it still go
+      await sendSave(job).catch(() => saveFailed.set(levelOf(job.scope, job.ws), "the settings could not be saved."));
+    }
+  } finally {
+    pendingSave = null;
+  }
+  const failed = [...saveFailed.values()][0];
+  showSaveState(failed ? "failed" : "saved", failed);
+}
+
+/** Send one save; the answer updates the level it was sent for, and resets the form only when it still shows exactly what was sent. */
+async function sendSave({ scope, ws, draft, sent, touched }) {
+  // the server puts the touched fields into the file as it is now
+  const level = { config: JSON.parse(sent), touched: [...touched] };
+  const body = scope === "global" ? { scope: "global", ...level } : { scope: "workspace", ws, ...level };
+  const res = await fetch("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).catch(() => null);
+  if (!res || !res.ok) {
+    const msg = res ? (await res.json().catch(() => ({}))).error : null;
+    saveFailed.set(levelOf(scope, ws), msg || "the settings could not be saved.");
+    return;
+  }
+  saveFailed.delete(levelOf(scope, ws));
+  const answer = await res.json();
+  // the saved file replaced the one that failed to load
+  if (scope === "global") {
+    settings.global = answer.config;
+    settings.errors.global = undefined;
+  } else {
+    settings.workspaces[ws] = answer.config;
+    delete settings.errors.workspaces[ws];
+  }
+  const same = sv.scope === scope && sv.ws === ws && sv.draft === draft;
+  if (same && JSON.stringify(sv.draft) === sent && !saveQueue.length) resetDraft();
+  if (same) $("#plans-warn").textContent = gitignoreNotes(answer.gitignore, touched.has("track_plans"));
+  if (onSettings()) renderSettings();
+}
+
+function showSaveState(state, why) {
+  const el = $("#save-state");
+  clearTimeout(saveStateTimer);
+  el.className = `save-state on ${state}`;
+  el.innerHTML = state === "saving" ? "Saving…" : state === "saved" ? `${ic("done")}Saved` : `Not saved: ${esc(why)}`;
+  if (state === "saved") saveStateTimer = setTimeout(() => el.classList.remove("on"), 2500);
 }
 
 /** What a save did to each workspace's .gitignore that the user should know. */

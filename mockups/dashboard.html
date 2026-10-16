@@ -145,6 +145,11 @@
   .actions { display: flex; gap: 10px; justify-content: flex-end; align-items: flex-start; margin-top: 24px; }
   button { font: 500 13px var(--sans); padding: 6px 14px; border-radius: 4px; border: 1px solid var(--ink); background: var(--ink); color: var(--paper); cursor: pointer; }
   button.plain { background: transparent; color: var(--ink); border-color: var(--rule); }
+  /* settings save as you change them: this note shows that they did */
+  .save-state { position: fixed; right: 24px; bottom: 20px; display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 4px; border: 1px solid var(--rule); background: var(--sheet); color: var(--soft); font-size: 13px; box-shadow: 0 2px 8px rgba(28, 27, 25, .08); opacity: 0; pointer-events: none; transition: opacity .2s; }
+  .save-state.on { opacity: 1; }
+  .save-state.saved { color: var(--green); }
+  .save-state.failed { color: var(--red); border-color: #e9c9c4; }
   pre { background: var(--sheet); border: 1px solid var(--rule); border-radius: 4px; padding: 10px 12px; font: 12px/1.5 var(--mono); overflow: auto; }
   details summary { cursor: pointer; color: var(--soft); font-size: 13px; }
   .mock { color: var(--muted); font-size: 12px; float: right; }
@@ -367,8 +372,8 @@
   <div class="actions">
     <details style="margin-right:auto"><summary id="preview-title">Show file</summary><pre id="preview"></pre></details>
     <button class="plain" id="clear-ws">Clear this workspace</button>
-    <button class="plain">Discard</button><button id="save">Save</button>
   </div>
+  <div class="save-state" id="save-state" role="status"></div>
 </section>
 </main>
 
@@ -697,7 +702,6 @@ function renderSettings() {
   document.getElementById("avatars-block").classList.toggle("on", scope === "global");
   renderAvatars();
   document.getElementById("clear-ws").style.display = scope === "workspace" ? "" : "none";
-  document.getElementById("save").textContent = scope === "global" ? "Save global" : `Save for ${ws()}`;
 }
 const PARTIES = [
   { key: "you", who: "us", label: "You", seen: "every session" },
@@ -720,7 +724,21 @@ function renderAvatars() {
 }
 document.querySelectorAll("input[name=scope]").forEach(r => r.onchange = () => { scope = r.value; renderSettings(); });
 document.getElementById("ws").onchange = () => { scope = "workspace"; document.querySelector("input[value=workspace]").checked = true; renderSettings(); };
-document.getElementById("clear-ws").onclick = () => { config.workspace[ws()] = {}; renderSettings(); };
+document.getElementById("clear-ws").onclick = () => { if (confirm(`Clear every setting saved for ${ws()}? It then follows the global settings.`)) { config.workspace[ws()] = {}; renderSettings(); flashSaved(); } };
+// a change saves at once: Saving…, then Saved for a moment
+let savedTimer = null;
+function flashSaved() {
+  const el = document.getElementById("save-state");
+  clearTimeout(savedTimer);
+  el.className = "save-state on saving"; el.textContent = "Saving…";
+  savedTimer = setTimeout(() => {
+    el.className = "save-state on saved"; el.innerHTML = `${ic("done")}Saved`;
+    savedTimer = setTimeout(() => el.classList.remove("on"), 2500);
+  }, 300);
+}
+document.getElementById("settings").addEventListener("change", e => {
+  if (e.target.name !== "scope" && e.target.id !== "ws" && e.target.dataset.av === undefined) flashSaved();
+});
 document.getElementById("refresh").onclick = e => { e.currentTarget.lastChild.textContent = "refreshed just now"; };
 renderSettings();
 

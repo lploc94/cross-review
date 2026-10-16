@@ -20,9 +20,10 @@ import { classify, inputValues, readSession, roundActivity } from "./model.js";
 import { findWorkspaces, isWorkspace, listSessions, sessionsDir, SCAN_DEPTH, SESSION_ID_RE } from "./scan.js";
 import { discoveryFile, removeDiscoveryIfOwn, writeDiscovery } from "./discovery.js";
 import { AvatarError, avatarFile, listAvatars, removeAvatar, saveAvatar, AVATAR_MAX_BYTES } from "./avatars.js";
-import { ensureCrossReviewDir, globalConfigPath, readConfig, resolvePlanSettings, syncGitignore, validateConfig, workspaceConfigPath, writeConfig } from "../config.js";
+import { CONFIG_SKILLS, ensureCrossReviewDir, globalConfigPath, readConfig, resolvePlanSettings, syncGitignore, validateConfig, workspaceConfigPath, writeConfig } from "../config.js";
 import { fillCommits, gitPlanFacts, listPlans, parsePlan, planProgress, planState, plansDir, plansWarning, summarizePlanText } from "../plans.js";
 import { getReviewer } from "../reviewers/index.js";
+import { mergeForm } from "./ui/settings.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const UI_DIR = path.join(HERE, "ui");
@@ -35,6 +36,8 @@ const PING_MS = 15000;
 const REQUEST_SCAN_AGE_MS = 5000;
 const ACTIVITY_PAGE = 20;
 const SETTINGS_BODY_MAX = 64 * 1024;
+/** A field the Settings page can change: a top-level key, or a known skill's model or effort. */
+const SETTING_PATH = new RegExp(`^(reviewer|model|effort|open_dashboard|open_plans|track_plans|skills\\.(${CONFIG_SKILLS.join("|")})\\.(model|effort))$`);
 const COOKIE = "cr_token";
 
 // The only files the server hands out; a request path is a key here or a 404
@@ -681,10 +684,22 @@ export async function startDashboard({
     } else {
       return fail(res, 400, "scope must be global or workspace");
     }
-    const errors = validateConfig(body.config);
+    let next = body.config;
+    if (body.touched !== undefined) {
+      // The page's changed fields go into the file as it is now, so a change made elsewhere since
+      // the page loaded stays; a broken file is replaced
+      if (!Array.isArray(body.touched) || !body.touched.every(p => typeof p === "string" && SETTING_PATH.test(p))) return fail(res, 400, "touched must list setting paths");
+      if (!next || typeof next !== "object" || Array.isArray(next)) return fail(res, 400, "config must be a JSON object");
+      let current = {};
+      try {
+        current = readConfig(file);
+      } catch {}
+      next = mergeForm(current, next, body.touched);
+    }
+    const errors = validateConfig(next);
     if (errors.length) return fail(res, 400, errors.join("; "));
     if (body.scope === "workspace") ensureCrossReviewDir(watcher.workspacePath(body.ws));
-    const config = writeConfig(file, body.config);
+    const config = writeConfig(file, next);
     // Plans in git: the saved level's workspaces get the .gitignore their resolved value asks for
     const targets = body.scope === "workspace" ? [[body.ws, watcher.workspacePath(body.ws)]] : [...watcher.workspaceMap()];
     const gitignore = Object.create(null);

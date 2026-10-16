@@ -41,6 +41,8 @@ const catalog = {
   cliInfo: async () => ({ version: "codex-cli 9.9.9-invented", loggedIn: true }),
 };
 const d = await startDashboard({ root, port: 0, open: false, discoveryFile: null, catalog });
+// Settings save as they change; this note says when every save is done
+const SAVED = `document.getElementById("save-state").classList.contains("saved")`;
 const browser = await launchChrome(bin, path.join(tmp, "profile"));
 try {
   const sessions = await (await fetch(`http://127.0.0.1:${d.port}/api/sessions`, { headers: { Authorization: `Bearer ${d.token}` } })).json();
@@ -236,7 +238,7 @@ try {
   await page.waitFor(`document.querySelectorAll("#per-skill tr").length === 4 && document.querySelectorAll("#avatars tr").length >= 2`);
   const set = await page.evaluate(`({
     follow: !!document.querySelector(".form #f-follow"),
-    save: document.getElementById("save").textContent,
+    buttons: [...document.querySelectorAll("#settings button")].map(b => b.id),
     avatars: document.getElementById("avatars-block").classList.contains("on"),
     model: document.querySelector("#f-model-set option").textContent,
     models: document.querySelectorAll("#f-model-set option").length,
@@ -247,7 +249,7 @@ try {
   })`);
   assert.equal(set.gutter, "stable", "Sessions and Settings keep the same width");
   assert.ok(set.follow);
-  assert.equal(set.save, "Save global");
+  assert.deepEqual(set.buttons, ["clear-ws"], "no Save or Discard: a change saves by itself");
   assert.equal(set.avatars, true);
   assert.equal(set.model, "Codex default (Model A)");
   assert.equal(set.models, 3);
@@ -256,20 +258,22 @@ try {
   assert.equal(set.inlineStyle, 0);
   await page.screenshot(path.join(shots, "settings-1400.png"));
 
-  // Save global: Follow reviews on, review-impl on Model B; the file holds only those
+  // Each change saves at once: Follow reviews on, review-impl on Model B; the file holds only
+  // those, and the note says Saved
   await page.evaluate(`(() => {
     const f = document.getElementById("f-follow"); f.value = "on"; f.dispatchEvent(new Event("change", { bubbles: true }));
     const m = document.querySelector('#per-skill select[data-path="skills.review-impl.model"]'); m.value = "model-b"; m.dispatchEvent(new Event("change", { bubbles: true }));
   })()`);
   assert.match(await page.evaluate(`document.querySelectorAll("#per-skill tr")[1].textContent`), /set here[\s\S]*Model B · high/);
-  await page.evaluate(`document.getElementById("save").click()`);
+  await page.waitFor(SAVED);
+  assert.equal(await page.evaluate(`document.getElementById("save-state").textContent`), "Saved");
+  await page.screenshot(path.join(shots, "settings-saved-1400.png"));
   const globalFile = path.join(process.env.HOME, ".cross-review", "config.json");
-  for (let i = 0; i < 50 && !fs.existsSync(globalFile); i++) await new Promise(r => setTimeout(r, 100));
   assert.deepEqual(JSON.parse(fs.readFileSync(globalFile, "utf8")), { open_dashboard: true, skills: { "review-impl": { model: "model-b" } } });
 
   // A workspace: inherits the global values, no avatars, saves to its own file
   await page.evaluate(`location.hash = "#/settings/harbor-app"`);
-  await page.waitFor(`document.getElementById("save").textContent === "Save for harbor-app"`);
+  await page.waitFor(`document.getElementById("preview-title").textContent === "Show harbor-app/.cross-review/config.json"`);
   const ws = await page.evaluate(`({
     avatars: document.getElementById("avatars-block").classList.contains("on"),
     follow: document.querySelector("#f-follow option").textContent,
@@ -280,16 +284,22 @@ try {
   assert.equal(ws.follow, "Inherit — on");
   assert.match(ws.impl, /^Model B · high/);
   assert.equal(ws.scope, true);
-  await page.evaluate(`(() => { const e = document.getElementById("f-effort-set"); e.value = "low"; e.dispatchEvent(new Event("change", { bubbles: true })); document.getElementById("save").click(); })()`);
+  await page.evaluate(`(() => { const e = document.getElementById("f-effort-set"); e.value = "low"; e.dispatchEvent(new Event("change", { bubbles: true })); })()`);
   const wsFile = path.join(fx.workspaces.harbor, ".cross-review", "config.json");
   for (let i = 0; i < 50 && !fs.existsSync(wsFile); i++) await new Promise(r => setTimeout(r, 100));
   assert.deepEqual(JSON.parse(fs.readFileSync(wsFile, "utf8")), { effort: "low" });
   await page.screenshot(path.join(shots, "settings-workspace-1400.png"));
+  // Clear this workspace asks first, then saves the empty level (which removes the file)
+  await page.evaluate(`(() => { window.confirm = () => false; document.getElementById("clear-ws").click(); })()`);
+  assert.match(await page.evaluate(`document.getElementById("preview").textContent`), /"effort": "low"/, "cancelled: nothing changes");
+  await page.evaluate(`(() => { window.confirm = () => true; document.getElementById("clear-ws").click(); })()`);
+  await page.waitFor(SAVED);
+  assert.equal(fs.existsSync(wsFile), false);
+  assert.equal(await page.evaluate(`document.getElementById("preview").textContent.trim()`), "{}");
 
-  // One save at a time: a second Save while the first is in flight does nothing, and an
-  // edit made meanwhile stays in the form for the next Save
+  // One save at a time: a change made while a save is out is saved after it, in order
   await page.evaluate(`location.hash = "#/settings"`);
-  await page.waitFor(`document.getElementById("save").textContent === "Save global"`);
+  await page.waitFor(`document.getElementById("preview-title").textContent === "Show ~/.cross-review/config.json"`);
   await page.evaluate(`(() => {
     const native = window.fetch;
     window.fetch = async (...args) => {
@@ -301,23 +311,48 @@ try {
       return res;
     };
     const e = document.getElementById("f-effort-set"); e.value = "low"; e.dispatchEvent(new Event("change", { bubbles: true }));
-    document.getElementById("save").click();
   })()`);
   await page.waitFor(`typeof window.releaseSave2 === "function"`);
-  assert.equal(await page.evaluate(`document.getElementById("save").disabled`), true);
-  await page.evaluate(`(() => { const e = document.getElementById("f-effort-set"); e.value = "xhigh"; e.dispatchEvent(new Event("change", { bubbles: true })); document.getElementById("save").click(); })()`);
+  assert.equal(await page.evaluate(`document.getElementById("save-state").textContent`), "Saving…");
+  await page.evaluate(`(() => { const e = document.getElementById("f-effort-set"); e.value = "xhigh"; e.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+  assert.equal(JSON.parse(fs.readFileSync(globalFile, "utf8")).effort, "low", "the second change waits for the first save");
   await page.evaluate(`window.releaseSave2()`);
-  await page.waitFor(`!document.getElementById("save").disabled`);
-  assert.equal(JSON.parse(fs.readFileSync(globalFile, "utf8")).effort, "low", "only the first save was sent");
-  assert.match(await page.evaluate(`document.getElementById("preview").textContent`), /"effort": "xhigh"/, "the later edit is kept");
-  await page.evaluate(`document.getElementById("save").click()`);
-  for (let i = 0; i < 50 && JSON.parse(fs.readFileSync(globalFile, "utf8")).effort !== "xhigh"; i++) await new Promise(r => setTimeout(r, 100));
+  await page.waitFor(SAVED);
   assert.equal(JSON.parse(fs.readFileSync(globalFile, "utf8")).effort, "xhigh");
+  assert.match(await page.evaluate(`document.getElementById("preview").textContent`), /"effort": "xhigh"/);
+
+  // A save whose answer cannot be read does not strand the change queued behind it; a last
+  // save that fails says so
+  await page.evaluate(`(() => {
+    const native = window.fetch;
+    window.posts = 0;
+    window.breakSaves = true;
+    window.fetch = async (...args) => {
+      if (window.breakSaves && args[0] === "/api/settings" && args[1] && args[1].method === "POST" && ++window.posts !== 2) {
+        await native(...args);
+        await new Promise(r => { window.breakBody = r; });
+        return { ok: true, json: () => Promise.reject(new TypeError("invented body failure")) };
+      }
+      return native(...args);
+    };
+    const e = document.getElementById("f-effort-set"); e.value = "low"; e.dispatchEvent(new Event("change", { bubbles: true }));
+  })()`);
+  await page.waitFor(`typeof window.breakBody === "function"`);
+  await page.evaluate(`(() => { const e = document.getElementById("f-effort-set"); e.value = "high"; e.dispatchEvent(new Event("change", { bubbles: true })); const b = window.breakBody; window.breakBody = null; b(); })()`);
+  await page.waitFor(SAVED);
+  assert.equal(await page.evaluate(`window.posts`), 2);
+  assert.equal(JSON.parse(fs.readFileSync(globalFile, "utf8")).effort, "high");
+  await page.evaluate(`(() => { const e = document.getElementById("f-effort-set"); e.value = "xhigh"; e.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+  await page.waitFor(`typeof window.breakBody === "function"`);
+  await page.evaluate(`(() => { const b = window.breakBody; window.breakBody = null; b(); })()`);
+  await page.waitFor(`document.getElementById("save-state").classList.contains("failed")`);
+  assert.match(await page.evaluate(`document.getElementById("save-state").textContent`), /^Not saved: /);
+  await page.evaluate(`(() => { window.breakSaves = false; })()`);
 
   // Switching to a workspace while a global save is in flight: the answer goes to the global
   // level only, and the workspace form starts from the workspace's own (empty) file
   await page.evaluate(`location.hash = "#/settings"`);
-  await page.waitFor(`document.getElementById("save").textContent === "Save global"`);
+  await page.waitFor(`document.getElementById("preview-title").textContent === "Show ~/.cross-review/config.json"`);
   await page.evaluate(`(() => {
     const native = window.fetch;
     window.fetch = async (...args) => {
@@ -329,15 +364,14 @@ try {
       return res;
     };
     const e = document.getElementById("f-effort-set"); e.value = "medium"; e.dispatchEvent(new Event("change", { bubbles: true }));
-    document.getElementById("save").click();
   })()`);
   await page.waitFor(`typeof window.releaseSave === "function"`);
   await page.evaluate(`location.hash = "#/settings/inkwell"`);
   await page.evaluate(`window.releaseSave()`);
-  await page.waitFor(`document.getElementById("save").textContent === "Save for inkwell"`);
+  await page.waitFor(`document.getElementById("preview-title").textContent === "Show inkwell/.cross-review/config.json"`);
   await page.waitFor(`document.getElementById("preview").textContent.trim() === "{}" && document.querySelector("#f-effort-set option").textContent === "Inherit — medium"`);
   assert.equal(JSON.parse(fs.readFileSync(globalFile, "utf8")).effort, "medium");
-  await page.evaluate(`(() => { const f = document.getElementById("f-follow"); f.value = "off"; f.dispatchEvent(new Event("change", { bubbles: true })); document.getElementById("save").click(); })()`);
+  await page.evaluate(`(() => { const f = document.getElementById("f-follow"); f.value = "off"; f.dispatchEvent(new Event("change", { bubbles: true })); })()`);
   const inkFile = path.join(fx.workspaces.inkwell, ".cross-review", "config.json");
   for (let i = 0; i < 50 && !fs.existsSync(inkFile); i++) await new Promise(r => setTimeout(r, 100));
   assert.deepEqual(JSON.parse(fs.readFileSync(inkFile, "utf8")), { open_dashboard: false });
@@ -345,7 +379,7 @@ try {
   // Settings loads that answer out of order: the older load is dropped, the newer page and
   // its edits stay
   await page.evaluate(`location.hash = "#/settings"`);
-  await page.waitFor(`document.getElementById("save").textContent === "Save global"`);
+  await page.waitFor(`document.getElementById("preview-title").textContent === "Show ~/.cross-review/config.json"`);
   await page.evaluate(`(() => {
     const native = window.fetch;
     window.fetch = async (...args) => {
@@ -360,10 +394,10 @@ try {
   })()`);
   await page.waitFor(`typeof window.releaseLoad === "function"`);
   await page.evaluate(`location.hash = "#/settings/inkwell"`);
-  await page.waitFor(`document.getElementById("save").textContent === "Save for inkwell"`);
+  await page.waitFor(`document.getElementById("preview-title").textContent === "Show inkwell/.cross-review/config.json"`);
   await page.evaluate(`(() => { const e = document.getElementById("f-effort-set"); e.value = "low"; e.dispatchEvent(new Event("change", { bubbles: true })); })()`);
   await page.evaluate(`(async () => { window.releaseLoad(); await new Promise(r => setTimeout(r, 300)); })()`);
-  assert.equal(await page.evaluate(`document.getElementById("save").textContent`), "Save for inkwell");
+  assert.equal(await page.evaluate(`document.getElementById("preview-title").textContent`), "Show inkwell/.cross-review/config.json");
   assert.match(await page.evaluate(`document.getElementById("preview").textContent`), /"effort": "low"/);
   // ... and a load that answers after the user left Settings does not pull them back
   await page.evaluate(`(() => { window.held3 = false; window.releaseLoad = null; location.hash = "#/settings/no-such-workspace"; })()`);
@@ -476,18 +510,18 @@ try {
     assert.deepEqual(await blank.evaluate(`[...document.querySelectorAll("#avatars tr")].slice(2).map(tr => tr.querySelector("img").alt).sort()`), ["AG", "I"]);
     fs.writeFileSync(path.join(blankRoot, "__proto__", ".cross-review", "config.json"), JSON.stringify({ effort: "low" }));
     await blank.evaluate(`location.hash = "#/settings/__proto__"`);
-    await blank.waitFor(`document.getElementById("save").textContent === "Save for __proto__"`);
+    await blank.waitFor(`document.getElementById("preview-title").textContent === "Show __proto__/.cross-review/config.json"`);
     assert.equal(await blank.evaluate(`document.getElementById("settings-error").textContent`), "");
     assert.match(await blank.evaluate(`document.getElementById("preview").textContent`), /"effort": "low"/);
     // A broken file shows its error until a save replaces it
     const quillFile = path.join(blankRoot, "quill", ".cross-review", "config.json");
     fs.writeFileSync(quillFile, "{ broken");
     await blank.evaluate(`location.hash = "#/settings/quill"`);
-    await blank.waitFor(`document.getElementById("save").textContent === "Save for quill"`);
+    await blank.waitFor(`document.getElementById("preview-title").textContent === "Show quill/.cross-review/config.json"`);
     assert.match(await blank.evaluate(`document.getElementById("settings-error").textContent`), /not valid JSON/);
-    await blank.evaluate(`(() => { const e = document.getElementById("f-effort-set"); e.value = "low"; e.dispatchEvent(new Event("change", { bubbles: true })); document.getElementById("save").click(); })()`);
+    await blank.evaluate(`(() => { const e = document.getElementById("f-effort-set"); e.value = "low"; e.dispatchEvent(new Event("change", { bubbles: true })); })()`);
     for (let i = 0; i < 50 && fs.readFileSync(quillFile, "utf8").includes("broken"); i++) await new Promise(r => setTimeout(r, 100));
-    await blank.waitFor(`!document.getElementById("save").disabled`);
+    await blank.waitFor(SAVED);
     assert.deepEqual(JSON.parse(fs.readFileSync(quillFile, "utf8")), { effort: "low" });
     assert.equal(await blank.evaluate(`document.getElementById("settings-error").textContent`), "");
   } finally {
@@ -509,6 +543,7 @@ try {
   }
 
   await settingsAtOnceChecks(browser);
+  await otherModelChecks(browser);
 
   await plansChecks(browser);
 
@@ -575,7 +610,7 @@ async function settingsAtOnceChecks(browser) {
       await fresh.evaluate(`location.hash = "#/settings"`);
       await fresh.waitFor(`typeof window.releaseLoad === "function"`);
       assert.equal(await fresh.evaluate(`document.querySelectorAll("#per-skill tr").length`), 4, "the form is filled while the load is held");
-      assert.equal(await fresh.evaluate(`document.getElementById("save").textContent`), "Save global");
+      assert.equal(await fresh.evaluate(`document.getElementById("preview-title").textContent`), "Show ~/.cross-review/config.json");
       assert.match(await fresh.evaluate(`document.getElementById("preview").textContent`), new RegExp(`"effort": "${before.effort}"`));
       assert.ok(await fresh.evaluate(`${options}.includes("Model A")`));
       await fresh.evaluate(`(() => { const f = document.getElementById("f-showplans"); f.value = "on"; f.dispatchEvent(new Event("change", { bubbles: true })); window.releaseLoad(); })()`);
@@ -594,9 +629,9 @@ async function settingsAtOnceChecks(browser) {
       await page.evaluate(holdLoad);
       await page.evaluate(`location.hash = "#/settings"`);
       await page.waitFor(`typeof window.releaseLoad === "function"`);
-      await page.evaluate(`(() => { const e = document.getElementById("f-effort-set"); e.value = "low"; e.dispatchEvent(new Event("change", { bubbles: true })); document.getElementById("save").click(); })()`);
+      await page.evaluate(`(() => { const e = document.getElementById("f-effort-set"); e.value = "low"; e.dispatchEvent(new Event("change", { bubbles: true })); })()`);
       for (let i = 0; i < 50 && JSON.parse(fs.readFileSync(globalFile, "utf8")).effort !== "low"; i++) await new Promise(r => setTimeout(r, 100));
-      await page.waitFor(`!document.getElementById("save").disabled`);
+      await page.waitFor(SAVED);
       await page.evaluate(`(async () => { window.releaseLoad(); await new Promise(r => setTimeout(r, 400)); })()`);
       assert.equal(await page.evaluate(`document.getElementById("f-effort-set").value`), "low");
       assert.match(await page.evaluate(`document.getElementById("preview").textContent`), /"effort": "low"/);
@@ -623,6 +658,46 @@ async function settingsAtOnceChecks(browser) {
     await detail.waitFor(`/^Model A · /.test(document.getElementById("f-model").textContent)`);
   } finally {
     await d9.close();
+  }
+}
+
+/** A model name typed under Other… stays while an earlier change finishes saving, and saves when the field is left. */
+async function otherModelChecks(browser) {
+  const otherRoot = path.join(tmp, "other");
+  fs.mkdirSync(path.join(otherRoot, ".cross-review", "sessions"), { recursive: true });
+  const d10 = await startDashboard({ root: otherRoot, port: 0, open: false, discoveryFile: null, catalog: { ...catalog, listModels: async () => null } });
+  const globalFile = path.join(process.env.HOME, ".cross-review", "config.json");
+  const before = fs.readFileSync(globalFile, "utf8");
+  const page = await browser.newPage(1400, 1000);
+  try {
+    await page.goto(`${d10.url}#/settings`);
+    await page.waitFor(`[...document.querySelectorAll("#f-model-set option")].some(o => o.value === "__other__")`);
+    await page.evaluate(`(() => {
+      const native = window.fetch;
+      window.fetch = async (...args) => {
+        const res = await native(...args);
+        if (args[0] === "/api/settings" && args[1] && args[1].method === "POST" && !window.held) {
+          window.held = true;
+          await new Promise(r => { window.releaseSave = r; });
+        }
+        return res;
+      };
+      const e = document.getElementById("f-effort-set"); e.value = "low"; e.dispatchEvent(new Event("change", { bubbles: true }));
+      const m = document.getElementById("f-model-set"); m.value = "__other__"; m.dispatchEvent(new Event("change", { bubbles: true }));
+      document.getElementById("f-model-other").value = "model-half";
+    })()`);
+    await page.waitFor(`typeof window.releaseSave === "function"`);
+    await page.evaluate(`window.releaseSave()`);
+    await page.waitFor(SAVED);
+    const other = await page.evaluate(`(() => { const o = document.getElementById("f-model-other"); return { on: o.classList.contains("on"), value: o.value, focused: document.activeElement === o }; })()`);
+    assert.deepEqual(other, { on: true, value: "model-half", focused: true });
+    assert.equal(JSON.parse(fs.readFileSync(globalFile, "utf8")).model, undefined, "the half-typed name is not saved");
+    await page.evaluate(`(() => { const o = document.getElementById("f-model-other"); o.value = "model-whole"; o.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+    await page.waitFor(SAVED);
+    assert.equal(JSON.parse(fs.readFileSync(globalFile, "utf8")).model, "model-whole");
+  } finally {
+    fs.writeFileSync(globalFile, before);
+    await d10.close();
   }
 }
 
@@ -839,10 +914,9 @@ async function plansChecks(browser) {
     git(inkwell, "init", "-q");
     fs.writeFileSync(path.join(inkwell, ".gitignore"), ".cross-review/\n");
     await page.evaluate(`location.hash = "#/settings"`);
-    await page.waitFor(`document.getElementById("save").textContent === "Save global" && document.getElementById("f-plans").options.length === 2`);
+    await page.waitFor(`document.getElementById("preview-title").textContent === "Show ~/.cross-review/config.json" && document.getElementById("f-plans").options.length === 2`);
     await page.evaluate(`(() => {
       for (const [id, v] of [["f-plans", "on"], ["f-showplans", "on"]]) { const s = document.getElementById(id); s.value = v; s.dispatchEvent(new Event("change", { bubbles: true })); }
-      document.getElementById("save").click();
     })()`);
     await page.waitFor(`/edited by hand/.test(document.getElementById("plans-warn").textContent)`);
     const warn = await page.evaluate(`document.getElementById("plans-warn").textContent`);
@@ -856,13 +930,13 @@ async function plansChecks(browser) {
     await page.screenshot(path.join(shots, "settings-plans-1400.png"));
     // a workspace inherits; choosing On and then Inherit again removes the key from its file
     await page.evaluate(`location.hash = "#/settings/harbor-app"`);
-    await page.waitFor(`document.getElementById("save").textContent === "Save for harbor-app"`);
+    await page.waitFor(`document.getElementById("preview-title").textContent === "Show harbor-app/.cross-review/config.json"`);
     assert.deepEqual(await page.evaluate(`[document.getElementById("f-plans").selectedOptions[0].text, document.getElementById("f-showplans").selectedOptions[0].text]`), ["Inherit — on", "Inherit — on"]);
     const wsFile = path.join(harbor, ".cross-review", "config.json");
-    const pick = async (id, v) => page.evaluate(`(() => { const s = document.getElementById("${id}"); s.value = "${v}"; s.dispatchEvent(new Event("change", { bubbles: true })); document.getElementById("save").click(); })()`);
+    const pick = async (id, v) => page.evaluate(`(() => { const s = document.getElementById("${id}"); s.value = "${v}"; s.dispatchEvent(new Event("change", { bubbles: true })); })()`);
     await pick("f-showplans", "off");
     for (let i = 0; i < 50 && !fs.existsSync(wsFile); i++) await sleep(100);
-    await page.waitFor(`!document.getElementById("save").disabled`);
+    await page.waitFor(SAVED);
     assert.deepEqual(JSON.parse(fs.readFileSync(wsFile, "utf8")), { open_plans: false });
     await pick("f-showplans", "");
     for (let i = 0; i < 50 && fs.existsSync(wsFile); i++) await sleep(100);
