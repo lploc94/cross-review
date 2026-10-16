@@ -19,6 +19,7 @@ import {
 import { followInDashboard } from "../skill-packs/cross-review/scripts/lib/dashboard/follow.js";
 import { writeFakeCodex } from "./helpers/fake-codex.js";
 import { writeFakeClaude } from "./helpers/fake-claude.js";
+import { writeFakeAgy } from "./helpers/fake-agy.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const RUNNER = path.join(ROOT, "skill-packs/cross-review/scripts/review-runner.js");
@@ -39,6 +40,7 @@ before(() => {
   fs.mkdirSync(bin);
   writeFakeCodex(bin);
   writeFakeClaude(bin);
+  writeFakeAgy(bin);
   workDir = path.join(tmp, "work");
   fs.mkdirSync(workDir);
   logPath = path.join(tmp, "codex-log.jsonl");
@@ -48,6 +50,8 @@ before(() => {
   process.env.FAKE_CODEX_OUTPUT = outputPath;
   process.env.FAKE_CLAUDE_LOG = path.join(tmp, "claude-log.jsonl");
   process.env.FAKE_CLAUDE_OUTPUT = path.join(tmp, "claude-output.md");
+  process.env.FAKE_AGY_LOG = path.join(tmp, "agy-log.jsonl");
+  process.env.FAKE_AGY_OUTPUT = path.join(tmp, "agy-output.md");
 });
 
 after(() => {
@@ -899,5 +903,83 @@ test("a failed Claude turn (is_error) stops the round with its message", async (
     await endSession(begun.session_dir);
   } finally {
     delete process.env.FAKE_CLAUDE_ERROR;
+  }
+});
+
+// ---------- Antigravity (agy) as the reviewer ----------
+
+function agyCalls() {
+  const f = process.env.FAKE_AGY_LOG;
+  if (!fs.existsSync(f)) return [];
+  return fs.readFileSync(f, "utf8").trim().split("\n").filter(Boolean).map(l => JSON.parse(l));
+}
+
+test("agy reviewer round trip: NDJSON on stdin, resumed by --conversation", async () => {
+  fs.rmSync(process.env.FAKE_AGY_LOG, { force: true });
+  resetLog();
+  fs.writeFileSync(process.env.FAKE_AGY_OUTPUT, "### ISSUE-1: Something\n- Category: correctness\n- Severity: high\n- Problem: p\n\n### VERDICT\n- Status: REVISE\n- Reason: r\n");
+  const input1 = inputFor("review-impl", "a1");
+  const begun = await beginSession({ skill: "review-impl", mode: "working-tree", inputText: input1, workingDir: workDir, reviewer: "agy", model: "gemini-x-flash", effort: "low" });
+  const w1 = await waitSession(begun.session_dir, { maxWaitSeconds: 30 });
+  assert.equal(w1.status, "completed", JSON.stringify(w1));
+  assert.equal(w1.next, "respond");
+  assert.equal(w1.thread_id, "conv-fake-1");
+  assert.equal(w1.review.blocks.length, 1);
+  const st = stateOf(begun.session_dir);
+  assert.deepEqual([st.reviewer, st.sandbox, st.model, st.effort], ["agy", "danger-full-access", "gemini-x-flash", "low"]);
+  // the stored prompt stays plain text; only the reviewer's stdin is encoded
+  const raw = fs.readFileSync(path.join(begun.session_dir, "prompts", "round-001.txt"), "utf8");
+  assert.equal(raw, renderExpected("review-impl", "working-tree-round1", input1));
+  const stdinFile = fs.readFileSync(path.join(begun.session_dir, "prompt.stdin"), "utf8");
+  assert.deepEqual(JSON.parse(stdinFile), { event: "user", message: { role: "user", content: raw } });
+
+  fs.writeFileSync(process.env.FAKE_AGY_OUTPUT, "### VERDICT\n- Status: APPROVE\n- Reason: ok\n");
+  const input2 = inputFor("review-impl", "a2");
+  await replySession(begun.session_dir, { inputText: input2 });
+  const w2 = await waitSession(begun.session_dir, { maxWaitSeconds: 30 });
+  assert.equal(w2.next, "done");
+
+  const calls = agyCalls();
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].prompt, raw);
+  assert.equal(calls[1].prompt, renderExpected("review-impl", "rebuttal-working-tree", input2));
+  assert.ok(!calls[0].args.includes("--conversation"));
+  assert.equal(argAfter(calls[1].args, "--conversation"), "conv-fake-1");
+  assert.equal(calls[1].args.at(-1), "--print=");
+  assert.ok(calls.every(c => argAfter(c.args, "--model") === "gemini-x-flash" && argAfter(c.args, "--effort") === "low"));
+  assert.ok(calls.every(c => c.args.includes("--dangerously-skip-permissions") && c.reviewerEnv === "agy"));
+  assert.equal(codexCalls().length, 0, "Codex is not started for an agy review");
+  const end = await endSession(begun.session_dir);
+  assert.equal(end.finalized, true);
+});
+
+test("agy rejects an effort the model lacks before any session exists", async () => {
+  const ws = fs.mkdtempSync(path.join(tmp, "agy-effort-"));
+  fs.rmSync(process.env.FAKE_AGY_LOG, { force: true });
+  await assert.rejects(
+    beginSession({ skill: "review-plan", inputText: inputFor("review-plan", "e"), workingDir: ws, reviewer: "agy", model: "gemini-x-flash", effort: "max" }),
+    e => e.code === "INVALID_SELECTION" && /gemini-x-flash supports effort: high, medium, low/.test(e.message),
+  );
+  await assert.rejects(
+    beginSession({ skill: "review-plan", inputText: inputFor("review-plan", "e"), workingDir: ws, reviewer: "agy", model: "no-such-model" }),
+    e => e.code === "INVALID_SELECTION" && /Unknown Antigravity model no-such-model/.test(e.message),
+  );
+  assert.equal(sessionCount(ws), 0);
+  assert.equal(agyCalls().length, 0);
+});
+
+test("a failed agy turn (status ERROR) stops the round with its error", async () => {
+  fs.writeFileSync(process.env.FAKE_AGY_OUTPUT, "unused");
+  process.env.FAKE_AGY_ERROR = "quota exhausted for gemini-x-flash";
+  try {
+    const begun = await beginSession({ skill: "review-plan", inputText: inputFor("review-plan", "f"), workingDir: workDir, reviewer: "agy", model: "claude-y" });
+    const w = await waitSession(begun.session_dir, { maxWaitSeconds: 30 });
+    assert.equal(w.next, "stopped");
+    assert.match(w.error, /Antigravity turn failed: quota exhausted/);
+    assert.equal(w.thread_id, "conv-fake-1");
+    assert.ok(!agyCalls().at(-1).args.includes("--effort"), "claude-y has no effort levels");
+    await endSession(begun.session_dir);
+  } finally {
+    delete process.env.FAKE_AGY_ERROR;
   }
 });

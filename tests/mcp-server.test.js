@@ -78,7 +78,7 @@ test("lists the four review tools", async () => {
     // Claude Code plan mode refuses MCP tools that are not marked read-only
     for (const t of tools) assert.equal(t.annotations?.readOnlyHint, true, `${t.name} lacks readOnlyHint`);
     const begin = tools.find(t => t.name === "review_begin");
-    assert.deepEqual(begin.inputSchema.properties.reviewer.enum, ["codex", "claude"]);
+    assert.deepEqual(begin.inputSchema.properties.reviewer.enum, ["codex", "claude", "agy"]);
     assert.ok(!begin.inputSchema.required.includes("reviewer"));
   } finally {
     await client.close();
