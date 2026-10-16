@@ -52,7 +52,10 @@ try {
   assert.equal(await page.evaluate("location.search"), "", "the token left the address bar");
 
   const dom = await page.evaluate(`(() => ({
-    logo: !!document.querySelector(".top .wrap .name svg"),
+    logo: (() => { const i = document.querySelector(".top .wrap .name img.logo"); return i && i.complete && i.naturalWidth > 0 ? i.getAttribute("src") : null; })(),
+    icon: document.querySelector("link[rel=icon]")?.getAttribute("href"),
+    foot: document.querySelector(".site-foot").textContent.replace(/\\s+/g, " ").trim(),
+    links: [...document.querySelectorAll(".site-foot a")].map(a => [a.textContent, a.href, a.target, a.rel]),
     nav: [...document.querySelectorAll(".top nav a")].map(a => ({ nav: a.dataset.nav, svg: !!a.querySelector("svg"), on: a.classList.contains("on") })),
     where: document.getElementById("where").textContent,
     active: [...document.querySelectorAll("#active tr")].map(tr => ({
@@ -64,10 +67,15 @@ try {
     inlineStyle: document.querySelectorAll("[style]").length,
   }))()`);
 
-  // header: logo, two nav entries with icons, Sessions on
-  assert.ok(dom.logo, "logo icon in .name");
+  // header: the owl as logo and tab icon, three nav entries with icons, Sessions on
+  assert.equal(dom.logo, "avatars/reviewer.png");
+  assert.equal(dom.icon, "avatars/reviewer.png");
   assert.deepEqual(dom.nav, [{ nav: "sessions", svg: true, on: true }, { nav: "plans", svg: true, on: false }, { nav: "settings", svg: true, on: false }]);
-  assert.match(dom.where, /scanned 3 levels down · 3 workspaces · pack \d+\.\d+\.\d+$/);
+  assert.match(dom.where, /scanned 3 levels down · 3 workspaces$/);
+  // footer: the pack's version and the project's links, opened in a new tab
+  assert.match(dom.foot, /^cross-review \d+\.\d+\.\d+ · GitHub · Update · Report a problem$/);
+  const repo = "https://github.com/lploc94/cross-review";
+  assert.deepEqual(dom.links, [["GitHub", repo, "_blank", "noopener noreferrer"], ["Update", `${repo}#reinstall--update`, "_blank", "noopener noreferrer"], ["Report a problem", `${repo}/issues`, "_blank", "noopener noreferrer"]]);
 
   // In progress: one row per active session, each with a state mark and a skill icon
   assert.equal(dom.active.length, sessions.active.length);
@@ -528,7 +536,7 @@ try {
     await d4.close();
   }
 
-  // Nothing in progress: the empty state with the full-body avatars
+  // Nothing in progress: the words alone
   const empty = await browser.newPage(1400, 900);
   const emptyRoot = path.join(tmp, "empty");
   fs.mkdirSync(path.join(emptyRoot, ".cross-review", "sessions"), { recursive: true });
@@ -537,7 +545,7 @@ try {
     await empty.goto(`${d2.url}#/`);
     await empty.waitFor(`document.querySelector("#active .empty-state")`);
     assert.equal(await empty.evaluate(`document.querySelector("#active .empty-state").textContent.trim()`), "Nothing in progress.");
-    assert.equal(await empty.evaluate(`[...document.querySelectorAll("#active .empty-state img")].every(i => i.complete && i.naturalWidth > 0)`), true);
+    assert.equal(await empty.evaluate(`document.querySelectorAll("#active .empty-state img").length`), 0, "the words alone, no pictures");
   } finally {
     await d2.close();
   }

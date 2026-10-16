@@ -26,7 +26,7 @@ code { font-family: var(--mono); font-size: 12.5px; background: var(--rule2); pa
 .top nav a.on { color: var(--ink); font-weight: 500; box-shadow: inset 0 -2px 0 var(--ink); }
 .top nav a:hover { text-decoration: none; color: var(--ink); }
 .top .where { margin-left: auto; color: var(--muted); font-size: 13px; }
-main.wrap { padding-top: 28px; padding-bottom: 80px; }
+main.wrap { padding-top: 28px; padding-bottom: 24px; }
 #settings { max-width: 860px; }   /* a form reads best narrow; all its parts share this right edge */
 .view { display: none; } .view.on { display: block; }
 h1 { font: 600 24px/1.25 var(--serif); margin: 0 0 4px; }
@@ -42,7 +42,10 @@ h2 { font: 600 17px var(--serif); margin: 34px 0 10px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 [data-i] .i, .with-i .i { margin-right: 6px; }
 .skill { color: var(--muted); margin-right: 8px; }
-.top .name .i { width: 21px; height: 21px; color: var(--rust); vertical-align: -3px; margin-right: 8px; }
+.top .name .logo { width: 30px; height: 30px; vertical-align: -7px; margin-right: 9px; }
+/* footer: version and the project's links */
+.site-foot { border-top: 1px solid var(--rule); padding: 14px 0 22px; color: var(--muted); font-size: 12.5px; }
+.site-foot a { color: var(--soft); }
 .status .what .i { width: 18px; height: 18px; vertical-align: -3px; margin-right: 8px; }
 .status .what .i { color: var(--c); }
 
@@ -162,9 +165,7 @@ td.clip, td.clip > div { white-space: nowrap; overflow: hidden; text-overflow: e
 
 /* empty states use the full-body avatars */
 .empty td { border-bottom: 1px solid var(--rule); padding: 18px 10px 14px; }
-.empty-state { display: flex; align-items: flex-end; gap: 14px; color: var(--muted); }
-.empty-state img { height: 96px; width: auto; display: block; }
-.empty-state span { padding-bottom: 8px; }
+.empty-state { color: var(--muted); }
 
 /* a long root path shortens with an ellipsis instead of squeezing the name and the tabs */
 .top .name, .top nav { flex: none; white-space: nowrap; }

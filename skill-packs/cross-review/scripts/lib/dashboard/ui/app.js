@@ -136,8 +136,8 @@ function renderWhere() {
     data.rootDisplay,
     `scanned ${data.depth} levels down`,
     `${n} ${n === 1 ? "workspace" : "workspaces"}`,
-    data.version ? `pack ${data.version}` : null,
-  ].filter(Boolean).join(" · ");
+  ].join(" · ");
+  $("#pack").textContent = data.version || "";
 }
 
 // ---------- Sessions ----------
@@ -171,8 +171,7 @@ function historyRow(s) {
     <td class="num mono nw">${s.reviewerSeconds ? clock(s.reviewerSeconds) : "—"}</td><td class="num line2 nw">${esc(when(s.createdAt))}</td></tr>`;
 }
 
-const EMPTY_ACTIVE = `<tr class="empty"><td colspan="4"><div class="empty-state">
-  <img src="avatars/reviewer-full.png" alt=""><img src="avatars/agent-full.png" alt=""><span>Nothing in progress.</span></div></td></tr>`;
+const EMPTY_ACTIVE = `<tr class="empty"><td colspan="4"><div class="empty-state">Nothing in progress.</div></td></tr>`;
 
 function renderFilters(id = "#f-ws") {
   const sel = $(id);
@@ -211,7 +210,10 @@ function fitPage(pg, rows) {
   paintPage(pg, rows, Math.min(left, PAGE_MAX_ROWS), true);
   const pager = $(pg.pager);
   const main = pager.closest("main");
-  const budget = window.innerHeight - (parseFloat(getComputedStyle(main).paddingBottom) || 0)
+  // the footer stays in the window too
+  const foot = $(".site-foot");
+  const footH = foot ? foot.getBoundingClientRect().height + (parseFloat(getComputedStyle(foot).marginTop) || 0) : 0;
+  const budget = window.innerHeight - (parseFloat(getComputedStyle(main).paddingBottom) || 0) - footH
     - pager.getBoundingClientRect().height - (parseFloat(getComputedStyle(pager).marginTop) || 0);
   let fit = 0;
   for (const row of $(pg.body).querySelectorAll("tr[data-go]")) {

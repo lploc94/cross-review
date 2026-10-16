@@ -29,7 +29,7 @@
   .top nav a.on { color: var(--ink); font-weight: 500; box-shadow: inset 0 -2px 0 var(--ink); }
   .top nav a:hover { text-decoration: none; color: var(--ink); }
   .top .where { margin-left: auto; color: var(--muted); font-size: 13px; }
-  main.wrap { padding-top: 28px; padding-bottom: 80px; }
+  main.wrap { padding-top: 28px; padding-bottom: 24px; }
   #settings { max-width: 860px; }   /* a form reads best narrow; all its parts share this right edge */
   .view { display: none; } .view.on { display: block; }
   h1 { font: 600 24px/1.25 var(--serif); margin: 0 0 4px; }
@@ -45,7 +45,10 @@
   @keyframes spin { to { transform: rotate(360deg); } }
   [data-i] .i, .with-i .i { margin-right: 6px; }
   .skill { color: var(--muted); margin-right: 8px; }
-  .top .name .i { width: 21px; height: 21px; color: var(--rust); vertical-align: -3px; margin-right: 8px; }
+  .top .name .logo { width: 30px; height: 30px; vertical-align: -7px; margin-right: 9px; }
+  /* footer: version and the project's links */
+  .site-foot { border-top: 1px solid var(--rule); padding: 14px 0 22px; color: var(--muted); font-size: 12.5px; }
+  .site-foot a { color: var(--soft); }
   .status .what .i { width: 18px; height: 18px; vertical-align: -3px; margin-right: 8px; }
   .status .what .i { color: var(--c); }
 
@@ -202,7 +205,7 @@
 </head>
 <body>
 <div class="top"><div class="wrap">
-  <div class="name" data-i="logo">cross-review</div>
+  <div class="name"><img class="logo" src="../skill-packs/cross-review/scripts/lib/dashboard/ui/avatars/reviewer.png" alt="">cross-review</div>
   <nav><a data-go="sessions" data-i="list" class="on">Sessions</a><a data-go="plans" data-i="plans">Plans</a><a data-go="settings" data-i="sliders">Settings</a></nav>
   <div class="where">~/projects · scanned 3 levels down · 4 workspaces · mock data</div>
 </div></div>
@@ -376,12 +379,12 @@
   <div class="save-state" id="save-state" role="status"></div>
 </section>
 </main>
+<footer class="site-foot"><div class="wrap">cross-review 10.2.0 · <a href="https://github.com/lploc94/cross-review" target="_blank" rel="noopener noreferrer">GitHub</a> · <a href="https://github.com/lploc94/cross-review#reinstall--update" target="_blank" rel="noopener noreferrer">Update</a> · <a href="https://github.com/lploc94/cross-review/issues" target="_blank" rel="noopener noreferrer">Report a problem</a></div></footer>
 
 <script>
 // ---------------- icons: one line set, 24px grid, drawn with currentColor ----------------
 const C = (x, y, r) => `<circle cx="${x}" cy="${y}" r="${r}"/>`, P = d => `<path d="${d}"/>`;
 const ICONS = {
-  logo: `<rect x="3" y="3" width="12" height="12" rx="1"/><rect x="9" y="9" width="12" height="12" rx="1"/>`,
   list: P("M9 6h12M9 12h12M9 18h12M4 6h.01M4 12h.01M4 18h.01"),
   sliders: P("M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"),
   approve: P("M20 6 9 17l-5-5"),

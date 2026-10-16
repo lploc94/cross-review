@@ -1,8 +1,7 @@
 // Icons: path data from Lucide (lucide-static 1.57.0, ISC; see LICENSE-lucide.txt), drawn
-// with currentColor on a 24px grid. The logo (two overlapping squares) is our own.
+// with currentColor on a 24px grid.
 
 export const ICONS = {
-  logo: `<rect x="3" y="3" width="12" height="12" rx="1"/><rect x="9" y="9" width="12" height="12" rx="1"/>`,
   list: `<path d="M3 5h.01"/><path d="M3 12h.01"/><path d="M3 19h.01"/><path d="M8 5h13"/><path d="M8 12h13"/><path d="M8 19h13"/>`, // list
   sliders: `<path d="M10 8h4"/><path d="M12 21v-9"/><path d="M12 8V3"/><path d="M17 16h4"/><path d="M19 12V3"/><path d="M19 21v-5"/><path d="M3 14h4"/><path d="M5 10V3"/><path d="M5 21v-7"/>`, // sliders-vertical
   approve: `<path d="M20 6 9 17l-5-5"/>`, // check
