@@ -51,7 +51,7 @@ function source(...answers) {
 async function serve(opts) {
   const root = mk("root");
   fs.mkdirSync(path.join(root, ".cross-review", "sessions"), { recursive: true });
-  const d = await startDashboard({ root, port: 0, open: false, discoveryFile: null, catalog: CATALOG, ...opts });
+  const d = await startDashboard({ root, port: 0, open: false, discoveryFile: null, catalogs: { codex: CATALOG }, ...opts });
   const call = async (p, method = "GET", body) => {
     const r = await fetch(`http://127.0.0.1:${d.port}${p}`, { method, headers: { Authorization: `Bearer ${d.token}`, "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
     assert.equal(r.status, 200, `${p}: ${await r.clone().text()}`);

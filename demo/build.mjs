@@ -113,7 +113,7 @@ async function main() {
     cliInfo: async () => ({ version: "codex-cli", loggedIn: true }),
   };
   const d = await startDashboard({
-    root, port: 0, open: false, discoveryFile: null, catalog, catalogCache: null, latestVersion: async () => null,
+    root, port: 0, open: false, discoveryFile: null, catalogs: { codex: catalog }, latestVersion: async () => null,
     now: () => clock, isAlive: pid => alive.has(pid), tickMs: 100, rescanMs: 100,
   });
   const base = new URL(d.url).origin;

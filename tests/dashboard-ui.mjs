@@ -583,7 +583,7 @@ async function settingsAtOnceChecks(browser) {
   fs.writeFileSync(cacheFile, JSON.stringify({ models: [{ slug: "model-old", name: "Model Old", description: "An invented saved model.", efforts: ["high"] }], reviewer: { version: "codex-cli 9.9.8-invented", loggedIn: true }, fetchedAt: Math.floor(Date.now() / 1000) - 3600 }));
   let release;
   const slow = { ...catalog, listModels: () => new Promise(r => { release = () => r(catalog.listModels()); }) };
-  const d8 = await startDashboard({ root, port: 0, open: false, discoveryFile: null, catalog: slow, catalogCache: cacheFile });
+  const d8 = await startDashboard({ root, port: 0, open: false, discoveryFile: null, catalogs: { codex: slow }, catalogCaches: { codex: cacheFile } });
   const options = `[...document.querySelectorAll("#f-model-set option")].map(o => o.textContent)`;
   const holdLoad = `(() => {
     const native = window.fetch;
@@ -663,7 +663,7 @@ async function settingsAtOnceChecks(browser) {
   let release2;
   const slow2 = { ...catalog, listModels: () => new Promise(r => { release2 = () => r(catalog.listModels()); }) };
   fs.writeFileSync(cacheFile, JSON.stringify({ models: [{ slug: "model-old", name: "Model Old", description: "An invented saved model.", efforts: ["high"] }], reviewer: null, fetchedAt: 1000 }));
-  const d9 = await startDashboard({ root, port: 0, open: false, discoveryFile: null, catalog: slow2, catalogCache: cacheFile });
+  const d9 = await startDashboard({ root, port: 0, open: false, discoveryFile: null, catalogs: { codex: slow2 }, catalogCaches: { codex: cacheFile } });
   try {
     const id = path.basename(fx.sessions.waiting);
     const ws = encodeURIComponent(path.relative(root, path.dirname(path.dirname(path.dirname(fx.sessions.waiting)))));
@@ -681,7 +681,7 @@ async function settingsAtOnceChecks(browser) {
 async function otherModelChecks(browser) {
   const otherRoot = path.join(tmp, "other");
   fs.mkdirSync(path.join(otherRoot, ".cross-review", "sessions"), { recursive: true });
-  const d10 = await startDashboard({ root: otherRoot, port: 0, open: false, discoveryFile: null, catalog: { ...catalog, listModels: async () => null } });
+  const d10 = await startDashboard({ root: otherRoot, port: 0, open: false, discoveryFile: null, catalogs: { codex: { ...catalog, listModels: async () => null } } });
   const globalFile = path.join(process.env.HOME, ".cross-review", "config.json");
   const before = fs.readFileSync(globalFile, "utf8");
   const page = await browser.newPage(1400, 1000);

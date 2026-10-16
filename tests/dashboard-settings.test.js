@@ -128,15 +128,17 @@ test("through the server: with no catalog, changing Follow reviews keeps effort 
   fs.mkdirSync(path.dirname(globalFile), { recursive: true });
   fs.writeFileSync(globalFile, JSON.stringify({ effort: "ultra", model: "x-unknown" }));
   const d = await startDashboard({ root, port: 0, open: false, discoveryFile: null,
-    catalog: { listModels: async () => null, defaultModel: () => null, cliInfo: async () => ({ version: null, loggedIn: false }) } });
+    catalogs: { codex: { listModels: async () => null, defaultModel: () => null, cliInfo: async () => ({ version: null, loggedIn: false }) } } });
   try {
     const auth = { Authorization: `Bearer ${d.token}` };
     const s = await (await fetch(`http://127.0.0.1:${d.port}/api/settings`, { headers: auth })).json();
-    assert.equal(s.models, null);
-    assert.deepEqual(s.global, { effort: "ultra", model: "x-unknown" });
-    const shownEffort = effortOptions({ catalog: s.models, model: s.global.model, saved: s.global.effort, inherited: "high (default)" }).find(o => o.selected).value;
-    const shownModel = modelOptions({ catalog: s.models, saved: s.global.model, inherited: "Codex default", codexDefault: s.codexDefault }).find(o => o.selected).value;
-    const config = mergeForm(s.global, { effort: shownEffort, model: shownModel, open_dashboard: true }, ["open_dashboard"]);
+    assert.equal(s.reviewers.codex.models, null);
+    // the legacy file is read as Codex's entry
+    assert.deepEqual(s.global, { reviewers: { codex: { effort: "ultra", model: "x-unknown" } } });
+    const codex = s.global.reviewers.codex;
+    const shownEffort = effortOptions({ catalog: s.reviewers.codex.models, model: codex.model, saved: codex.effort, inherited: "high (default)" }).find(o => o.selected).value;
+    const shownModel = modelOptions({ catalog: s.reviewers.codex.models, saved: codex.model, inherited: "Codex default", codexDefault: s.reviewers.codex.defaultModel }).find(o => o.selected).value;
+    const config = mergeForm(s.global, { reviewers: { codex: { effort: shownEffort, model: shownModel } }, open_dashboard: true }, ["open_dashboard"]);
     const r = await fetch(`http://127.0.0.1:${d.port}/api/settings`, { method: "POST", headers: { ...auth, "Content-Type": "application/json" }, body: JSON.stringify({ scope: "global", config }) });
     assert.equal(r.status, 200, await r.text());
     assert.deepEqual(JSON.parse(fs.readFileSync(globalFile, "utf8")), { open_dashboard: true, reviewers: { codex: { effort: "ultra", model: "x-unknown" } } });
@@ -151,31 +153,30 @@ test("through the server: a save with `touched` changes only those fields in the
   const globalFile = path.join(process.env.HOME, ".cross-review", "config.json");
   fs.mkdirSync(path.dirname(globalFile), { recursive: true });
   const d = await startDashboard({ root, port: 0, open: false, discoveryFile: null,
-    catalog: { listModels: async () => null, defaultModel: () => null, cliInfo: async () => ({ version: null, loggedIn: false }) } });
+    catalogs: { codex: { listModels: async () => null, defaultModel: () => null, cliInfo: async () => ({ version: null, loggedIn: false }) } } });
   const post = body => fetch(`http://127.0.0.1:${d.port}/api/settings`, { method: "POST", headers: { Authorization: `Bearer ${d.token}`, "Content-Type": "application/json" }, body: JSON.stringify(body) });
   try {
     // the page loaded { effort: "high" }; meanwhile the file gained a model and a per-skill effort
     fs.writeFileSync(globalFile, JSON.stringify({ effort: "high", model: "model-x", skills: { "review-pr": { effort: "low" } } }));
-    const form = { effort: "medium", open_plans: true, skills: { "review-impl": { model: "model-b" } } };
-    let r = await post({ scope: "global", config: form, touched: ["effort", "skills.review-impl.model"] });
+    const form = { open_plans: true, reviewers: { codex: { effort: "medium", skills: { "review-impl": { model: "model-b" } } } } };
+    let r = await post({ scope: "global", config: form, touched: ["reviewers.codex.effort", "reviewers.codex.skills.review-impl.model"] });
     const answer = await r.text();
     assert.equal(r.status, 200, answer);
     // written in the per-reviewer form: Codex's fields under reviewers.codex
     const want = { reviewers: { codex: { effort: "medium", model: "model-x", skills: { "review-pr": { effort: "low" }, "review-impl": { model: "model-b" } } } } };
     assert.deepEqual(JSON.parse(fs.readFileSync(globalFile, "utf8")), want, "untouched open_plans is not written; the file's own fields stay");
-    // the answer is what the page shows: Codex's fields at the top level, as it reads them
-    assert.deepEqual(JSON.parse(answer).config, want.reviewers.codex);
+    assert.deepEqual(JSON.parse(answer).config, want);
     // clearing a touched field removes it
-    r = await post({ scope: "global", config: {}, touched: ["model"] });
+    r = await post({ scope: "global", config: {}, touched: ["reviewers.codex.model"] });
     assert.equal(r.status, 200);
     assert.equal(JSON.parse(fs.readFileSync(globalFile, "utf8")).reviewers.codex.model, undefined);
     assert.equal(JSON.parse(fs.readFileSync(globalFile, "utf8")).reviewers.codex.effort, "medium");
     // a broken file is replaced by the touched fields
     fs.writeFileSync(globalFile, "{ broken");
-    r = await post({ scope: "global", config: { effort: "low" }, touched: ["effort"] });
+    r = await post({ scope: "global", config: { reviewers: { codex: { effort: "low" } } }, touched: ["reviewers.codex.effort"] });
     assert.equal(r.status, 200);
     assert.deepEqual(JSON.parse(fs.readFileSync(globalFile, "utf8")), { reviewers: { codex: { effort: "low" } } });
-    for (const touched of [["__proto__"], ["skills.__proto__.model"], ["skills.review-impl.reviewer"], "effort", [1]]) {
+    for (const touched of [["__proto__"], ["effort"], ["reviewers.codex.skills.__proto__.model"], ["reviewers.codex.skills.review-impl.reviewer"], "reviewers.codex.effort", [1]]) {
       r = await post({ scope: "global", config: { effort: "high" }, touched });
       assert.equal(r.status, 400, JSON.stringify(touched));
     }
@@ -184,4 +185,19 @@ test("through the server: a save with `touched` changes only those fields in the
     fs.rmSync(globalFile, { force: true });
     await d.close();
   }
+});
+
+test("mergeForm nested paths: set, clear and prune under reviewers.<name>", () => {
+  const file = { reviewer: "agy", reviewers: { codex: { model: "gpt-x" } } };
+  const set = mergeForm(file, { reviewers: { agy: { skills: { "review-pr": { effort: "low" } } } } }, ["reviewers.agy.skills.review-pr.effort"]);
+  assert.deepEqual(set, { reviewer: "agy", reviewers: { codex: { model: "gpt-x" }, agy: { skills: { "review-pr": { effort: "low" } } } } });
+  assert.deepEqual(file, { reviewer: "agy", reviewers: { codex: { model: "gpt-x" } } }, "the saved object is not changed");
+  const cleared = mergeForm(set, { reviewers: { agy: { skills: { "review-pr": { effort: "" } } } } }, ["reviewers.agy.skills.review-pr.effort"]);
+  assert.deepEqual(cleared, file, "emptied objects up the path are removed");
+  assert.deepEqual(mergeForm(file, {}, ["reviewers.codex.model"]), { reviewer: "agy" });
+  // clearing a field that is not there adds nothing
+  assert.deepEqual(mergeForm(file, {}, ["reviewers.claude.skills.review-plan.model"]), file);
+  // a path through a prototype key is ignored
+  assert.deepEqual(mergeForm({}, JSON.parse('{"__proto__": {"x": 1}}'), ["__proto__.x"]), {});
+  assert.equal({}.x, undefined);
 });

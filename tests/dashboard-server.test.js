@@ -12,7 +12,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { buildFixture, buildPlans, PLANS, writePlan, writeSession } from "./helpers/dashboard-fixture.js";
-import { GITIGNORE } from "../skill-packs/cross-review/scripts/lib/config.js";
+import { GITIGNORE, resolveSettings } from "../skill-packs/cross-review/scripts/lib/config.js";
 import { findWorkspaces } from "../skill-packs/cross-review/scripts/lib/dashboard/scan.js";
 import { startDashboard, createListWatcher } from "../skill-packs/cross-review/scripts/lib/dashboard/server.js";
 
@@ -41,7 +41,7 @@ after(() => {
 async function serve(opts = {}) {
   const root = mk("root");
   const fx = buildFixture(root, { now: nowS(), livePid: process.pid });
-  const d = await startDashboard({ root, port: 0, open: false, discoveryFile: null, catalog: CATALOG, ...opts });
+  const d = await startDashboard({ root, port: 0, open: false, discoveryFile: null, catalogs: { codex: CATALOG }, ...opts });
   return { root, fx, d };
 }
 
@@ -216,7 +216,7 @@ test("a session folder that is a symlink is neither listed nor served", async ()
   const fx = buildFixture(mk("elsewhere"), { now: nowS(), livePid: 1 });
   const id = idOf(fx.sessions.waiting);
   fs.symlinkSync(fx.sessions.waiting, path.join(root, ".cross-review", "sessions", id));
-  const d = await startDashboard({ root, port: 0, open: false, discoveryFile: null, catalog: CATALOG });
+  const d = await startDashboard({ root, port: 0, open: false, discoveryFile: null, catalogs: { codex: CATALOG } });
   try {
     const p = await getJson(d, "/api/sessions");
     assert.equal(p.active.length + p.history.length, 0);
@@ -338,7 +338,7 @@ test("list stream: a new session in a known workspace appears on the next tick; 
 
 test("port: random in [20000, 30000]; busy ports are skipped; 50 busy ports fail", async () => {
   const root = mk("port");
-  const d = await startDashboard({ root, open: false, discoveryFile: null, catalog: CATALOG });
+  const d = await startDashboard({ root, open: false, discoveryFile: null, catalogs: { codex: CATALOG } });
   try {
     assert.ok(d.port >= 20000 && d.port <= 30000, `port ${d.port}`);
   } finally {
@@ -354,13 +354,13 @@ test("port: random in [20000, 30000]; busy ports are skipped; 50 busy ports fail
   const picks = [...busy.map(s => s.address().port), free];
   let calls = 0;
   try {
-    const d2 = await startDashboard({ root, open: false, discoveryFile: null, catalog: CATALOG, pickPort: () => picks[calls++] });
+    const d2 = await startDashboard({ root, open: false, discoveryFile: null, catalogs: { codex: CATALOG }, pickPort: () => picks[calls++] });
     assert.equal(d2.port, free);
     assert.equal(calls, 4);
     await d2.close();
     let n = 0;
     await assert.rejects(
-      startDashboard({ root, open: false, discoveryFile: null, catalog: CATALOG, pickPort: () => { n++; return busy[0].address().port; } }),
+      startDashboard({ root, open: false, discoveryFile: null, catalogs: { codex: CATALOG }, pickPort: () => { n++; return busy[0].address().port; } }),
       /No free port/,
     );
     assert.equal(n, 50);
@@ -406,7 +406,7 @@ test("token: 401 without it, 303 with a cookie for the right one, Bearer accepte
 test("dashboard.json: written 0600 with pid, port, token, root; removed on close unless another process owns it", async () => {
   const root = mk("disc");
   const file = path.join(mk("home"), ".cross-review", "dashboard.json");
-  const d = await startDashboard({ root, port: 0, open: false, discoveryFile: file, catalog: CATALOG });
+  const d = await startDashboard({ root, port: 0, open: false, discoveryFile: file, catalogs: { codex: CATALOG } });
   const info = JSON.parse(fs.readFileSync(file, "utf8"));
   assert.equal(fs.statSync(file).mode & 0o777, 0o600);
   assert.deepEqual({ pid: info.pid, port: info.port, token: info.token, root: info.root }, { pid: process.pid, port: d.port, token: d.token, root: fs.realpathSync(root) });
@@ -414,7 +414,7 @@ test("dashboard.json: written 0600 with pid, port, token, root; removed on close
   await d.close();
   assert.equal(fs.existsSync(file), false);
 
-  const d2 = await startDashboard({ root, port: 0, open: false, discoveryFile: file, catalog: CATALOG });
+  const d2 = await startDashboard({ root, port: 0, open: false, discoveryFile: file, catalogs: { codex: CATALOG } });
   const other = { pid: 1, port: 1234, token: "f".repeat(64), root: "/elsewhere", started_at: 1 };
   fs.writeFileSync(file, JSON.stringify(other));
   await d2.close();
@@ -424,8 +424,16 @@ test("dashboard.json: written 0600 with pid, port, token, root; removed on close
 // ---------- 8, AC-3.5 ----------
 
 /** Spawn a dashboard command with a temp HOME; resolves once it prints its URL. */
+/** A bin dir whose `claude` and `agy` fail at once: the dashboard asks every reviewer CLI at start, never the real ones here. */
+function stubReviewerCli() {
+  const bin = mk("stub-bin");
+  for (const name of ["claude", "agy"]) fs.writeFileSync(path.join(bin, name), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+  return bin;
+}
+
 function spawnDashboard(args, home) {
-  const child = spawn(process.execPath, args, { env: { ...process.env, HOME: home, USERPROFILE: home, CODEX_HOME: path.join(home, ".codex") }, stdio: ["ignore", "pipe", "pipe"] });
+  const env = { ...process.env, HOME: home, USERPROFILE: home, CODEX_HOME: path.join(home, ".codex"), PATH: `${stubReviewerCli()}${path.delimiter}${process.env.PATH}` };
+  const child = spawn(process.execPath, args, { env, stdio: ["ignore", "pipe", "pipe"] });
   let out = "";
   let err = "";
   const exited = new Promise(r => child.on("exit", (code, signal) => r({ code, signal })));
@@ -700,7 +708,7 @@ const CATALOG = {
 const originOf = d => ({ Origin: `http://127.0.0.1:${d.port}`, Cookie: `cr_token=${d.token}` });
 
 test("settings: GET lists both levels and the catalog; POST writes the workspace file with a .gitignore; bad input changes nothing", async () => {
-  const { d, fx } = await serve({ catalog: CATALOG });
+  const { d, fx } = await serve({ catalogs: { codex: CATALOG } });
   const wsFile = path.join(fx.workspaces.harbor, ".cross-review", "config.json");
   const post = (body, headers = originOf(d)) => request(d.port, "/api/settings", { method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body });
   try {
@@ -708,9 +716,9 @@ test("settings: GET lists both levels and the catalog; POST writes the workspace
     let s = await getJson(d, "/api/settings");
     assert.deepEqual(s.global, {});
     assert.deepEqual(Object.keys(s.workspaces).sort(), ["harbor-app", "inkwell", "services/orchard-api"]);
-    assert.equal(s.models[0].slug, "model-a");
-    assert.equal(s.codexDefault, "model-a");
-    assert.deepEqual(s.reviewer, { version: "codex-cli 9.9.9-invented", loggedIn: true });
+    assert.equal(s.reviewers.codex.models[0].slug, "model-a");
+    assert.equal(s.reviewers.codex.defaultModel, "model-a");
+    assert.deepEqual(s.reviewers.codex.cli, { version: "codex-cli 9.9.9-invented", loggedIn: true });
 
     const ok = await post({ scope: "workspace", ws: "harbor-app", config: { effort: "low", skills: { "review-impl": { model: "model-a" } } } });
     assert.equal(ok.status, 200, ok.text);
@@ -728,7 +736,8 @@ test("settings: GET lists both levels and the catalog; POST writes the workspace
     assert.equal((await post({ scope: "global", config: { open_dashboard: true } })).status, 200);
     assert.deepEqual(JSON.parse(fs.readFileSync(path.join(process.env.HOME, ".cross-review", "config.json"), "utf8")), { open_dashboard: true });
     s = await getJson(d, "/api/settings");
-    assert.deepEqual(s.workspaces["harbor-app"], { effort: "low", skills: { "review-impl": { model: "model-a" } } });
+    // read back in the per-reviewer form the file now has
+    assert.deepEqual(s.workspaces["harbor-app"], { reviewers: { codex: { effort: "low", skills: { "review-impl": { model: "model-a" } } } } });
     // An empty config removes the file
     assert.equal((await post({ scope: "workspace", ws: "harbor-app", config: {} })).status, 200);
     assert.equal(fs.existsSync(wsFile), false);
@@ -758,12 +767,12 @@ test("settings: workspaces named __proto__ and global are listed; a broken works
   }
   fs.writeFileSync(path.join(root, "__proto__", ".cross-review", "config.json"), JSON.stringify({ effort: "low" }));
   fs.writeFileSync(path.join(root, "global", ".cross-review", "config.json"), "{ broken");
-  const d = await startDashboard({ root, port: 0, open: false, discoveryFile: null, catalog: CATALOG });
+  const d = await startDashboard({ root, port: 0, open: false, discoveryFile: null, catalogs: { codex: CATALOG } });
   try {
     const s = await getJson(d, "/api/settings");
     assert.deepEqual(Object.keys(s.workspaces).sort(), ["__proto__", "global"]);
     assert.deepEqual(Object.keys(s.paths).sort(), ["__proto__", "global"]);
-    assert.deepEqual(s.workspaces.__proto__, { effort: "low" });
+    assert.deepEqual(s.workspaces.__proto__, { reviewers: { codex: { effort: "low" } } });
     assert.equal(s.errors.global, undefined);
     assert.match(s.errors.workspaces.global, /not valid JSON/);
   } finally {
@@ -796,22 +805,23 @@ test("models: a cached catalog answers at once while the server asks the reviewe
   const cache = path.join(mk("models-cache"), "models.json");
   writeCache(cache, OLD_MODELS);
   const catalog = slowCatalog();
-  const { d } = await serve({ catalog, catalogCache: cache });
+  const { d } = await serve({ catalogs: { codex: catalog }, catalogCaches: { codex: cache } });
   try {
     // the server asked at start, before any page did
     assert.equal(catalog.calls, 1);
     let s = await getJson(d, "/api/settings");
-    assert.deepEqual([s.models, s.modelsFetchedAt, s.modelsRefreshing, s.reviewer.version], [OLD_MODELS, 1000, true, "codex-cli 9.9.8-invented"]);
+    const c0 = s.reviewers.codex;
+    assert.deepEqual([c0.models, c0.modelsFetchedAt, c0.modelsRefreshing, c0.cli.version], [OLD_MODELS, 1000, true, "codex-cli 9.9.8-invented"]);
     // /api/models waits for the answer in flight instead of asking again
     const fresh = getJson(d, "/api/models");
     await new Promise(r => setTimeout(r, 50));
     assert.equal(catalog.calls, 1);
     catalog.answer(NEW_MODELS);
     const m = await fresh;
-    assert.deepEqual([m.models, m.reviewer.version, m.refreshing], [NEW_MODELS, "codex-cli 9.9.9-invented", false]);
+    assert.deepEqual([m.models, m.cli.version, m.refreshing], [NEW_MODELS, "codex-cli 9.9.9-invented", false]);
     assert.ok(m.fetchedAt > 1000);
     s = await getJson(d, "/api/settings");
-    assert.deepEqual([s.models, s.modelsRefreshing], [NEW_MODELS, false]);
+    assert.deepEqual([s.reviewers.codex.models, s.reviewers.codex.modelsRefreshing], [NEW_MODELS, false]);
     assert.deepEqual(JSON.parse(fs.readFileSync(cache, "utf8")).models, NEW_MODELS);
   } finally {
     catalog.answer(null);
@@ -823,7 +833,7 @@ test("models: a failed refresh keeps the cached list; with no cache the first se
   const cache = path.join(mk("models-cache"), "models.json");
   writeCache(cache, OLD_MODELS);
   let catalog = slowCatalog();
-  let { d } = await serve({ catalog, catalogCache: cache });
+  let { d } = await serve({ catalogs: { codex: catalog }, catalogCaches: { codex: cache } });
   try {
     catalog.answer(null); // the reviewer CLI is gone or broken
     const m = await getJson(d, "/api/models");
@@ -834,14 +844,14 @@ test("models: a failed refresh keeps the cached list; with no cache the first se
   }
   fs.rmSync(cache);
   catalog = slowCatalog();
-  ({ d } = await serve({ catalog, catalogCache: cache }));
+  ({ d } = await serve({ catalogs: { codex: catalog }, catalogCaches: { codex: cache } }));
   try {
     let answered = false;
     const s = getJson(d, "/api/settings").then(x => { answered = true; return x; });
     await new Promise(r => setTimeout(r, 50));
     assert.equal(answered, false, "nothing to show yet: the first load waits");
     catalog.answer(NEW_MODELS);
-    assert.deepEqual((await s).models, NEW_MODELS);
+    assert.deepEqual((await s).reviewers.codex.models, NEW_MODELS);
     assert.equal(catalog.calls, 1, "the load waited for the request the start made");
     assert.deepEqual(JSON.parse(fs.readFileSync(cache, "utf8")).models, NEW_MODELS);
   } finally {
@@ -853,7 +863,7 @@ test("models: a failed refresh keeps the cached list; with no cache the first se
 test("models: an injected catalog writes no cache unless one is named", async () => {
   const file = path.join(process.env.HOME, ".cross-review", "models.json");
   fs.rmSync(file, { force: true });
-  const { d } = await serve({ catalog: CATALOG });
+  const { d } = await serve({ catalogs: { codex: CATALOG } });
   try {
     await getJson(d, "/api/settings");
     assert.equal(fs.existsSync(file), false);
@@ -863,7 +873,7 @@ test("models: an injected catalog writes no cache unless one is named", async ()
 });
 
 test("avatars: a real PNG is stored and served byte for byte; renamed text, over 1 MB and bad keys are refused", async () => {
-  const { d } = await serve({ catalog: CATALOG });
+  const { d } = await serve({ catalogs: { codex: CATALOG } });
   const png = fs.readFileSync(path.join(REPO, "skill-packs/cross-review/scripts/lib/dashboard/ui/avatars/you.png"));
   const upload = (key, body, headers = originOf(d)) => new Promise((resolve, reject) => {
     const r = http.request({ host: "127.0.0.1", port: d.port, path: `/api/avatars/${key}`, method: "POST", headers: { ...headers, "Content-Type": "image/png", "Content-Length": body.length } }, res => {
@@ -924,7 +934,7 @@ async function servePlans(opts = {}) {
   const root = mk("plans-root");
   const fx = buildFixture(root, { now: nowS(), livePid: process.pid });
   const pl = buildPlans(fx);
-  const d = await startDashboard({ root, port: 0, open: false, discoveryFile: null, catalog: CATALOG, ...opts });
+  const d = await startDashboard({ root, port: 0, open: false, discoveryFile: null, catalogs: { codex: CATALOG }, ...opts });
   return { root, fx, pl, d };
 }
 const planOf = (p, ws, file) => p.plans.find(x => x.ws === ws && x.file === file);
@@ -1154,7 +1164,7 @@ test("/api/plan: a checkpoint session's verdict is the one its sessions row show
 });
 
 test("settings keep each workspace's .gitignore in step with Plans in git; custom files and parent rules are reported", async () => {
-  const { d, fx, pl } = await servePlans({ catalog: CATALOG });
+  const { d, fx, pl } = await servePlans({ catalogs: { codex: CATALOG } });
   const gi = ws => path.join(ws, ".cross-review", ".gitignore");
   const read = ws => (fs.existsSync(gi(ws)) ? fs.readFileSync(gi(ws), "utf8") : null);
   const post = body => request(d.port, "/api/settings", { method: "POST", headers: { ...originOf(d), "Content-Type": "application/json" }, body });
@@ -1202,5 +1212,150 @@ test("settings keep each workspace's .gitignore in step with Plans in git; custo
   } finally {
     fs.rmSync(globalFile, { force: true });
     await d.close();
+  }
+});
+
+// ---------- per reviewer (claude-agy-reviewers plan, Phase 5) ----------
+
+const catalogOf = (version, models, defaultModel = null) => {
+  const c = { calls: 0 };
+  c.listModels = async () => { c.calls++; return models; };
+  c.defaultModel = () => defaultModel;
+  c.cliInfo = async () => ({ version, loggedIn: true });
+  return c;
+};
+const CLAUDE_MODELS = [{ slug: "opus", name: "Opus", description: "Invented.", efforts: ["low", "high", "max"] }];
+const AGY_MODELS = [{ slug: "gemini-x-flash", name: "Gemini X Flash", description: "", efforts: ["high", "low"] }];
+
+test("settings payload per reviewer: three entries; a failing catalog is isolated", async () => {
+  const agy = { listModels: async () => { throw new Error("agy models: not signed in"); }, defaultModel: () => { throw new Error("no settings"); }, cliInfo: async () => ({ version: "9.9.9", loggedIn: null }) };
+  const { d } = await serve({ catalogs: { codex: CATALOG, claude: catalogOf("claude 9.9.9-invented", CLAUDE_MODELS, "opus"), agy } });
+  try {
+    const s = await getJson(d, "/api/settings");
+    assert.deepEqual(s.reviewerNames, ["codex", "claude", "agy"]);
+    assert.equal(s.defaultReviewer, "codex");
+    assert.deepEqual(Object.keys(s.reviewers), ["codex", "claude", "agy"]);
+    for (const k of ["models", "codexDefault", "reviewer"]) assert.equal(s[k], undefined, `no top-level ${k}`);
+    const { codex, claude, agy: a } = s.reviewers;
+    assert.deepEqual([codex.label, codex.models[0].slug, codex.defaultModel, codex.cli.version, codex.efforts, codex.allowCustomModel],
+      ["Codex", "model-a", "model-a", "codex-cli 9.9.9-invented", null, false]);
+    assert.deepEqual([claude.label, claude.models, claude.defaultModel, claude.efforts, claude.allowCustomModel],
+      ["Claude Code", CLAUDE_MODELS, "opus", ["low", "medium", "high", "xhigh", "max"], true]);
+    assert.deepEqual([a.label, a.models, a.defaultModel, a.efforts, a.allowCustomModel], ["Antigravity", null, null, null, false]);
+    for (const r of Object.values(s.reviewers)) assert.equal(typeof r.modelsRefreshing, "boolean");
+  } finally {
+    await d.close();
+  }
+});
+
+test("models route per reviewer: refresh asks that reviewer only; an unknown one is 400", async () => {
+  const codex = catalogOf("codex-cli 9.9.9-invented", [{ slug: "model-a", name: "Model A", description: "", efforts: ["high"] }], "model-a");
+  const agy = catalogOf("9.9.9", AGY_MODELS, "Gemini X Flash (High)");
+  const { d } = await serve({ catalogs: { codex, agy } });
+  try {
+    await getJson(d, "/api/settings");
+    const before = [codex.calls, agy.calls];
+    const m = await getJson(d, "/api/models?reviewer=agy&refresh=1");
+    assert.deepEqual([codex.calls, agy.calls], [before[0], before[1] + 1]);
+    assert.deepEqual([m.reviewer, m.models, m.defaultModel, m.cli.version], ["agy", AGY_MODELS, "Gemini X Flash (High)", "9.9.9"]);
+    const c = await getJson(d, "/api/models");
+    assert.deepEqual([c.reviewer, c.models[0].slug], ["codex", "model-a"]);
+    // a reviewer with no injected catalog: no list, no error
+    assert.deepEqual((await getJson(d, "/api/models?reviewer=claude")).models, null);
+    for (const q of ["zzz", "__proto__", ""]) {
+      const r = await request(d.port, `/api/models?reviewer=${q}`, { headers: bearer(d) });
+      assert.equal(r.status, 400, q);
+    }
+  } finally {
+    await d.close();
+  }
+});
+
+test("save per reviewer: new paths, legacy files normalized, set then clear, legacy paths refused", async () => {
+  const { d } = await serve({ catalogs: { codex: CATALOG } });
+  const globalFile = path.join(process.env.HOME, ".cross-review", "config.json");
+  const read = () => JSON.parse(fs.readFileSync(globalFile, "utf8"));
+  const post = body => request(d.port, "/api/settings", { method: "POST", headers: { ...originOf(d), "Content-Type": "application/json" }, body: { scope: "global", ...body } });
+  fs.mkdirSync(path.dirname(globalFile), { recursive: true });
+  try {
+    let r = await post({ config: { reviewers: { claude: { model: "opus" } } }, touched: ["reviewers.claude.model"] });
+    assert.equal(r.status, 200, r.text);
+    assert.deepEqual(read(), { reviewers: { claude: { model: "opus" } } });
+    assert.deepEqual(JSON.parse(r.text).config, { reviewers: { claude: { model: "opus" } } });
+
+    // a legacy file becomes the per-reviewer form on any save
+    fs.writeFileSync(globalFile, JSON.stringify({ model: "gpt-x" }));
+    r = await post({ config: { open_dashboard: true }, touched: ["open_dashboard"] });
+    assert.equal(r.status, 200, r.text);
+    assert.deepEqual(read(), { open_dashboard: true, reviewers: { codex: { model: "gpt-x" } } });
+    const s = await getJson(d, "/api/settings");
+    assert.deepEqual(s.global, { open_dashboard: true, reviewers: { codex: { model: "gpt-x" } } });
+
+    // set then clear Codex's model on a legacy file
+    fs.writeFileSync(globalFile, JSON.stringify({ model: "A" }));
+    r = await post({ config: { reviewers: { codex: { model: "B" } } }, touched: ["reviewers.codex.model"] });
+    assert.equal(r.status, 200, r.text);
+    assert.deepEqual([read().reviewers.codex.model, read().model], ["B", undefined]);
+    r = await post({ config: { reviewers: { codex: { model: "" } } }, touched: ["reviewers.codex.model"] });
+    assert.equal(r.status, 200, r.text);
+    assert.equal(fs.existsSync(globalFile), false, "nothing left: the emptied reviewers object is pruned and the file removed");
+    const ws = mk("resolve-after-clear");
+    assert.equal(resolveSettings({ skill: "review-impl", workingDir: ws }).model, null);
+
+    // per-skill paths under a reviewer
+    r = await post({ config: { reviewers: { agy: { skills: { "review-pr": { effort: "low" } } } } }, touched: ["reviewers.agy.skills.review-pr.effort"] });
+    assert.equal(r.status, 200, r.text);
+    assert.deepEqual(read(), { reviewers: { agy: { skills: { "review-pr": { effort: "low" } } } } });
+
+    // legacy and unknown paths are refused and change nothing
+    const before = fs.readFileSync(globalFile, "utf8");
+    for (const touched of [["model"], ["effort"], ["skills.review-impl.model"], ["reviewers.gemini.model"], ["reviewers.codex.colour"], ["reviewers.__proto__.model"], ["reviewers.codex.skills.review-commit.model"]]) {
+      r = await post({ config: { model: "B", effort: "low" }, touched });
+      assert.equal(r.status, 400, JSON.stringify(touched));
+      assert.match(r.text, /touched must list setting paths/);
+    }
+    assert.equal(fs.readFileSync(globalFile, "utf8"), before);
+    // a Claude effort outside its levels is refused by the validator
+    r = await post({ config: { reviewers: { claude: { effort: "huge" } } }, touched: ["reviewers.claude.effort"] });
+    assert.equal(r.status, 400);
+    assert.match(r.text, /reviewers\.claude\.effort: must be one of/);
+  } finally {
+    fs.rmSync(globalFile, { force: true });
+    await d.close();
+  }
+});
+
+test("avatar parties per reviewer: one per reviewer the sessions used", async () => {
+  const root = mk("avatar-reviewers");
+  const fx = buildFixture(root, { now: nowS(), livePid: process.pid });
+  const dirs = Object.values(fx.sessions);
+  const patch = (dir, reviewer) => {
+    const f = path.join(dir, "state.json");
+    fs.writeFileSync(f, JSON.stringify({ ...JSON.parse(fs.readFileSync(f, "utf8")), reviewer }));
+  };
+  patch(dirs[0], "claude");
+  patch(dirs[1], "claude");
+  const d = await startDashboard({ root, port: 0, open: false, discoveryFile: null, catalogs: { codex: CATALOG } });
+  try {
+    const list = await getJson(d, "/api/avatars");
+    const reviewers = list.parties.filter(p => p.key.startsWith("reviewer:"));
+    assert.deepEqual(reviewers.map(p => [p.key, p.who, p.label]), [["reviewer:codex", "rv", "Reviewer · Codex"], ["reviewer:claude", "rv", "Reviewer · Claude Code"]]);
+    const total = (await getJson(d, "/api/sessions"));
+    const n = total.active.length + total.history.length;
+    assert.equal(reviewers[1].seenIn, "2 sessions");
+    assert.equal(reviewers[0].seenIn, `${n - 2} sessions`);
+    assert.ok(!list.parties.some(p => p.key === "reviewer:agy"), "a reviewer no session used has no party");
+  } finally {
+    await d.close();
+  }
+  // every session by one reviewer: "every session"
+  const root2 = mk("avatar-one-reviewer");
+  buildFixture(root2, { now: nowS(), livePid: process.pid });
+  const d2 = await startDashboard({ root: root2, port: 0, open: false, discoveryFile: null, catalogs: { codex: CATALOG } });
+  try {
+    const list = await getJson(d2, "/api/avatars");
+    assert.deepEqual(list.parties.filter(p => p.key.startsWith("reviewer:")).map(p => [p.key, p.seenIn]), [["reviewer:codex", "every session"]]);
+  } finally {
+    await d2.close();
   }
 });

@@ -40,28 +40,36 @@ export function effortOptions({ catalog, model, saved, inherited }) {
 
 const getPath = (obj, p) => p.split(".").reduce((o, k) => (o && typeof o === "object" ? o[k] : undefined), obj);
 
+const UNSAFE_KEY = new Set(["__proto__", "constructor", "prototype"]);
+const isPlain = v => v !== null && typeof v === "object" && !Array.isArray(v);
+
 /**
- * The config to save: the saved one with only the touched fields ("model", "effort",
- * "reviewer", "open_dashboard", "skills.<skill>.<model|effort>") taken from the form.
- * An empty form value removes the field. The saved object is not modified.
+ * The config to save: the saved one with only the touched fields ("reviewer", "open_dashboard",
+ * "reviewers.<name>.<model|effort>", "reviewers.<name>.skills.<skill>.<model|effort>", …) taken
+ * from the form. An empty form value removes the field, and objects it leaves empty on its path.
+ * The saved object is not modified.
  */
 export function mergeForm(saved, form, touched) {
   const out = JSON.parse(JSON.stringify(saved || {}));
   for (const p of touched) {
-    const value = getPath(form, p);
     const keys = p.split(".");
-    if (keys[0] === "skills") {
-      const [, skill, key] = keys;
-      const skills = out.skills || {};
-      const entry = { ...(skills[skill] || {}) };
-      if (value === undefined || value === null || value === "") delete entry[key]; else entry[key] = value;
-      if (Object.keys(entry).length) skills[skill] = entry; else delete skills[skill];
-      if (Object.keys(skills).length) out.skills = skills; else delete out.skills;
-    } else if (value === undefined || value === null || value === "") {
-      delete out[keys[0]];
-    } else {
-      out[keys[0]] = value;
+    if (keys.some(k => UNSAFE_KEY.has(k))) continue;
+    const value = getPath(form, p);
+    const clear = value === undefined || value === null || value === "";
+    const chain = [out];
+    for (const k of keys.slice(0, -1)) {
+      const node = chain[chain.length - 1];
+      if (!isPlain(node[k])) {
+        if (clear) break;
+        node[k] = {};
+      }
+      chain.push(node[k]);
     }
+    if (chain.length < keys.length) continue; // clearing a field that is not there
+    const last = keys[keys.length - 1];
+    if (clear) delete chain[chain.length - 1][last];
+    else chain[chain.length - 1][last] = value;
+    for (let i = chain.length - 1; i > 0 && !Object.keys(chain[i]).length; i--) delete chain[i - 1][keys[i - 1]];
   }
   return out;
 }

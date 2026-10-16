@@ -22,7 +22,7 @@ import { discoveryFile, removeDiscoveryIfOwn, writeDiscovery } from "./discovery
 import { AvatarError, avatarFile, listAvatars, removeAvatar, saveAvatar, AVATAR_MAX_BYTES } from "./avatars.js";
 import { CONFIG_SKILLS, ensureCrossReviewDir, globalConfigPath, readConfig, resolvePlanSettings, syncGitignore, validateConfig, workspaceConfigPath, writeConfig } from "../config.js";
 import { fillCommits, gitPlanFacts, listPlans, parsePlan, planProgress, planState, plansDir, plansWarning, summarizePlanText } from "../plans.js";
-import { getReviewer } from "../reviewers/index.js";
+import { DEFAULT_REVIEWER, REVIEWER_NAMES, getReviewer } from "../reviewers/index.js";
 import { mergeForm } from "./ui/settings.js";
 import { fetchLatestVersion, isNewer, readUpdateCache, UPDATE_TTL_S, updateCachePath, writeUpdateCache } from "./update.js";
 
@@ -37,8 +37,8 @@ const PING_MS = 15000;
 const REQUEST_SCAN_AGE_MS = 5000;
 const ACTIVITY_PAGE = 20;
 const SETTINGS_BODY_MAX = 64 * 1024;
-/** A field the Settings page can change: a top-level key, or a known skill's model or effort. */
-const SETTING_PATH = new RegExp(`^(reviewer|model|effort|open_dashboard|open_plans|track_plans|check_updates|skills\\.(${CONFIG_SKILLS.join("|")})\\.(model|effort))$`);
+/** A field the Settings page can change: a top-level key, or a reviewer's model or effort, for all skills or one. */
+const SETTING_PATH = new RegExp(`^(reviewer|open_dashboard|open_plans|track_plans|check_updates|reviewers\\.(${REVIEWER_NAMES.join("|")})\\.(skills\\.(${CONFIG_SKILLS.join("|")})\\.)?(model|effort))$`);
 const COOKIE = "cr_token";
 
 // The only files the server hands out; a request path is a key here or a 404
@@ -523,24 +523,83 @@ function deniedHtml() {
   return deniedPage;
 }
 
+// ---------- model catalogs ----------
+
+const NO_CATALOG = { listModels: async () => null, defaultModel: () => null, cliInfo: async () => null };
+const CATALOG_CACHE_FILES = { codex: "models.json", agy: "models-agy.json" }; // Claude's list is fixed
+
+const defaultCatalogCache = name => (CATALOG_CACHE_FILES[name] ? path.join(os.homedir(), ".cross-review", CATALOG_CACHE_FILES[name]) : null);
+
+/**
+ * A reviewer's model catalog, stale-while-revalidate: the list saved by an earlier run answers at
+ * once while the reviewer CLI is asked again (at start, and on "refresh list"); a new list replaces
+ * it and the file. A failed ask keeps the list it had. Only a first run with no saved list waits
+ * for the CLI. The file keeps the CLI status under `reviewer`, as earlier versions wrote it.
+ */
+function reviewerCatalog(impl, cacheFile) {
+  let state = null; // { models, fetchedAt, cli }
+  let refreshing = null; // the ask in flight
+  try {
+    const saved = cacheFile ? JSON.parse(fs.readFileSync(cacheFile, "utf8")) : null;
+    if (saved && Array.isArray(saved.models)) state = { models: saved.models, fetchedAt: saved.fetchedAt || null, cli: saved.reviewer || null };
+  } catch {}
+  const refresh = () => {
+    if (!refreshing) {
+      refreshing = Promise.resolve()
+        .then(() => Promise.all([impl.listModels(), impl.cliInfo ? impl.cliInfo() : null]))
+        .catch(() => [null, null])
+        .then(([list, info]) => {
+          const fetchedAt = Math.floor(Date.now() / 1000);
+          if (list || !state || !state.models) state = { models: list || null, fetchedAt, cli: info || null };
+          else state = { ...state, cli: info || state.cli };
+          if (list && cacheFile) {
+            try {
+              fs.mkdirSync(path.dirname(cacheFile), { recursive: true });
+              const tmp = `${cacheFile}.${process.pid}.tmp`;
+              fs.writeFileSync(tmp, JSON.stringify({ models: state.models, fetchedAt: state.fetchedAt, reviewer: state.cli }));
+              fs.renameSync(tmp, cacheFile);
+            } catch {}
+          }
+        })
+        .finally(() => { refreshing = null; });
+    }
+    return refreshing;
+  };
+  refresh();
+  return {
+    /** The catalog now (waiting only when there is none yet); `settle` also waits for the ask in flight, `refresh` starts one. */
+    async models({ refresh: again = false, settle = false } = {}) {
+      if (again) await refresh();
+      else if (!state || settle) await (refreshing || (state ? null : refresh()));
+      return { models: null, fetchedAt: null, cli: null, ...state, refreshing: Boolean(refreshing) };
+    },
+    defaultModel() {
+      try {
+        return impl.defaultModel ? impl.defaultModel() ?? null : null;
+      } catch {
+        return null;
+      }
+    },
+  };
+}
+
 // ---------- server ----------
 
 /**
  * Start the dashboard. Options besides the documented four are for tests: pickPort,
- * discoveryFile (null: none), now, tickMs, rescanMs, isAlive, reveal, catalog
- * ({listModels, defaultModel, cliInfo}; default: the Codex adapter's), catalogCache (the file that
- * keeps the model list between runs; default ~/.cross-review/models.json for the Codex adapter,
- * none for an injected catalog; null: none), latestVersion (async () => the newest pack version;
+ * discoveryFile (null: none), now, tickMs, rescanMs, isAlive, reveal, catalogs ({<reviewer>:
+ * {listModels, defaultModel, cliInfo}}; default: each reviewer adapter; a reviewer left out of an
+ * injected map has no catalog), catalogCaches ({<reviewer>: the file that keeps its model list
+ * between runs}; default ~/.cross-review/models.json for Codex and models-agy.json for agy, none
+ * for Claude or an injected map; null: none), latestVersion (async () => the newest pack version;
  * default: the latest version on npm), updateCache (default ~/.cross-review/update.json).
  */
 export async function startDashboard({
   root = process.cwd(), port = null, open = false, idleExitSeconds = null,
   pickPort = randomPort, discoveryFile: discFile = discoveryFile(), host = "127.0.0.1",
-  now, tickMs = 1000, rescanMs, isAlive, reveal = revealFolder, catalog: injectedCatalog, catalogCache,
+  now, tickMs = 1000, rescanMs, isAlive, reveal = revealFolder, catalogs: injectedCatalogs, catalogCaches = {},
   latestVersion = fetchLatestVersion, updateCache = updateCachePath(),
 } = {}) {
-  const catalog = injectedCatalog || getReviewer("codex");
-  const cacheFile = catalogCache !== undefined ? catalogCache : injectedCatalog ? null : path.join(os.homedir(), ".cross-review", "models.json");
   const watcher = createListWatcher({ root, now, tickMs, rescanMs, isAlive });
   const token = crypto.randomBytes(32).toString("hex");
   const tokenBuf = Buffer.from(token);
@@ -599,38 +658,13 @@ export async function startDashboard({
 
   // ----- settings -----
 
-  // The model catalog, stale-while-revalidate: the list saved by an earlier run answers at once while
-  // the reviewer CLI is asked again (at start, and on "refresh list"); a new list replaces it and the
-  // file. A failed ask keeps the list it had. Only a first run with no saved list waits for the CLI.
-  let catalogState = null; // { models, fetchedAt, reviewer }
-  let refreshing = null; // the ask in flight
-  try {
-    const saved = cacheFile ? JSON.parse(fs.readFileSync(cacheFile, "utf8")) : null;
-    if (saved && Array.isArray(saved.models)) catalogState = { models: saved.models, fetchedAt: saved.fetchedAt || null, reviewer: saved.reviewer || null };
-  } catch {}
-  const refreshCatalog = () => {
-    if (!refreshing) {
-      refreshing = Promise.resolve()
-        .then(() => Promise.all([catalog.listModels(), catalog.cliInfo ? catalog.cliInfo() : null]))
-        .catch(() => [null, null])
-        .then(([list, info]) => {
-          const fetchedAt = Math.floor(Date.now() / 1000);
-          if (list || !catalogState || !catalogState.models) catalogState = { models: list || null, fetchedAt, reviewer: info };
-          else catalogState = { ...catalogState, reviewer: info || catalogState.reviewer };
-          if (list && cacheFile) {
-            try {
-              fs.mkdirSync(path.dirname(cacheFile), { recursive: true });
-              const tmp = `${cacheFile}.${process.pid}.tmp`;
-              fs.writeFileSync(tmp, JSON.stringify(catalogState));
-              fs.renameSync(tmp, cacheFile);
-            } catch {}
-          }
-        })
-        .finally(() => { refreshing = null; });
-    }
-    return refreshing;
-  };
-  refreshCatalog();
+  // One model catalog per reviewer, asked at start, all at once; one that fails leaves the others
+  const catalogs = Object.create(null);
+  for (const name of REVIEWER_NAMES) {
+    const impl = injectedCatalogs ? injectedCatalogs[name] || NO_CATALOG : getReviewer(name);
+    const cacheFile = catalogCaches[name] !== undefined ? catalogCaches[name] : injectedCatalogs ? null : defaultCatalogCache(name);
+    catalogs[name] = reviewerCatalog(impl, cacheFile);
+  }
 
   // Check for updates: on start when the global "Check for updates" is on and the last answer is
   // older than a few days (or failed), and whenever Check now is pressed
@@ -670,33 +704,13 @@ export async function startDashboard({
     };
   };
   if (autoUpdates() && updateStale()) checkForUpdate();
-  /** The catalog now (waiting only when there is none yet); `settle` also waits for the ask in flight, `refresh` starts one. */
-  const models = async ({ refresh = false, settle = false } = {}) => {
-    if (refresh) await refreshCatalog();
-    else if (!catalogState || settle) await (refreshing || (catalogState ? null : refreshCatalog()));
-    return { ...catalogState, refreshing: Boolean(refreshing) };
-  };
-
-  // Until the Settings page edits reviewers.<name>, it reads and writes Codex's model, effort and
-  // skills at the top level, where older files keep them: readConfig gives them under
-  // reviewers.codex, so they move back up here, and writeConfig moves them down again.
-  const codexAtTop = cfg => {
-    const codex = cfg && cfg.reviewers && cfg.reviewers.codex;
-    if (!codex) return cfg;
-    const { model, effort, skills, ...restCodex } = codex;
-    const reviewers = { ...cfg.reviewers, codex: restCodex };
-    if (!Object.keys(restCodex).length) delete reviewers.codex;
-    const out = { ...cfg, ...(model !== undefined && { model }), ...(effort !== undefined && { effort }), ...(skills !== undefined && { skills }) };
-    if (Object.keys(reviewers).length) out.reviewers = reviewers; else delete out.reviewers;
-    return out;
-  };
 
   async function settingsPayload() {
     // Keyed by workspace path: no prototype, so a workspace named __proto__ is a plain key
     const errors = { global: undefined, workspaces: Object.create(null) };
     const load = (file, onError) => {
       try {
-        return codexAtTop(readConfig(file));
+        return readConfig(file);
       } catch (e) {
         onError(e.message);
         return {};
@@ -708,22 +722,23 @@ export async function startDashboard({
       workspacesCfg[ws] = load(workspaceConfigPath(abs), m => { errors.workspaces[ws] = m; });
       paths[ws] = tildePath(workspaceConfigPath(abs));
     }
-    const m = await models();
-    let codexDefault = null;
-    try {
-      codexDefault = catalog.defaultModel();
-    } catch {}
+    const entries = await Promise.all(REVIEWER_NAMES.map(async name => {
+      const mod = getReviewer(name);
+      const m = await catalogs[name].models();
+      return [name, {
+        label: mod.label, models: m.models, modelsFetchedAt: m.fetchedAt, modelsRefreshing: m.refreshing,
+        defaultModel: catalogs[name].defaultModel(), cli: m.cli, efforts: mod.efforts || null, allowCustomModel: mod.allowCustomModel === true,
+      }];
+    }));
     return {
       global: load(globalConfigPath(), m => { errors.global = m; }),
       globalPath: tildePath(globalConfigPath()),
       workspaces: workspacesCfg,
       paths,
       names: Object.fromEntries([...watcher.workspaceMap().keys()].map(ws => [ws, watcher.wsName(ws)])),
-      models: m.models,
-      modelsFetchedAt: m.fetchedAt,
-      modelsRefreshing: m.refreshing,
-      codexDefault,
-      reviewer: m.reviewer,
+      reviewers: Object.fromEntries(entries),
+      reviewerNames: REVIEWER_NAMES,
+      defaultReviewer: DEFAULT_REVIEWER,
       errors,
     };
   }
@@ -748,7 +763,7 @@ export async function startDashboard({
       if (!next || typeof next !== "object" || Array.isArray(next)) return fail(res, 400, "config must be a JSON object");
       let current = {};
       try {
-        current = codexAtTop(readConfig(file));
+        current = readConfig(file);
       } catch {}
       next = mergeForm(current, next, body.touched);
     }
@@ -781,7 +796,7 @@ export async function startDashboard({
       }
       gitignore[ws] = { result, blocked_by: blockedBy, warning };
     }
-    return json(res, 200, { ok: true, config: codexAtTop(config), gitignore });
+    return json(res, 200, { ok: true, config, gitignore });
   }
 
   // ----- avatars -----
@@ -800,10 +815,16 @@ export async function startDashboard({
       callers.set(s.caller.name, c);
     }
     const seen = n => `${n} ${n === 1 ? "session" : "sessions"}`;
-    const parties = [
-      { key: "you", who: "us", label: "You", seenIn: "every session" },
-      { key: "reviewer:codex", who: "rv", label: "Reviewer · Codex", seenIn: "every session" },
-    ];
+    const parties = [{ key: "you", who: "us", label: "You", seenIn: "every session" }];
+    // A party per reviewer the sessions used; the default one even before any session
+    const byReviewer = new Map();
+    for (const s of [...p.active, ...p.history]) byReviewer.set(s.reviewer, (byReviewer.get(s.reviewer) || 0) + 1);
+    const total = p.active.length + p.history.length;
+    for (const name of REVIEWER_NAMES) {
+      const n = byReviewer.get(name) || 0;
+      if (!n && !(name === DEFAULT_REVIEWER && !total)) continue;
+      parties.push({ key: `reviewer:${name}`, who: "rv", label: `Reviewer · ${getReviewer(name).label}`, seenIn: n === total ? "every session" : seen(n) });
+    }
     for (const [name, c] of [...callers].sort((a, b) => b[1].n - a[1].n)) {
       const key = `agent:${name.toLowerCase().replace(/[^a-z0-9._-]/g, "-")}`;
       parties.push({ key, who: "ag", label: `Agent · ${c.title}`, seenIn: seen(c.n), name });
@@ -1024,13 +1045,11 @@ export async function startDashboard({
         if (url.searchParams.get("wait") === "1" && updateCheck) await updateCheck;
         return json(res, 200, updatePayload());
       case "/api/models": {
+        const name = url.searchParams.has("reviewer") ? url.searchParams.get("reviewer") : DEFAULT_REVIEWER;
+        if (!REVIEWER_NAMES.includes(name)) return fail(res, 400, `unknown reviewer (known: ${REVIEWER_NAMES.join(", ")})`);
         // Waits for the ask in flight, so a page shown from the saved list learns the new one
-        const m = await models({ refresh: url.searchParams.get("refresh") === "1", settle: true });
-        let codexDefault = null;
-        try {
-          codexDefault = catalog.defaultModel();
-        } catch {}
-        return json(res, 200, { models: m.models, fetchedAt: m.fetchedAt, refreshing: m.refreshing, codexDefault, reviewer: m.reviewer });
+        const m = await catalogs[name].models({ refresh: url.searchParams.get("refresh") === "1", settle: true });
+        return json(res, 200, { reviewer: name, models: m.models, fetchedAt: m.fetchedAt, refreshing: m.refreshing, defaultModel: catalogs[name].defaultModel(), cli: m.cli });
       }
       case "/api/avatars":
         return json(res, 200, avatarParties());
