@@ -101,6 +101,10 @@
   #avatars .mark { display: inline-block; vertical-align: middle; margin-right: 10px; }
   #avatars td { vertical-align: middle; }
   #avatars-block { display: none; } #avatars-block.on { display: block; }
+  #updates-block { display: none; } #updates-block.on { display: block; }
+  label.check { margin-right: 12px; }
+  label.check input { vertical-align: -1px; margin: 0 6px 0 0; }
+  .site-foot a.new { color: var(--amber); font-weight: 500; }
   .bubble { max-width: 86%; min-width: 0; background: var(--sheet); border: 1px solid var(--rule); border-radius: 4px; padding: 10px 14px; }
   .m.r .bubble { background: #f2f4fb; border-color: #dfe4f3; }
   .m.us .bubble { background: #f1f6f2; border-color: #d9e7dd; }
@@ -372,6 +376,14 @@
     <p class="sub" style="font-size:12.5px">Applies everywhere and saves as soon as you pick an image. Images stay on this computer in <span class="mono">~/.cross-review/avatars/</span>. PNG, JPEG, WebP or GIF, up to 1 MB. Without an image the letters are shown.</p>
   </div>
 
+  <div id="updates-block">
+    <h2>Updates</h2>
+    <div class="form">
+      <div>Check for updates</div><div><label class="check"><input type="checkbox" id="f-updates"> When the dashboard starts, at most every 3 days</label> <button class="plain" id="check-update">Check now</button><div class="help" id="update-help">You have the latest version, 10.2.0 (checked 2 hours ago).</div></div>
+    </div>
+    <p class="sub" style="font-size:12.5px">A check reads the pack's version on GitHub; nothing about you or your sessions is sent.</p>
+  </div>
+
   <div class="actions">
     <details style="margin-right:auto"><summary id="preview-title">Show file</summary><pre id="preview"></pre></details>
     <button class="plain" id="clear-ws">Clear this workspace</button>
@@ -379,7 +391,7 @@
   <div class="save-state" id="save-state" role="status"></div>
 </section>
 </main>
-<footer class="site-foot"><div class="wrap">cross-review 10.2.0 · <a href="https://github.com/lploc94/cross-review" target="_blank" rel="noopener noreferrer">GitHub</a> · <a href="https://github.com/lploc94/cross-review#reinstall--update" target="_blank" rel="noopener noreferrer">Update</a> · <a href="https://github.com/lploc94/cross-review/issues" target="_blank" rel="noopener noreferrer">Report a problem</a></div></footer>
+<footer class="site-foot"><div class="wrap">cross-review 10.2.0 · <a href="https://github.com/lploc94/cross-review" target="_blank" rel="noopener noreferrer">GitHub</a> · <a href="https://github.com/lploc94/cross-review#reinstall--update" id="update-link" target="_blank" rel="noopener noreferrer">Update</a> · <a href="https://github.com/lploc94/cross-review/issues" target="_blank" rel="noopener noreferrer">Report a problem</a></div></footer>
 
 <script>
 // ---------------- icons: one line set, 24px grid, drawn with currentColor ----------------
@@ -703,6 +715,7 @@ function renderSettings() {
   document.getElementById("preview-title").textContent = scope === "global" ? "Show ~/.cross-review/config.json" : `Show ${ws()}/.cross-review/config.json`;
   document.getElementById("preview").textContent = JSON.stringify(lv, (k, v) => v && typeof v === "object" && k && !Object.values(v).some(x => x !== undefined) ? undefined : v, 2);
   document.getElementById("avatars-block").classList.toggle("on", scope === "global");
+  document.getElementById("updates-block").classList.toggle("on", scope === "global");
   renderAvatars();
   document.getElementById("clear-ws").style.display = scope === "workspace" ? "" : "none";
 }
@@ -742,6 +755,15 @@ function flashSaved() {
 document.getElementById("settings").addEventListener("change", e => {
   if (e.target.name !== "scope" && e.target.id !== "ws" && e.target.dataset.av === undefined) flashSaved();
 });
+// Check now: the mock pretends GitHub has a newer version
+document.getElementById("check-update").onclick = () => {
+  const help = document.getElementById("update-help"), link = document.getElementById("update-link");
+  help.textContent = "Checking…";
+  setTimeout(() => {
+    help.textContent = "Version 10.3.0 is out; you have 10.2.0. Run npx github:lploc94/cross-review to update.";
+    link.textContent = "Update available: 10.3.0"; link.classList.add("new");
+  }, 600);
+};
 document.getElementById("refresh").onclick = e => { e.currentTarget.lastChild.textContent = "refreshed just now"; };
 renderSettings();
 

@@ -24,6 +24,7 @@ import { CONFIG_SKILLS, ensureCrossReviewDir, globalConfigPath, readConfig, reso
 import { fillCommits, gitPlanFacts, listPlans, parsePlan, planProgress, planState, plansDir, plansWarning, summarizePlanText } from "../plans.js";
 import { getReviewer } from "../reviewers/index.js";
 import { mergeForm } from "./ui/settings.js";
+import { fetchLatestVersion, isNewer, readUpdateCache, UPDATE_TTL_S, updateCachePath, writeUpdateCache } from "./update.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const UI_DIR = path.join(HERE, "ui");
@@ -37,7 +38,7 @@ const REQUEST_SCAN_AGE_MS = 5000;
 const ACTIVITY_PAGE = 20;
 const SETTINGS_BODY_MAX = 64 * 1024;
 /** A field the Settings page can change: a top-level key, or a known skill's model or effort. */
-const SETTING_PATH = new RegExp(`^(reviewer|model|effort|open_dashboard|open_plans|track_plans|skills\\.(${CONFIG_SKILLS.join("|")})\\.(model|effort))$`);
+const SETTING_PATH = new RegExp(`^(reviewer|model|effort|open_dashboard|open_plans|track_plans|check_updates|skills\\.(${CONFIG_SKILLS.join("|")})\\.(model|effort))$`);
 const COOKIE = "cr_token";
 
 // The only files the server hands out; a request path is a key here or a 404
@@ -529,12 +530,14 @@ function deniedHtml() {
  * discoveryFile (null: none), now, tickMs, rescanMs, isAlive, reveal, catalog
  * ({listModels, defaultModel, cliInfo}; default: the Codex adapter's), catalogCache (the file that
  * keeps the model list between runs; default ~/.cross-review/models.json for the Codex adapter,
- * none for an injected catalog; null: none).
+ * none for an injected catalog; null: none), latestVersion (async () => the newest pack version;
+ * default: the manifest on GitHub), updateCache (default ~/.cross-review/update.json).
  */
 export async function startDashboard({
   root = process.cwd(), port = null, open = false, idleExitSeconds = null,
   pickPort = randomPort, discoveryFile: discFile = discoveryFile(), host = "127.0.0.1",
   now, tickMs = 1000, rescanMs, isAlive, reveal = revealFolder, catalog: injectedCatalog, catalogCache,
+  latestVersion = fetchLatestVersion, updateCache = updateCachePath(),
 } = {}) {
   const catalog = injectedCatalog || getReviewer("codex");
   const cacheFile = catalogCache !== undefined ? catalogCache : injectedCatalog ? null : path.join(os.homedir(), ".cross-review", "models.json");
@@ -628,6 +631,45 @@ export async function startDashboard({
     return refreshing;
   };
   refreshCatalog();
+
+  // Check for updates: on start when the global "Check for updates" is on and the last answer is
+  // older than a few days (or failed), and whenever Check now is pressed
+  let updateState = readUpdateCache(updateCache); // { latest, checked_at, error }
+  let updateCheck = null; // the check in flight
+  const updateStale = () => !updateState || Boolean(updateState.error) || Date.now() / 1000 - updateState.checked_at >= UPDATE_TTL_S;
+  const autoUpdates = () => {
+    try {
+      return readConfig(globalConfigPath()).check_updates === true;
+    } catch {
+      return false;
+    }
+  };
+  const checkForUpdate = () => {
+    if (!updateCheck) {
+      updateCheck = Promise.resolve()
+        .then(() => latestVersion())
+        // a failed check keeps the version the last good one found
+        .then(latest => ({ latest, error: null }), e => ({ latest: updateState ? updateState.latest : null, error: (e && e.message) || "the check failed" }))
+        .then(r => {
+          updateState = { ...r, checked_at: Math.floor(Date.now() / 1000) };
+          try {
+            writeUpdateCache(updateCache, updateState);
+          } catch {}
+        })
+        .finally(() => { updateCheck = null; });
+    }
+    return updateCheck;
+  };
+  const updatePayload = () => {
+    const current = packVersion();
+    const latest = updateState ? updateState.latest : null;
+    return {
+      current, latest, available: Boolean(latest && current && isNewer(latest, current)),
+      checked_at: updateState ? updateState.checked_at : null, error: updateState ? updateState.error : null,
+      checking: Boolean(updateCheck), auto: autoUpdates(),
+    };
+  };
+  if (autoUpdates() && updateStale()) checkForUpdate();
   /** The catalog now (waiting only when there is none yet); `settle` also waits for the ask in flight, `refresh` starts one. */
   const models = async ({ refresh = false, settle = false } = {}) => {
     if (refresh) await refreshCatalog();
@@ -700,6 +742,8 @@ export async function startDashboard({
     if (errors.length) return fail(res, 400, errors.join("; "));
     if (body.scope === "workspace") ensureCrossReviewDir(watcher.workspacePath(body.ws));
     const config = writeConfig(file, next);
+    // turning Check for updates on checks now unless the last answer is fresh
+    if (body.scope === "global" && config.check_updates === true && updateStale()) checkForUpdate();
     // Plans in git: the saved level's workspaces get the .gitignore their resolved value asks for
     const targets = body.scope === "workspace" ? [[body.ws, watcher.workspacePath(body.ws)]] : [...watcher.workspaceMap()];
     const gitignore = Object.create(null);
@@ -920,6 +964,10 @@ export async function startDashboard({
         if (e.status === 413) return fail(res, 413, "the request is over 64 KB");
         return fail(res, 400, "body must be JSON");
       }
+      if (route === "/api/update/check") {
+        await checkForUpdate();
+        return json(res, 200, updatePayload());
+      }
       if (route === "/api/settings") {
         try {
           return saveSettings(res, body);
@@ -957,6 +1005,10 @@ export async function startDashboard({
     switch (route) {
       case "/api/settings":
         return json(res, 200, await settingsPayload());
+      case "/api/update":
+        // ?wait=1: after the check in flight, so a page that saw `checking` learns its answer
+        if (url.searchParams.get("wait") === "1" && updateCheck) await updateCheck;
+        return json(res, 200, updatePayload());
       case "/api/models": {
         // Waits for the ask in flight, so a page shown from the saved list learns the new one
         const m = await models({ refresh: url.searchParams.get("refresh") === "1", settle: true });

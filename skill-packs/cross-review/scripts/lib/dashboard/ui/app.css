@@ -46,6 +46,10 @@ h2 { font: 600 17px var(--serif); margin: 34px 0 10px; }
 /* footer: version and the project's links */
 .site-foot { border-top: 1px solid var(--rule); padding: 14px 0 22px; color: var(--muted); font-size: 12.5px; }
 .site-foot a { color: var(--soft); }
+.site-foot a.new { color: var(--amber); font-weight: 500; }
+#updates-block { display: none; } #updates-block.on { display: block; }
+label.check { margin-right: 12px; }
+label.check input { vertical-align: -1px; margin: 0 6px 0 0; }
 .status .what .i { width: 18px; height: 18px; vertical-align: -3px; margin-right: 8px; }
 .status .what .i { color: var(--c); }
 

@@ -166,6 +166,14 @@
     <p class="sub small">Applies everywhere and saves as soon as you pick an image. Images stay on this computer in <span class="mono">~/.cross-review/avatars/</span>. PNG, JPEG, WebP or GIF, up to 1 MB. Without an image the default pictures are shown.</p>
   </div>
 
+  <div id="updates-block">
+    <h2>Updates</h2>
+    <div class="form">
+      <div>Check for updates</div><div><label class="check"><input type="checkbox" id="f-updates"> When the dashboard starts, at most every 3 days</label> <button class="plain" id="check-update">Check now</button><div class="help" id="update-help"></div></div>
+    </div>
+    <p class="sub small">A check reads the pack's version on GitHub; nothing about you or your sessions is sent.</p>
+  </div>
+
   <div class="actions">
     <details class="push"><summary id="preview-title">Show file</summary><pre id="preview"></pre></details>
     <button class="plain" id="clear-ws">Clear this workspace</button>
@@ -173,6 +181,6 @@
   <div class="save-state" id="save-state" role="status" aria-live="polite"></div>
 </section>
 </main>
-<footer class="site-foot"><div class="wrap">cross-review <span id="pack"></span> · <a href="https://github.com/lploc94/cross-review" target="_blank" rel="noopener noreferrer">GitHub</a> · <a href="https://github.com/lploc94/cross-review#reinstall--update" target="_blank" rel="noopener noreferrer">Update</a> · <a href="https://github.com/lploc94/cross-review/issues" target="_blank" rel="noopener noreferrer">Report a problem</a></div></footer>
+<footer class="site-foot"><div class="wrap">cross-review <span id="pack"></span> · <a href="https://github.com/lploc94/cross-review" target="_blank" rel="noopener noreferrer">GitHub</a> · <a id="update-link" href="https://github.com/lploc94/cross-review#reinstall--update" target="_blank" rel="noopener noreferrer">Update</a> · <a href="https://github.com/lploc94/cross-review/issues" target="_blank" rel="noopener noreferrer">Report a problem</a></div></footer>
 </body>
 </html>

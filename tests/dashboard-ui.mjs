@@ -257,7 +257,7 @@ try {
   })`);
   assert.equal(set.gutter, "stable", "Sessions and Settings keep the same width");
   assert.ok(set.follow);
-  assert.deepEqual(set.buttons, ["clear-ws"], "no Save or Discard: a change saves by itself");
+  assert.deepEqual(set.buttons, ["check-update", "clear-ws"], "no Save or Discard: a change saves by itself");
   assert.equal(set.avatars, true);
   assert.equal(set.model, "Codex default (Model A)");
   assert.equal(set.models, 3);
@@ -552,6 +552,7 @@ try {
 
   await settingsAtOnceChecks(browser);
   await otherModelChecks(browser);
+  await updateChecks(browser);
 
   await plansChecks(browser);
 
@@ -706,6 +707,47 @@ async function otherModelChecks(browser) {
   } finally {
     fs.writeFileSync(globalFile, before);
     await d10.close();
+  }
+}
+
+/** Check for updates: the footer link, Settings' Check now, and the global tick. */
+async function updateChecks(browser) {
+  const updRoot = path.join(tmp, "updates");
+  fs.mkdirSync(path.join(updRoot, "quarry", ".cross-review", "sessions"), { recursive: true });
+  let answer;
+  const latestVersion = () => new Promise(r => { answer = r; });
+  const d11 = await startDashboard({ root: updRoot, port: 0, open: false, discoveryFile: null, catalog, latestVersion, updateCache: path.join(tmp, "update-cache.json") });
+  const globalFile = path.join(process.env.HOME, ".cross-review", "config.json");
+  const before = fs.readFileSync(globalFile, "utf8");
+  const page = await browser.newPage(1400, 1000);
+  const help = () => page.evaluate(`document.getElementById("update-help").textContent`);
+  try {
+    await page.goto(`${d11.url}#/settings`);
+    await page.waitFor(`document.getElementById("updates-block").classList.contains("on") && /Not checked yet/.test(document.getElementById("update-help").textContent)`);
+    assert.equal(await page.evaluate(`document.getElementById("f-updates").checked`), false, "off by default");
+    assert.equal(await page.evaluate(`document.getElementById("update-link").textContent`), "Update");
+    // Check now: Checking… while GitHub is asked, then the newer version, here and in the footer
+    await page.evaluate(`document.getElementById("check-update").click()`);
+    await page.waitFor(`document.getElementById("update-help").textContent === "Checking…" && document.getElementById("check-update").disabled`);
+    answer("99.0.0");
+    await page.waitFor(`/Version 99\\.0\\.0 is out/.test(document.getElementById("update-help").textContent)`);
+    assert.match(await help(), /you have \d+\.\d+\.\d+\. Run npx github:lploc94\/cross-review to update\.$/);
+    assert.deepEqual(await page.evaluate(`(() => { const a = document.getElementById("update-link"); return [a.textContent, a.classList.contains("new")]; })()`), ["Update available: 99.0.0", true]);
+    await page.screenshot(path.join(shots, "settings-updates-1400.png"));
+    // the tick saves to the global file; a workspace has no Updates block
+    await page.evaluate(`(() => { const c = document.getElementById("f-updates"); c.checked = true; c.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+    await page.waitFor(SAVED);
+    assert.equal(JSON.parse(fs.readFileSync(globalFile, "utf8")).check_updates, true);
+    await page.evaluate(`location.hash = "#/settings/quarry"`);
+    await page.waitFor(`document.getElementById("preview-title").textContent === "Show quarry/.cross-review/config.json"`);
+    assert.equal(await page.evaluate(`document.getElementById("updates-block").classList.contains("on")`), false);
+    // another page opened later shows the kept answer in its footer at once
+    const other = await browser.newPage(1400, 900);
+    await other.goto(`${d11.url}#/`);
+    await other.waitFor(`document.getElementById("update-link").textContent === "Update available: 99.0.0"`);
+  } finally {
+    fs.writeFileSync(globalFile, before);
+    await d11.close();
   }
 }
 

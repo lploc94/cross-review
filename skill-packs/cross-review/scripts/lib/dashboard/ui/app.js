@@ -129,6 +129,35 @@ const getJson = async url => {
 
 // ---------- header ----------
 
+// ---------- updates ----------
+
+let update = null; // /api/update: { current, latest, available, checked_at, error, checking, auto }
+
+/** Load the update answer; `wait` waits for a check in flight (one the server started at launch or on a save). */
+async function loadUpdate(wait = false) {
+  const u = await getJson(wait ? "/api/update?wait=1" : "/api/update");
+  if (!u) return;
+  update = u;
+  renderUpdate();
+  if (u.checking && !wait) loadUpdate(true);
+}
+
+/** The footer's Update link and Settings' line about the last check. */
+function renderUpdate() {
+  const u = update;
+  const link = $("#update-link");
+  link.textContent = u && u.available ? `Update available: ${u.latest}` : "Update";
+  link.classList.toggle("new", Boolean(u && u.available));
+  const help = $("#update-help");
+  $("#check-update").disabled = Boolean(u && u.checking);
+  if (!u) help.textContent = "";
+  else if (u.checking) help.textContent = "Checking…";
+  else if (u.error) help.textContent = `You have ${u.current}. The last check failed${u.checked_at ? ` ${ago(u.checked_at)}` : ""}: ${u.error}.`;
+  else if (u.available) help.textContent = `Version ${u.latest} is out; you have ${u.current}. Run npx github:lploc94/cross-review to update.`;
+  else if (u.latest) help.textContent = `You have the latest version, ${u.current} (checked ${ago(u.checked_at)}).`;
+  else help.textContent = `You have ${u.current}. Not checked yet.`;
+}
+
 function renderWhere() {
   const n = data.workspaces.length;
   const where = $("#where");
@@ -1009,7 +1038,7 @@ let pendingSave = null; // saves queued or in flight (see saveSoon): the page re
 let settingsLoad = 0; // counts openSettings calls; only the latest one applies its answer
 let savesStarted = 0; // counts saves sent; a settings load that saw one start meanwhile is asked again
 
-const ALL_PATHS = ["reviewer", "model", "effort", "open_dashboard", "open_plans", "track_plans", ...SKILLS.flatMap(s => [`skills.${s}.model`, `skills.${s}.effort`])];
+const ALL_PATHS = ["reviewer", "model", "effort", "open_dashboard", "open_plans", "track_plans", "check_updates", ...SKILLS.flatMap(s => [`skills.${s}.model`, `skills.${s}.effort`])];
 const clone = x => JSON.parse(JSON.stringify(x || {}));
 const modelName = (slug, models = settings ? settings.models : catalogInfo.models) => {
   const m = slug && models ? models.find(x => x.slug === slug) : null;
@@ -1201,6 +1230,9 @@ function renderSettings() {
   $("#preview-title").textContent = workspace ? `Show ${name}/.cross-review/config.json` : `Show ${settings.globalPath}`;
   $("#preview").textContent = JSON.stringify(mergeForm(savedConfig(), sv.draft, sv.touched), null, 2);
   $("#avatars-block").classList.toggle("on", !workspace);
+  $("#updates-block").classList.toggle("on", !workspace);
+  $("#f-updates").checked = !workspace && d.check_updates === true;
+  renderUpdate();
   renderAvatarTable();
   $("#clear-ws").classList.toggle("off", !workspace);
 }
@@ -1266,6 +1298,17 @@ function onSettingsChange(e) {
     const v = t.value === "on" ? true : t.value === "off" ? (sv.scope === "workspace" ? false : undefined) : undefined;
     setPath(sv.draft, onOff[t.id], v);
     sv.touched.add(onOff[t.id]);
+  } else if (t.id === "f-updates") {
+    // off is the default: the key is dropped
+    setPath(sv.draft, "check_updates", t.checked ? true : undefined);
+    sv.touched.add("check_updates");
+    // turning it on checks at once (unless the last answer is fresh): show that answer
+    if (t.checked) {
+      renderSettings();
+      saveSoon();
+      pendingSave.then(() => loadUpdate(true));
+      return;
+    }
   } else if (t.id === "f-reviewer-set") {
     setPath(sv.draft, "reviewer", t.value || undefined);
     sv.touched.add("reviewer");
@@ -1307,6 +1350,15 @@ async function onSettingsClick(e) {
       sv.refreshed = true;
       renderSettings();
     }
+    return;
+  }
+  if (t.id === "check-update") {
+    update = { ...(update || {}), checking: true };
+    renderUpdate();
+    const u = await fetch("/api/update/check", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })
+      .then(r => (r.ok ? r.json() : null)).catch(() => null);
+    update = u || { ...(update || {}), checking: false, error: "the dashboard did not answer" };
+    renderUpdate();
     return;
   }
   if (t.id === "clear-ws") {
@@ -1450,6 +1502,7 @@ async function start() {
   if (first) apply(first);
   if (a) avatars = a;
   route();
+  loadUpdate();
   // loaded in the background, so Settings opens filled in and session pages name their models
   if (!onSettings()) {
     getJson("/api/settings").then(s => {

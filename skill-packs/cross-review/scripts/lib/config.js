@@ -3,7 +3,7 @@
 // dashboard's Settings page reads and writes them.
 //
 // Schema: { reviewer?, model?, effort?, open_dashboard?, track_plans?, open_plans?,
-//           skills?: { <skill>: { model?, effort? } } }
+//           check_updates? (read from the global file only), skills?: { <skill>: { model?, effort? } } }
 // Each key resolves on its own: requested > workspace skill > workspace > global skill >
 // global > default (the reviewer's own model, effort "high", reviewer "codex").
 // track_plans and open_plans are plan settings, not review settings: workspace > global > false.
@@ -52,7 +52,7 @@ export function validateConfig(obj) {
       checkModel(v, "model", errors);
     } else if (key === "effort") {
       checkEffort(v, "effort", errors);
-    } else if (key === "open_dashboard" || key === "track_plans" || key === "open_plans") {
+    } else if (key === "open_dashboard" || key === "track_plans" || key === "open_plans" || key === "check_updates") {
       if (typeof v !== "boolean") errors.push(`${key}: must be true or false`);
     } else if (key === "skills") {
       if (!isObject(v)) {
