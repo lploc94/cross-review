@@ -32,15 +32,16 @@ function isFile(file) {
   }
 }
 
-/** The first file on PATH that Windows would run for name, or null. */
+/** The first file on PATH that Windows would run for name (a path: that file), or null. */
 function findOnPath(name, env) {
   // PATHEXT is upper case; the file system is not, and npm writes lower-case names
   const exts = (envValue(env, "PATHEXT") || ".COM;.EXE;.BAT;.CMD").toLowerCase().split(";").filter(Boolean);
   const hasExt = exts.some(e => name.toLowerCase().endsWith(e));
-  const dirs = (envValue(env, "PATH") || "").split(";").map(d => d.trim().replace(/^"(.*)"$/, "$1")).filter(Boolean);
+  const dirs = /[\\/]/.test(name) ? [""]
+    : (envValue(env, "PATH") || "").split(";").map(d => d.trim().replace(/^"(.*)"$/, "$1")).filter(Boolean);
   for (const dir of dirs) {
     for (const ext of hasExt ? [""] : exts) {
-      const file = path.join(dir, name + ext);
+      const file = dir ? path.join(dir, name + ext) : name + ext;
       if (isFile(file)) return file;
     }
   }

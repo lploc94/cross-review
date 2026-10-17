@@ -13,6 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderSkillTemplate } from './lib/render-skill.js';
+import { commandAvailable, resolveSpawn } from '../skill-packs/cross-review/scripts/lib/command.js';
 
 // `npx @tlelabs/cross-review dashboard`: run the dashboard from the package itself; no install step runs
 if (process.argv[2] === 'dashboard') {
@@ -63,11 +64,14 @@ const MCP_TOOLS = ['review_begin', 'review_wait', 'review_reply', 'review_end'];
 const WAIT_DEFAULT_S = 270;
 const CODEX_TOOL_TIMEOUT_S = 300;
 
-// The cross-review command: a shell script that runs the installed runner (`cross-review dashboard`, …).
-// The marker tells a script this installer wrote from anyone else's file of the same name.
+// The cross-review command: a shell script that runs the installed runner (`cross-review dashboard`, …);
+// on Windows, cross-review.cmd, .ps1 and a sh script in npm's global folder, which npm keeps on PATH.
+// The marker tells a file this installer wrote from anyone else's file of the same name.
+const IS_WIN = process.platform === 'win32';
 const commandDir = path.join(home, '.local', 'bin');
 const commandPath = path.join(commandDir, PACK);
-const COMMAND_MARKER = '# cross-review command, written by the cross-review installer; reinstalling rewrites it';
+const MARKER_TEXT = 'cross-review command, written by the cross-review installer; reinstalling rewrites it';
+const COMMAND_MARKER = `# ${MARKER_TEXT}`;
 
 const autoMode = process.argv.includes('--auto');
 const SKILLS = [...RUNNER_SKILLS, ...PLAIN_SKILLS];
@@ -99,13 +103,14 @@ function copyDirSync(src, dest) {
   }
 }
 
-/** Run a CLI quietly; returns { ok, output }. */
+/** Run a CLI quietly, without a shell (Windows: an npm .cmd shim runs as what it points at); returns { ok, output }. */
 function run(cmd, args, opts = {}) {
+  const spawn = resolveSpawn(cmd, args, { allowCmdShell: true });
   try {
-    const output = execFileSync(cmd, args, {
+    const output = execFileSync(spawn.cmd, spawn.args, {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
-      shell: process.platform === 'win32',
+      windowsVerbatimArguments: spawn.windowsVerbatimArguments,
       timeout: 120_000,
       ...opts,
     });
@@ -116,7 +121,7 @@ function run(cmd, args, opts = {}) {
 }
 
 function commandExists(cmd) {
-  return run(process.platform === 'win32' ? 'where' : 'which', [cmd], { timeout: 5000 }).ok;
+  return commandAvailable(cmd, { allowCmdShell: true });
 }
 
 /**
@@ -125,7 +130,7 @@ function commandExists(cmd) {
  * /opt/homebrew/Cellar/node/<version>/bin/node disappear on upgrade.
  */
 function stableNodePath() {
-  const found = run(process.platform === 'win32' ? 'where' : 'which', ['node'], { timeout: 5000 });
+  const found = run(IS_WIN ? 'where' : 'which', ['node'], { timeout: 5000 });
   const candidate = found.ok ? found.output.split(/\r?\n/)[0].trim() : '';
   try {
     if (candidate && fs.realpathSync(candidate) === fs.realpathSync(process.execPath)) return candidate;
@@ -159,37 +164,91 @@ function approveCodexTools(configPath) {
   fs.writeFileSync(configPath, text, 'utf8');
 }
 
-/** Quote a string for a POSIX shell: single quotes, with each ' written as '\'' */
+/** Quote a string for a POSIX shell, in single quotes, with each ' written as '\'' */
 function shellQuote(s) {
   return `'${String(s).replace(/'/g, `'\\''`)}'`;
 }
 
 /**
- * Write ~/.local/bin/cross-review, or rewrite the one an earlier install wrote. Anything else at that path
- * (another file, a link) is left alone. Returns { written, note }; never throws.
+ * Write one command file atomically, or rewrite the one an earlier install wrote. Anything else at that
+ * path (another file, a link) is left alone. Returns a note when it was not written; throws on I/O errors.
+ */
+function writeCommandFile(file, text, runHint) {
+  let st = null;
+  try {
+    st = fs.lstatSync(file);
+  } catch (e) {
+    if (e.code !== 'ENOENT') throw e;
+  }
+  if (st && !(st.isFile() && fs.readFileSync(file, 'utf8').includes(MARKER_TEXT))) {
+    return `left ${file} in place; the installer did not write it. Run the dashboard with: ${runHint}`;
+  }
+  const tmp = path.join(path.dirname(file), `.${path.basename(file)}-${uid}`);
+  fs.writeFileSync(tmp, text, { mode: 0o755 });
+  fs.chmodSync(tmp, 0o755);
+  fs.renameSync(tmp, file);
+  return null;
+}
+
+/** True when dir is one of PATH's entries (case-insensitive on Windows). */
+function onPath(dir) {
+  const norm = d => (IS_WIN ? path.resolve(d).toLowerCase() : path.resolve(d));
+  return (process.env.PATH || '').split(path.delimiter).some(d => d && norm(d) === norm(dir));
+}
+
+/**
+ * Write ~/.local/bin/cross-review, or rewrite the one an earlier install wrote. On Windows: cross-review.cmd,
+ * cross-review.ps1 and cross-review (sh, for Git Bash) in npm's global folder, each judged on its own.
+ * Returns { written, path, notes }; never throws.
  */
 function installCommand(nodePath) {
+  if (IS_WIN) return installWindowsCommand(nodePath);
   try {
-    let st = null;
-    try {
-      st = fs.lstatSync(commandPath);
-    } catch (e) {
-      if (e.code !== 'ENOENT') throw e;
-    }
-    if (st && !(st.isFile() && fs.readFileSync(commandPath, 'utf8').includes(COMMAND_MARKER))) {
-      return { written: false, note: `left ${commandPath} in place; the installer did not write it. Run the dashboard with: node ${shellQuote(runnerPath)} dashboard` };
-    }
     fs.mkdirSync(commandDir, { recursive: true });
     const text = `#!/bin/sh\n${COMMAND_MARKER}\nexec ${shellQuote(nodePath)} ${shellQuote(runnerPath)} "$@"\n`;
-    const tmp = path.join(commandDir, `.${PACK}-${uid}`);
-    fs.writeFileSync(tmp, text, { mode: 0o755 });
-    fs.chmodSync(tmp, 0o755);
-    fs.renameSync(tmp, commandPath);
-    const onPath = (process.env.PATH || '').split(path.delimiter).some(d => d && path.resolve(d) === commandDir);
-    return { written: true, note: onPath ? null : `${commandDir} is not on your PATH; add it (for example: export PATH="$HOME/.local/bin:$PATH" in your shell profile)` };
+    const left = writeCommandFile(commandPath, text, `node ${shellQuote(runnerPath)} dashboard`);
+    if (left) return { written: false, path: commandPath, notes: [left] };
+    const notes = onPath(commandDir) ? [] : [`${commandDir} is not on your PATH; add it (for example: export PATH="$HOME/.local/bin:$PATH" in your shell profile)`];
+    return { written: true, path: commandPath, notes };
   } catch (e) {
-    return { written: false, note: `could not write ${commandPath}: ${e.message}` };
+    return { written: false, path: commandPath, notes: [`could not write ${commandPath}: ${e.message}`] };
   }
+}
+
+function installWindowsCommand(nodePath) {
+  const npxHint = 'npx @tlelabs/cross-review dashboard';
+  const prefix = run('npm', ['prefix', '-g'], { timeout: 60_000 });
+  const dir = prefix.ok ? prefix.output.trim().split(/\r?\n/).pop().trim() : '';
+  if (!dir) {
+    return { written: false, path: null, notes: [`could not find npm's global folder (npm prefix -g): ${prefix.output}; run the dashboard with: ${npxHint}`] };
+  }
+  const cmdPath = path.join(dir, `${PACK}.cmd`);
+  // cmd.exe and PowerShell cannot quote a path that holds a double quote
+  if ([nodePath, runnerPath].some(p => p.includes('"'))) {
+    return { written: false, path: cmdPath, notes: [`no cross-review command: a path contains a double quote (${nodePath}, ${runnerPath}); run the dashboard with: ${npxHint}`] };
+  }
+  const batch = s => s.replace(/%/g, '%%');
+  const psQuote = s => `'${s.replace(/'/g, "''")}'`;
+  const slash = s => s.replace(/\\/g, '/');
+  const files = [
+    [cmdPath, ['@ECHO off', `REM ${MARKER_TEXT}`, `"${batch(nodePath)}" "${batch(runnerPath)}" %*`, ''].join('\r\n')],
+    [path.join(dir, `${PACK}.ps1`), [COMMAND_MARKER, `& ${psQuote(nodePath)} ${psQuote(runnerPath)} @args`, 'exit $LASTEXITCODE', ''].join('\n')],
+    [path.join(dir, PACK), ['#!/bin/sh', COMMAND_MARKER, `exec ${shellQuote(slash(nodePath))} ${shellQuote(slash(runnerPath))} "$@"`, ''].join('\n')],
+  ];
+  const notes = [];
+  let written = false;
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    for (const [file, text] of files) {
+      const left = writeCommandFile(file, text, `node "${runnerPath}" dashboard`);
+      if (left) notes.push(left);
+      else if (file === cmdPath) written = true;
+    }
+  } catch (e) {
+    notes.push(`could not write the cross-review command in ${dir}: ${e.message}`);
+  }
+  if (!onPath(dir)) notes.push(`${dir} is not on your PATH; add it to your user PATH (Settings > System > About > Advanced system settings > Environment Variables)`);
+  return { written, path: cmdPath, notes };
 }
 
 // The earlier pack's runtime lived only here; its skills had this runner path rendered into them
@@ -270,7 +329,7 @@ try {
   for (const file of ['package.json', 'package-lock.json', 'manifest.json']) {
     fs.copyFileSync(path.join(skillPackDir, file), path.join(stagedRuntime, file));
   }
-  if (process.platform !== 'win32') {
+  if (!IS_WIN) {
     fs.chmodSync(path.join(stagedScripts, 'review-runner.js'), 0o755);
   }
 
@@ -418,10 +477,8 @@ try {
     }
   }
 
-  // 6. The cross-review command (POSIX shells only; on Windows the dashboard runs through npx)
-  const command = process.platform === 'win32'
-    ? { written: false, note: null }
-    : installCommand(stableNodePath());
+  // 6. The cross-review command (Windows: .cmd, .ps1 and sh in npm's global folder)
+  const command = installCommand(stableNodePath());
 
   // 7. Success message
   console.log('');
@@ -430,8 +487,8 @@ try {
   console.log(`  Claude Code:   ${claudeSkillsRoot}`);
   console.log(`  Codex:         ${agentsSkillsRoot}`);
   console.log(`  MCP server:    ${registered.length ? `registered with ${registered.join(' and ')}` : 'not registered (runner CLI fallback)'}`);
-  console.log(`  Command:       ${command.written ? `${commandPath} (cross-review dashboard)` : 'npx @tlelabs/cross-review dashboard'}`);
-  if (command.note) console.warn(`  Note: ${command.note}`);
+  console.log(`  Command:       ${command.written ? `${command.path} (cross-review dashboard)` : 'npx @tlelabs/cross-review dashboard'}`);
+  for (const note of command.notes) console.warn(`  Note: ${note}`);
   console.log('');
   console.log('Skills (Claude Code: /name, Codex: $name):');
   console.log('  loop-plan             — write a phased, code-grounded implementation plan');

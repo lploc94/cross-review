@@ -8,12 +8,15 @@ import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { commandAvailable, resolveSpawn } from "../skill-packs/cross-review/scripts/lib/command.js";
+
 const home = path.resolve(process.argv[2] || "");
 if (!process.argv[2] || !fs.existsSync(home)) {
   console.error("usage: node tests/install-check.mjs <home>");
   process.exit(2);
 }
 const codexHome = process.env.CODEX_HOME || path.join(home, ".codex");
+const IS_WIN = process.platform === "win32";
 
 const RUNNER_SKILLS = ["review-plan", "review-impl", "review-think", "review-pr"];
 const PLAIN_SKILLS = ["loop-plan", "loop-implement"];
@@ -72,8 +75,12 @@ function isLegacyCopy(dir, name) {
   return new RegExp(`^name:\\s*${name}\\s*$`, "m").test(text) && text.includes(legacyRunnerRef);
 }
 
-function onPath(cmd) {
-  try { execFileSync("which", [cmd], { stdio: "ignore" }); return true; } catch { return false; }
+const onPath = cmd => commandAvailable(cmd);
+
+/** Runs a CLI the way the installer does: no shell; an npm .cmd shim as what it points at. */
+function runCli(cmd, args, opts) {
+  const r = resolveSpawn(cmd, args, { allowCmdShell: true });
+  return execFileSync(r.cmd, r.args, { windowsVerbatimArguments: r.windowsVerbatimArguments, ...opts });
 }
 
 // Skills in both roots: present, fully rendered, no flavor text or protocol files
@@ -86,7 +93,7 @@ for (const [root, client] of [[claudeRoot, "claude"], [agentsRoot, "codex"]]) {
     const fm = text.match(/^---\n([\s\S]*?)\n---\n/);
     check(fm && new RegExp(`^name: ${skill}$`, "m").test(fm[1]) && /^description: \S/m.test(fm[1]), `${client}: ${skill} front matter lacks name/description`);
     check(!text.includes("{{"), `${client}: ${skill} has an unrendered placeholder`);
-    check(text.includes(`node "${runner}"`), `${client}: ${skill} does not point at the installed runner`);
+    check(text.includes(`node "${runnerRef}"`), `${client}: ${skill} does not point at the installed runner`);
   }
   for (const skill of [...SKILLS, "cross-review"]) {
     for (const f of walk(path.join(root, skill))) {
@@ -155,8 +162,8 @@ try {
   failures.push(`runtime: runner version failed: ${e.message}`);
 }
 
-// The cross-review command: a small shell script in ~/.local/bin that runs the installed runner (not on Windows)
-if (process.platform !== "win32") {
+// The cross-review command: a small shell script in ~/.local/bin that runs the installed runner
+if (!IS_WIN) {
   const command = path.join(home, ".local", "bin", "cross-review");
   try {
     const st = fs.lstatSync(command);
@@ -169,6 +176,28 @@ if (process.platform !== "win32") {
     check(version === "15", `command: cross-review version printed ${version}, expected 15`);
   } catch (e) {
     failures.push(`command: ~/.local/bin/cross-review: ${e.message}`);
+  }
+}
+
+// Windows: cross-review.cmd, .ps1 and sh in npm's global folder, each with the marker and the installed runner
+if (IS_WIN) {
+  try {
+    const dir = process.env.npm_config_prefix || runCli("npm", ["prefix", "-g"], { encoding: "utf8" }).trim().split(/\r?\n/).pop().trim();
+    const cmd = path.join(dir, "cross-review.cmd");
+    const expected = [
+      [cmd, `"${runner}"`],
+      [path.join(dir, "cross-review.ps1"), `'${runner.replace(/'/g, "''")}'`],
+      [path.join(dir, "cross-review"), `'${slashed(runner).replace(/'/g, `'\\''`)}'`],
+    ];
+    for (const [file, ref] of expected) {
+      const text = fs.readFileSync(file, "utf8");
+      check(text.includes("cross-review command, written by the cross-review installer"), `command: ${file} has no cross-review marker`);
+      check(text.includes(ref), `command: ${file} does not run the installed runner`);
+    }
+    const version = runCli(cmd, ["version"], { encoding: "utf8" }).trim();
+    check(version === "15", `command: cross-review.cmd version printed ${version}, expected 15`);
+  } catch (e) {
+    failures.push(`command: Windows cross-review command: ${e.message}`);
   }
 }
 
@@ -200,12 +229,13 @@ if (onPath("codex")) {
   const file = path.join(codexHome, "config.toml");
   const toml = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
   check((toml.match(/^\[mcp_servers\.cross-review\]$/gm) || []).length === 1, "codex: [mcp_servers.cross-review] is not present exactly once");
-  check(toml.includes(mcpServer), "codex: MCP server path not in config.toml");
+  // Windows paths sit in TOML strings with escaped backslashes
+  check(slashed(toml).includes(slashed(mcpServer)), "codex: MCP server path not in config.toml");
   // Global server args as Codex itself parses config.toml, read from the filesystem root:
   // a project's config could shadow them
   if (toml) {
     try {
-      const listed = JSON.parse(execFileSync("codex", ["mcp", "list", "--json"], { encoding: "utf8", cwd: path.parse(home).root, env: { ...process.env, CODEX_HOME: codexHome } }));
+      const listed = JSON.parse(runCli("codex", ["mcp", "list", "--json"], { encoding: "utf8", cwd: path.parse(home).root, env: { ...process.env, CODEX_HOME: codexHome } }));
       check(!listed.some(s => (s.transport?.args || []).some(a => slashed(a) === legacyServer)), "codex: the old codex-review MCP server is still registered");
     } catch (e) {
       failures.push(`codex: mcp list failed: ${e.message}`);

@@ -115,6 +115,8 @@ test("Windows: a batch file that is not a shim runs through cmd only when allowe
       windowsVerbatimArguments: true,
     });
     assert.equal(commandAvailable("batch", { env, allowCmdShell: true }), true);
+    // a path is that file only, PATH aside
+    assert.deepEqual(resolveSpawn(file, ["x"], { env: { ...env, Path: "" }, allowCmdShell: true }).args.at(-1), `""${file}" "x""`);
     for (const bad of ["a\"b", "100%"]) {
       assert.deepEqual(resolveSpawn("batch", [bad], { env, allowCmdShell: true }), { cmd: "batch", args: [bad] });
     }
