@@ -32,6 +32,7 @@ This project was called **codex-review** (`lploc94/codex_skill`, skills `codex-p
   - `codex` ([Codex CLI](https://github.com/openai/codex), an OpenAI account or API key): the default reviewer
   - `claude` ([Claude Code](https://docs.anthropic.com/en/docs/claude-code))
   - `agy` ([Antigravity CLI](https://antigravity.google/docs))
+- macOS, Linux or Windows. On Windows the reviewer CLIs may be `.exe` files or npm installs (`.cmd`), and the `cross-review` command works in PowerShell 7, cmd and Git Bash
 
 ## Install
 
@@ -47,7 +48,9 @@ From GitHub instead: `npx github:lploc94/cross-review`.
 3. Renders each SKILL.md with the shared review protocol and the absolute runner path
 4. Registers the `cross-review` MCP server with Claude Code (user scope) and Codex
 5. Swaps directories atomically with rollback on failure; removes the old `codex-review` pack and this pack's copies in `~/.codex/skills`
-6. Writes the `cross-review` command to `~/.local/bin/cross-review` (macOS and Linux), a small script that runs the installed runner. A file of that name the installer did not write is left alone. When `~/.local/bin` is not on your `PATH`, the installer says so
+6. Writes the `cross-review` command, a small script that runs the installed runner: `~/.local/bin/cross-review` on macOS and Linux; on Windows `cross-review.cmd`, `cross-review.ps1` and `cross-review` (for Git Bash) in npm's global folder (`npm prefix -g`, usually `%APPDATA%\npm`, which is on your `PATH`). A file of that name the installer did not write is left alone. When the folder is not on your `PATH`, the installer says so
+
+Windows PowerShell 5.1 blocks `.ps1` files by default: type `cross-review.cmd` there, or allow local scripts with `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`. PowerShell 7 runs them as they are.
 
 ### Verify
 ```bash
@@ -111,8 +114,8 @@ Name a model or effort when you ask for a review (or in a plan's review checkpoi
 ## Dashboard
 
 ```bash
-cross-review dashboard                             # the command the installer writes to ~/.local/bin
-npx @tlelabs/cross-review dashboard               # without installing, and on Windows
+cross-review dashboard                             # the command the installer writes (~/.local/bin, or npm's folder on Windows)
+npx @tlelabs/cross-review dashboard               # without installing
 ```
 
 ![Sessions: reviews in progress and the history](docs/images/sessions.png)

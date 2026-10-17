@@ -27,6 +27,7 @@ The project was called `codex-review` (repo `lploc94/codex_skill`, skills `codex
 - Node.js >= 22 and npm
 - Claude Code CLI and/or Codex CLI
 - At least one reviewer CLI in PATH: `codex` (the default reviewer), `claude` or `agy` (Antigravity)
+- Windows: the reviewer CLIs as an `.exe` or an npm `.cmd` shim; the `cross-review` command runs in PowerShell 7, cmd and Git Bash
 
 ## Development Commands
 
@@ -42,7 +43,7 @@ node video/build.mjs                                                # landing pa
 node skill-packs/cross-review/scripts/review-runner.js dashboard --root <temp fixture dir>   # dashboard by hand
 ```
 
-Never test the installer against the real HOME; use a temporary `HOME` and `CODEX_HOME`. Tests that start a review or the dashboard also set a temporary `HOME`, so they never read or write the real `~/.cross-review/` (settings, avatars, `dashboard.json`). Run the dashboard in tests and screenshots with `--root` on a temp fixture dir; fixtures and screenshots use invented data only.
+Never test the installer against the real HOME; use a temporary `HOME` and `CODEX_HOME` (on Windows also `USERPROFILE`, which `os.homedir()` reads, and `npm_config_prefix`, where the command goes). Tests that start a review or the dashboard also set a temporary `HOME` (and `USERPROFILE`), so they never read or write the real `~/.cross-review/` (settings, avatars, `dashboard.json`). Run the dashboard in tests and screenshots with `--root` on a temp fixture dir; fixtures and screenshots use invented data only.
 
 ## Architecture
 
@@ -54,8 +55,8 @@ Never test the installer against the real HOME; use a temporary `HOME` and `CODE
 3. Render every SKILL.md template. Review skills get `{{PROTOCOL_CORE}}`, `{{PROTOCOL_VARIANT}}` (from `shared/protocol/`) and `{{RUNNER_PATH}}`; loop skills get `{{CLIENT_*}}` values per client and `{{RUNNER_PATH}}` (for the `plans` command). Any leftover `{{` fails the install
 4. Verify the runner (`node review-runner.js version`)
 5. Atomic swap in both skill roots with full rollback; delete the old `codex-review` pack (runtime and skills, ownership checked) and this pack's copies in `$CODEX_HOME/skills`
-6. Remove the old `codex-review` MCP registration when it points at that pack's runtime, then register MCP server `cross-review` (Claude: `claude mcp remove` + `add -s user`, `REVIEW_WAIT_DEFAULT_S=270`; Codex: `codex mcp add`, `REVIEW_WAIT_DEFAULT_S=270` and `tool_timeout_sec = 300`). Skipped with a warning when `npm ci` failed
-7. Write the `cross-review` command `~/.local/bin/cross-review` (not on Windows): `#!/bin/sh` + a marker line + `exec <node> <installed runner> "$@"`, written atomically. A file there without the marker, or a link, is left in place with a note; a missing `~/.local/bin` on `PATH` is reported. Failures only warn
+6. Remove the old `codex-review` MCP registration when it points at that pack's runtime, then register MCP server `cross-review` (Claude: `claude mcp remove` + `add -s user`, `REVIEW_WAIT_DEFAULT_S=270`; Codex: `codex mcp add`, `REVIEW_WAIT_DEFAULT_S=270` and `tool_timeout_sec = 300`). Skipped with a warning when `npm ci` failed. CLI calls never use a shell: `lib/command.js` `resolveSpawn` runs an npm `.cmd` shim on Windows as node + script or as its `.exe`, and only a batch file that is not a shim (`npm.cmd`) through `cmd.exe /d /s /c`
+7. Write the `cross-review` command, each file atomically with a marker line. POSIX: `~/.local/bin/cross-review` (`#!/bin/sh` + marker + `exec <node> <installed runner> "$@"`). Windows: `cross-review.cmd`, `cross-review.ps1` and `cross-review` (sh, for Git Bash) in `npm prefix -g` (`%APPDATA%\npm`, which npm keeps on PATH), each judged on its own. A file there without the marker, or a link, is left in place with a note; a command folder missing from `PATH` is reported. Failures only warn
 
 ### Skill Pack Layout
 
@@ -67,7 +68,7 @@ skill-packs/cross-review/
 ├── scripts/
 │   ├── review-runner.js               ← runner CLI (stdlib only)
 │   ├── mcp-server.js                 ← MCP stdio server: review_begin/wait/reply/end
-│   └── lib/                          ← parse.js, review-core.js (the four verbs), config.js (review and plan settings), plans.js (plans and the `plans` command), reviewers/ (one adapter per reviewer CLI)
+│   └── lib/                          ← parse.js, review-core.js (the four verbs), config.js (review and plan settings), plans.js (plans and the `plans` command), command.js (find and start a CLI without a shell), reviewers/ (one adapter per reviewer CLI)
 │       └── dashboard/                ← server.js (node:http, SSE), scan.js, model.js, follow.js, avatars.js, discovery.js, ui/ (static page, no build)
 └── skills/
     ├── review-plan/, review-impl/, review-think/, review-pr/
@@ -89,6 +90,7 @@ skill-packs/cross-review/
 ├── review-*/            ← SKILL.md only; points at the shared runtime
 └── loop-plan/, loop-implement/   ← SKILL.md + agents/openai.yaml
 ~/.local/bin/cross-review  ← runs the installed runner: `cross-review dashboard`, `cross-review version`, …
+%APPDATA%\npm\cross-review.cmd, cross-review.ps1, cross-review   ← the same on Windows (npm's global folder)
 ```
 
 ### Core Execution Flow
@@ -117,7 +119,7 @@ Besides the prompts and outputs, a session keeps what the dashboard needs to ret
 
 - **One core, two shells**: `lib/review-core.js` implements `begin/wait/reply/end` on top of the low-level runner commands (called as a child process); the CLI verbs and the MCP server share it
 - **Runner is stdlib only**; only the MCP server needs the SDK
-- **Reviewer adapters**: everything specific to a reviewer CLI (command line for new and resumed turns, sandbox names, event-log parsing, process identity, model list, CLI status) lives in `scripts/lib/reviewers/<name>.js` (`codex`, `claude`, `agy`; contract in `reviewers/index.js`); optional exports: `encodePrompt` (stdin for a CLI that does not read plain text: agy takes one NDJSON user message), `efforts` (fixed levels, or null when they depend on the model), `checkSelection` (refuse a model/effort before `begin`/`reply` launch anything), `allowCustomModel`. The runner owns spawning, watchdogs, polling and state. Sessions store `reviewer`; state without it means `codex`. agy's effort belongs to the model family: `agy models` lists `<family>-<level>` variants, run as `--model <family> --effort <level>`
+- **Reviewer adapters**: everything specific to a reviewer CLI (command line for new and resumed turns, sandbox names, event-log parsing, process identity, model list, CLI status) lives in `scripts/lib/reviewers/<name>.js` (`codex`, `claude`, `agy`; contract in `reviewers/index.js`); optional exports: `encodePrompt` (stdin for a CLI that does not read plain text: agy takes one NDJSON user message), `efforts` (fixed levels, or null when they depend on the model), `checkSelection` (refuse a model/effort before `begin`/`reply` launch anything), `allowCustomModel`. The runner owns spawning (through `lib/command.js`, so an npm `.cmd` shim works on Windows), watchdogs, polling and state; `matchesCmdline` reads the program quote-aware and skips a node host (`"C:\Program Files\…\claude.exe"`, `node …\codex.js`). Sessions store `reviewer`; state without it means `codex`. agy's effort belongs to the model family: `agy models` lists `<family>-<level>` variants, run as `--model <family> --effort <level>`
 - **No nested reviews**: the runner starts every reviewer with `CROSS_REVIEW_REVIEWER=<name>`, and `begin` inside that environment (CLI or MCP) fails with `NESTED_REVIEW`, so a reviewer that has the skills installed (Claude Code) cannot start a review of its own
 - **Reviewer access**: review skills run the reviewer with its full-access sandbox (Codex: `danger-full-access`; Claude Code and agy: `--dangerously-skip-permissions`) so it can run tests, builds and network commands to verify claims; prompts forbid changing project files. The low-level `start` keeps its `read-only` default
 - **Self-contained SKILL.md**: protocol text is inlined at install; no `references/protocol.md`, no flavor text
@@ -167,6 +169,14 @@ Besides the prompts and outputs, a session keeps what the dashboard needs to ret
 - `skill-packs/` is the single source of truth for templates, runtime and prompts.
 
 ## Breaking Changes
+
+### pack 10.5.0: Windows
+- **Command**: the installer writes `cross-review.cmd`, `cross-review.ps1` and `cross-review` (sh, for Git Bash) into npm's global folder (`npm prefix -g`, usually `%APPDATA%\npm`, already on PATH), so `cross-review dashboard` works in PowerShell 7, cmd and Git Bash. Windows PowerShell 5.1 blocks `.ps1` files under its default execution policy: run `cross-review.cmd` there, or `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`. A file of the same name without the installer's marker is left alone.
+- **Reviewers on Windows**: codex, claude and agy start from an `.exe` or an npm `.cmd` shim without a shell (`lib/command.js`); the runner recognises them by their program name even under a quoted `C:\Program Files\…` path or a node host, so `stop` can kill them.
+- **Installer**: no shell for CLI calls on any system (no more `DEP0190`; a node path with spaces is passed to `claude mcp add` as one argument).
+- **Checkouts**: `.gitattributes` keeps LF in Windows checkouts.
+- **Going back to 10.4.0**: `npx @tlelabs/cross-review@10.4.0`, then delete `cross-review.cmd`, `cross-review.ps1` and `cross-review` from `npm prefix -g` by hand; 10.4.0 does not know them.
+- `package.json` and `manifest.json` 10.5.0.
 
 ### pack 10.4.0: Claude Code and Antigravity reviewers
 - **Reviewers**: `reviewer` may be `codex` (default), `claude` (Claude Code) or `agy` (Antigravity), on `review_begin`/`--reviewer` or in the settings files. Review skills say so in their descriptions, and the protocol rule is now "Pass `reviewer`, `model` or `effort` only when the user names one or the plan's review checkpoint does; otherwise omit them, without asking the user which reviewer to use".
@@ -223,7 +233,7 @@ Besides the prompts and outputs, a session keeps what the dashboard needs to ret
 
 ## Releasing
 
-`.github/workflows/ci.yml` runs the tests and a temp-HOME install check on Node 22 (the lowest `engines` allows) and 24 for every push to `main` and every pull request; the README shows its badge with the npm version, release, Node and license badges (shields.io, no logos).
+`.github/workflows/ci.yml` runs the tests and a temp-HOME install check on `ubuntu-latest` and `windows-latest` (tests in Git Bash; the Windows install check in pwsh with a temp `HOME`, `USERPROFILE`, `CODEX_HOME` and `npm_config_prefix`), each on Node 22 (the lowest `engines` allows) and 24 for every push to `main` and every pull request; the README shows its badge with the npm version, release, Node and license badges (shields.io, no logos).
 
 `.github/workflows/release.yml` publishes `@tlelabs/cross-review` to npm when a `v<version>` tag is pushed: it checks that the tag, `package.json` and `manifest.json` carry the same version, runs the tests and a temp-HOME install check, packs, publishes with npm trusted publishing (OIDC, provenance; no token) unless that version is already on npm, and creates a GitHub release with the tarball.
 

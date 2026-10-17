@@ -10,10 +10,11 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest, windows-latest]
         # the lowest supported (package.json engines) and the one the release builds with
         node: ["22", "24"]
     steps:
@@ -23,11 +24,24 @@ jobs:
           node-version: ${{ matrix.node }}
       - name: Install the runtime dependencies
         run: npm ci --prefix skill-packs/cross-review
+      # Git Bash on Windows; the tests isolate HOME and USERPROFILE themselves
       - name: Test
+        shell: bash
         run: node test-default-timeout.js && node test-stall-recovery.js && node test-timeout-resume.js && node --test "tests/*.test.js"
       # The installer under a temporary HOME, as in CLAUDE.md; never the runner's real HOME.
       - name: Install check
+        if: runner.os != 'Windows'
         run: |
           H="$(mktemp -d)"
           HOME="$H" CODEX_HOME="$H/.codex" node bin/cross-review.js
           node tests/install-check.mjs "$H"
+      # Windows reads the profile from USERPROFILE, and the command goes to npm's global folder
+      - name: Install check (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $H = New-Item -ItemType Directory (Join-Path $env:RUNNER_TEMP "h")
+          $env:HOME = $H; $env:USERPROFILE = $H; $env:CODEX_HOME = "$H\.codex"; $env:npm_config_prefix = "$H\npm"
+          node bin/cross-review.js
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          node tests/install-check.mjs $H

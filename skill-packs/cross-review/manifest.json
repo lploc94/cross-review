@@ -1,6 +1,6 @@
 {
   "name": "cross-review",
-  "version": "10.4.0",
+  "version": "10.5.0",
   "runtime": {
     "runner": "scripts/review-runner.js",
     "mcp_server": "scripts/mcp-server.js",

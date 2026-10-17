@@ -54,3 +54,36 @@ test("release: publishes once per version, by OIDC only", () => {
   assert.match(s, /npm publish "tlelabs-cross-review-\$\{version\}\.tgz" --access public --provenance/);
   assert.doesNotMatch(text(), /NODE_AUTH_TOKEN|NPM_TOKEN|secrets\./, "no npm token anywhere");
 });
+
+// CI: the tests and an install check on Linux and Windows, Node 22 and 24
+const CI = path.join(REPO, ".github", "workflows", "ci.yml");
+const ci = () => fs.readFileSync(CI, "utf8");
+const ciStep = name => {
+  const found = ci().split(/\n(?=\s+- (?:name|uses|run):)/).find(s => s.trimStart().startsWith(`- name: ${name}`));
+  assert.ok(found, `CI step "${name}" exists`);
+  return found;
+};
+
+test("ci: every test and install check runs on ubuntu-latest and windows-latest, Node 22 and 24", () => {
+  assert.match(ci(), /runs-on: \$\{\{ matrix\.os \}\}/);
+  assert.match(ci(), /os: \[ubuntu-latest, windows-latest\]/);
+  assert.match(ci(), /node: \["22", "24"\]/);
+  assert.match(ci(), /fail-fast: false/);
+  const t = ciStep("Test");
+  assert.match(t, /shell: bash/);
+  assert.match(t, /node test-default-timeout\.js && node test-stall-recovery\.js && node test-timeout-resume\.js && node --test "tests\/\*\.test\.js"/);
+  assert.doesNotMatch(t, /\bif:/, "the tests run on both systems");
+});
+
+test("ci: the Windows install check uses a temporary profile and npm folder, never the runner's own", () => {
+  const posix = ciStep("Install check");
+  assert.match(posix, /if: runner\.os != 'Windows'/);
+  assert.match(posix, /node tests\/install-check\.mjs "\$H"/);
+  const win = ciStep("Install check (Windows)");
+  assert.match(win, /if: runner\.os == 'Windows'/);
+  assert.match(win, /shell: pwsh/);
+  assert.match(win, /\$H = New-Item -ItemType Directory \(Join-Path \$env:RUNNER_TEMP "h"\)/);
+  for (const v of ["HOME", "USERPROFILE", "CODEX_HOME", "npm_config_prefix"]) assert.match(win, new RegExp(`\\$env:${v} = `), v);
+  assert.match(win, /node bin\/cross-review\.js/);
+  assert.match(win, /node tests\/install-check\.mjs \$H/);
+});

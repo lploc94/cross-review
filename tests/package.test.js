@@ -17,6 +17,9 @@ test("package: scoped name, the cross-review command, and the manifest's version
   assert.deepEqual(pkg.bin, { "cross-review": "./bin/cross-review.js" });
   assert.match(pkg.version, /^\d+\.\d+\.\d+$/);
   assert.equal(pkg.version, manifest.version, "package.json and manifest.json carry one version");
+  // a release that changes behaviour leads Breaking Changes in CLAUDE.md
+  const latest = fs.readFileSync(path.join(REPO, "CLAUDE.md"), "utf8").match(/^### pack (\d+\.\d+\.\d+)\b/m);
+  assert.equal(latest?.[1], pkg.version, "the newest Breaking Changes entry is this version");
 });
 
 test("package: homepage, repository, issues and license point at the project", () => {
