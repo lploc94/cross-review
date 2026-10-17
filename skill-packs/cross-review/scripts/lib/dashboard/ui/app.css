@@ -113,7 +113,7 @@ aside section + section { margin-top: 28px; }
 .sev { font-weight: 500; font-size: 12px; margin-left: 6px; }
 .sev.high { color: var(--red); } .sev.medium { color: var(--amber); } .sev.low { color: var(--muted); }
 .finding dl { display: grid; grid-template-columns: 90px 1fr; gap: 2px 10px; margin: 6px 0 0; font-size: 13.5px; }
-.finding dt { color: var(--muted); } .finding dd { margin: 0; min-width: 0; }
+.finding dt { color: var(--muted); } .finding dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .finding dd > :first-child { margin-top: 0; } .finding dd > :last-child { margin-bottom: 0; }
 .finding dd pre { overflow-x: auto; }
 .flash { animation: flash 1.6s; } @keyframes flash { from { background: #fff1b8; } to { background: transparent; } }
@@ -134,7 +134,7 @@ aside section + section { margin-top: 28px; }
 /* issue ledger */
 .iss { padding: 8px 0; border-bottom: 1px solid var(--rule); cursor: pointer; font-size: 13px; }
 .iss:hover .it { text-decoration: underline; }
-.iss .it { font-weight: 600; } .iss .loc { color: var(--muted); font: 11.5px var(--mono); }
+.iss .it { font-weight: 600; } .iss .loc { color: var(--muted); font: 11.5px var(--mono); overflow-wrap: anywhere; }
 .trail { margin-top: 3px; font-size: 12px; color: var(--soft); }
 .trail i { font-style: normal; color: var(--muted); }
 .facts { font-size: 13px; } .facts div { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; border-bottom: 1px solid var(--rule2); }
