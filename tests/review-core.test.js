@@ -20,6 +20,7 @@ import { followInDashboard } from "../skill-packs/cross-review/scripts/lib/dashb
 import { writeFakeCodex } from "./helpers/fake-codex.js";
 import { writeFakeClaude } from "./helpers/fake-claude.js";
 import { writeFakeAgy } from "./helpers/fake-agy.js";
+import * as codex from "../skill-packs/cross-review/scripts/lib/reviewers/codex.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const RUNNER = path.join(ROOT, "skill-packs/cross-review/scripts/review-runner.js");
@@ -99,6 +100,22 @@ function renderExpected(skill, template, input) {
 const PLAN = { skill_name: "review-plan" };
 const PR = { skill_name: "review-pr" };
 const THINK = { skill_name: "review-think" };
+
+test("codex matchesCmdline: only `exec` turns of codex, codex.exe or a node-hosted codex.js", () => {
+  for (const yes of [
+    "codex exec --skip-git-repo-check --json --sandbox danger-full-access -C /w",
+    "node /opt/homebrew/bin/codex exec --json",
+    "C:\\tools\\codex.exe exec --json",
+    "\"C:\\Program Files\\nodejs\\node.exe\" \"C:\\Users\\x y\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\bin\\codex.js\" exec --json resume t -",
+  ]) assert.equal(codex.matchesCmdline(yes), true, yes);
+  for (const no of [
+    "codex",
+    "codex login status",
+    "code.exe C:\\x\\codex.md exec",
+    "vim codex exec",
+    "codex-helper exec --json",
+  ]) assert.equal(codex.matchesCmdline(no), false, no);
+});
 
 test("computeNext: running", () => {
   assert.equal(computeNext({ status: "running" }, PLAN).next, "running");

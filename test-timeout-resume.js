@@ -8,6 +8,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { writeFakeCli } from "./tests/helpers/fake-cli.js";
 
 // The runner reads ~/.cross-review/config.json: never the real one (os.homedir() reads USERPROFILE on Windows)
 const TEMP_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "review-runner-home-"));
@@ -70,8 +71,7 @@ function writeJsonl(sessionDir, events) {
 }
 
 function createFakeCodex(fakeBin, logPath) {
-  const fakeCodex = path.join(fakeBin, "codex");
-  fs.writeFileSync(fakeCodex, `#!/usr/bin/env node
+  writeFakeCli(fakeBin, "codex", `
 const fs = require("node:fs");
 const args = process.argv.slice(2);
 const mode = process.env.FAKE_CODEX_MODE || "silent";
@@ -87,8 +87,7 @@ if (mode === "progress") {
 }
 if (mode === "exit") process.exit(42);
 setInterval(() => {}, 1 << 30);
-`, "utf8");
-  fs.chmodSync(fakeCodex, 0o755);
+`);
   fs.writeFileSync(logPath, "", "utf8");
 }
 

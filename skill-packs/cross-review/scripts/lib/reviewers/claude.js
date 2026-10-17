@@ -3,12 +3,12 @@
 // session id. The result event's `is_error` decides failure: Claude reports an unknown model
 // as `subtype: "success"` with `is_error: true`.
 
-import { execFile, spawnSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-const IS_WIN = process.platform === "win32";
+import { commandAvailable, programOf, resolveSpawn } from "../command.js";
 
 export const name = "claude";
 export const label = "Claude Code";
@@ -27,8 +27,7 @@ export const efforts = ["low", "medium", "high", "xhigh", "max"];
 export const allowCustomModel = true;
 
 export function isAvailable() {
-  const probe = spawnSync(IS_WIN ? "where" : "which", ["claude"], { encoding: "utf8" });
-  return probe.status === 0;
+  return commandAvailable("claude");
 }
 
 export function checkSelection({ effort }) {
@@ -200,10 +199,8 @@ export function logOutcome(state) {
 
 /** True when a process command line is a print-mode Claude turn this runner may kill. */
 export function matchesCmdline(cmdline) {
-  const words = cmdline.trim().split(/\s+/);
-  // either separator: a Windows command line read on any platform
-  const exe = (words[0] || "").split(/[\\/]/).pop().toLowerCase();
-  if (exe !== "claude" && exe !== "claude.exe") return false;
+  const { program, words } = programOf(cmdline);
+  if (!["claude", "claude.exe", "claude.js"].includes(program)) return false;
   return (words.includes("-p") || words.includes("--print")) && words.includes("stream-json");
 }
 
@@ -234,7 +231,8 @@ export function defaultModel() {
 
 function runClaude(args, timeout = 5000) {
   return new Promise(resolve => {
-    execFile("claude", args, { encoding: "utf8", timeout }, (err, stdout) => resolve({ ok: !err, stdout: stdout || "" }));
+    const { cmd, args: argv } = resolveSpawn("claude", args);
+    execFile(cmd, argv, { encoding: "utf8", timeout }, (err, stdout) => resolve({ ok: !err, stdout: stdout || "" }));
   });
 }
 

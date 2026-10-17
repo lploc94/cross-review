@@ -9,6 +9,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { writeFakeCli } from "./tests/helpers/fake-cli.js";
 
 // The runner reads ~/.cross-review/config.json: never the real one (os.homedir() reads USERPROFILE on Windows)
 const TEMP_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "review-runner-home-"));
@@ -58,9 +59,7 @@ try {
   fs.mkdirSync(workDir);
 
   // Keep the fake Codex alive so start records the running session state.
-  const fakeCodex = path.join(fakeBin, "codex");
-  fs.writeFileSync(fakeCodex, "#!/usr/bin/env node\nsetInterval(() => {}, 1 << 30);\n", "utf8");
-  fs.chmodSync(fakeCodex, 0o755);
+  writeFakeCli(fakeBin, "codex", "setInterval(() => {}, 1 << 30);\n");
 
   const env = {
     ...process.env,

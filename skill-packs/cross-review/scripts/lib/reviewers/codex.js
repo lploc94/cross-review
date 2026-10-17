@@ -1,12 +1,12 @@
 // Codex CLI as the reviewer: how to find it, launch or resume a turn, read its event log,
 // and recognise its process. The runner owns spawning, watchdogs, polling and state.
 
-import { execFile, spawnSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-const IS_WIN = process.platform === "win32";
+import { commandAvailable, programOf, resolveSpawn } from "../command.js";
 
 export const name = "codex";
 export const label = "Codex";
@@ -19,48 +19,7 @@ export const defaultSandbox = "read-only";
 export const fullAccessSandbox = "danger-full-access";
 
 export function isAvailable() {
-  const probe = spawnSync(IS_WIN ? "where" : "which", ["codex"], { encoding: "utf8" });
-  return probe.status === 0;
-}
-
-/**
- * Resolve the codex CLI command for spawning.
- *
- * On Windows, npm-installed CLIs are .cmd wrappers (e.g. codex.cmd).
- * Node.js spawn() cannot resolve .cmd files without shell: true,
- * but shell: true + detached: true drops stdio on Windows.
- * Instead, resolve the underlying codex.js entry point and invoke
- * it directly via node.exe — no shell needed.
- */
-function resolveCommand() {
-  if (!IS_WIN) {
-    return { cmd: "codex", prependArgs: [] };
-  }
-
-  // Try to find codex.js via npm global prefix
-  const r = spawnSync("npm", ["config", "get", "prefix"], {
-    encoding: "utf8",
-    shell: true,
-    timeout: 10000,
-  });
-  if (r.status === 0 && r.stdout) {
-    const codexJs = path.join(r.stdout.trim(), "node_modules", "@openai", "codex", "bin", "codex.js");
-    if (fs.existsSync(codexJs)) {
-      return { cmd: process.execPath, prependArgs: [codexJs] };
-    }
-  }
-
-  // Fallback: try common npm global path on Windows
-  const appData = process.env.APPDATA;
-  if (appData) {
-    const codexJs = path.join(appData, "npm", "node_modules", "@openai", "codex", "bin", "codex.js");
-    if (fs.existsSync(codexJs)) {
-      return { cmd: process.execPath, prependArgs: [codexJs] };
-    }
-  }
-
-  // Last resort: assume "codex" is directly executable (non-npm install)
-  return { cmd: "codex", prependArgs: [] };
+  return commandAvailable("codex");
 }
 
 /**
@@ -68,7 +27,6 @@ function resolveCommand() {
  * threadId empty → new thread; otherwise resume that thread.
  */
 export function buildCommand({ threadId, workingDir, model, effort, sandbox }) {
-  const { cmd, prependArgs } = resolveCommand();
   // Omit the override when absent so Codex keeps its default model selection.
   const modelArgs = model === undefined || model === null ? [] : ["--model", model];
 
@@ -76,9 +34,9 @@ export function buildCommand({ threadId, workingDir, model, effort, sandbox }) {
     // `exec resume` has no --sandbox flag; without the override a resumed turn falls back
     // to the config default (seen in real rollouts: danger-full-access → workspace-write)
     return {
-      cmd,
+      cmd: "codex",
       args: [
-        ...prependArgs, "exec", "--skip-git-repo-check", "--json",
+        "exec", "--skip-git-repo-check", "--json",
         "--config", `model_reasoning_effort=${effort}`,
         "--config", `sandbox_mode="${sandbox}"`,
         "resume", ...modelArgs, threadId, "-",
@@ -87,9 +45,8 @@ export function buildCommand({ threadId, workingDir, model, effort, sandbox }) {
     };
   }
   return {
-    cmd,
+    cmd: "codex",
     args: [
-      ...prependArgs,
       "exec", "--skip-git-repo-check", "--json",
       ...modelArgs,
       "--sandbox", sandbox,
@@ -266,8 +223,8 @@ export function logOutcome(state) {
 
 /** True when a process command line is a Codex turn this runner may kill. */
 export function matchesCmdline(cmdline) {
-  return cmdline.includes("codex exec") || cmdline.includes("codex.exe exec") ||
-    (cmdline.includes("codex.js") && cmdline.includes("exec"));
+  const { program, words } = programOf(cmdline);
+  return ["codex", "codex.exe", "codex.js"].includes(program) && words.includes("exec");
 }
 
 // ---------- settings: model catalog, default model, CLI status ----------
@@ -275,9 +232,9 @@ export function matchesCmdline(cmdline) {
 const CATALOG_TIMEOUT_MS = 15000;
 
 function runCodex(args, timeout = CATALOG_TIMEOUT_MS) {
-  const { cmd, prependArgs } = resolveCommand();
+  const { cmd, args: argv } = resolveSpawn("codex", args);
   return new Promise(resolve => {
-    execFile(cmd, [...prependArgs, ...args], { encoding: "utf8", timeout, maxBuffer: 32 * 1024 * 1024 }, (err, stdout) => {
+    execFile(cmd, argv, { encoding: "utf8", timeout, maxBuffer: 32 * 1024 * 1024 }, (err, stdout) => {
       resolve({ ok: !err, stdout: stdout || "" });
     });
   });

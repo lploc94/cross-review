@@ -11,6 +11,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { writeFakeCli } from "./helpers/fake-cli.js";
 import { buildFixture, buildPlans, PLANS, writePlan, writeSession } from "./helpers/dashboard-fixture.js";
 import { GITIGNORE, resolveSettings } from "../skill-packs/cross-review/scripts/lib/config.js";
 import { findWorkspaces } from "../skill-packs/cross-review/scripts/lib/dashboard/scan.js";
@@ -432,7 +433,7 @@ test("dashboard.json: written 0600 with pid, port, token, root; removed on close
 /** A bin dir whose `claude` and `agy` fail at once: the dashboard asks every reviewer CLI at start, never the real ones here. */
 function stubReviewerCli() {
   const bin = mk("stub-bin");
-  for (const name of ["claude", "agy"]) fs.writeFileSync(path.join(bin, name), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+  for (const name of ["claude", "agy"]) writeFakeCli(bin, name, "process.exit(1);\n");
   return bin;
 }
 

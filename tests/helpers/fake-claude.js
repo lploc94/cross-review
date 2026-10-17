@@ -1,12 +1,10 @@
 // Fake `claude` executable for tests: logs its args, stdin prompt and CROSS_REVIEW_REVIEWER to
 // FAKE_CLAUDE_LOG, then prints a stream-json turn whose result is the content of FAKE_CLAUDE_OUTPUT.
 // The session id is "session-fake-1"; FAKE_CLAUDE_ERROR ends the turn with is_error (subtype "success").
-import fs from "node:fs";
-import path from "node:path";
+import { writeFakeCli } from "./fake-cli.js";
 
 export function writeFakeClaude(binDir) {
-  const fake = path.join(binDir, "claude");
-  fs.writeFileSync(fake, `#!/usr/bin/env node
+  writeFakeCli(binDir, "claude", `#!/usr/bin/env node
 const fs = require("node:fs");
 let prompt = "";
 try { prompt = fs.readFileSync(0, "utf8"); } catch {}
@@ -26,5 +24,5 @@ if (process.env.FAKE_CLAUDE_ERROR) {
 }
 process.stdout.write(out.map(e => JSON.stringify(e)).join("\\n") + "\\n");
 process.exit(process.env.FAKE_CLAUDE_ERROR ? 1 : 0);
-`, { mode: 0o755 });
+`);
 }

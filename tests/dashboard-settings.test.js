@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { writeFakeCli } from "./helpers/fake-cli.js";
 
 import { cliInfo, defaultModel, listModels } from "../skill-packs/cross-review/scripts/lib/reviewers/codex.js";
 import { FALLBACK_EFFORTS, OTHER, effectiveReviewer, effortLevels, effortOptions, hasNoEfforts, inheritedValue, mergeForm, modelOptions, resolveHere } from "../skill-packs/cross-review/scripts/lib/dashboard/ui/settings.js";
@@ -35,8 +36,7 @@ before(() => {
   fs.mkdirSync(bin);
   fs.writeFileSync(path.join(tmp, "catalog.json"), JSON.stringify(CATALOG));
   // FAKE_MODELS: ok | bundled (only --bundled works) | fail
-  fs.writeFileSync(path.join(bin, "codex"), `#!/usr/bin/env node
-const args = process.argv.slice(2).join(" ");
+  writeFakeCli(bin, "codex", `const args = process.argv.slice(2).join(" ");
 const mode = process.env.FAKE_MODELS || "ok";
 if (args === "--version") { process.stdout.write("codex-cli 9.9.9-invented\\n"); process.exit(0); }
 if (args === "login status") { process.stdout.write("Logged in\\n"); process.exit(0); }
@@ -47,7 +47,7 @@ if (args.startsWith("debug models")) {
   process.exit(0);
 }
 process.exit(2);
-`, { mode: 0o755 });
+`);
   process.env.PATH = `${bin}${path.delimiter}${process.env.PATH}`;
   process.env.HOME = path.join(tmp, "home");
   // os.homedir() reads USERPROFILE on Windows

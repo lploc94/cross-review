@@ -14,6 +14,7 @@ import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { writeFakeCli } from "./tests/helpers/fake-cli.js";
 
 // The runner reads ~/.cross-review/config.json: never the real one (os.homedir() reads USERPROFILE on Windows)
 const TEMP_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "review-runner-home-"));
@@ -31,7 +32,7 @@ let sessionDir = null;
 // A stand-in for the codex CLI that only stays alive: the test kills it right after start and
 // never needs a real reviewer (none is installed in CI, and a real one would start a paid turn).
 const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), "stall-fake-codex-"));
-fs.writeFileSync(path.join(fakeBin, "codex"), "#!/usr/bin/env node\nsetInterval(() => {}, 1 << 30);\n", { mode: 0o755 });
+writeFakeCli(fakeBin, "codex", "setInterval(() => {}, 1 << 30);\n");
 const ENV = { ...process.env, PATH: `${fakeBin}${path.delimiter}${process.env.PATH || ""}` };
 
 function cleanup() {

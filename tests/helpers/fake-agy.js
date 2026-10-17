@@ -3,8 +3,7 @@
 // with the CLI's message. It logs {args, stdin, prompt, reviewerEnv} to FAKE_AGY_LOG, then prints a
 // stream-json turn whose response is the content of FAKE_AGY_OUTPUT; the conversation id is
 // "conv-fake-1". FAKE_AGY_ERROR ends the turn with status ERROR.
-import fs from "node:fs";
-import path from "node:path";
+import { writeFakeCli } from "./fake-cli.js";
 
 export const FAKE_AGY_MODELS = [
   "gemini-x-flash-high\tGemini X Flash (High)",
@@ -15,8 +14,7 @@ export const FAKE_AGY_MODELS = [
 ].join("\n") + "\n";
 
 export function writeFakeAgy(binDir) {
-  const fake = path.join(binDir, "agy");
-  fs.writeFileSync(fake, `#!/usr/bin/env node
+  writeFakeCli(binDir, "agy", `#!/usr/bin/env node
 const fs = require("node:fs");
 const args = process.argv.slice(2);
 if (args[0] === "models") {
@@ -56,5 +54,5 @@ if (process.env.FAKE_AGY_ERROR) {
 }
 process.stdout.write(out.map(e => JSON.stringify(e)).join("\\n") + "\\n");
 process.exit(process.env.FAKE_AGY_ERROR ? 1 : 0);
-`, { mode: 0o755 });
+`);
 }

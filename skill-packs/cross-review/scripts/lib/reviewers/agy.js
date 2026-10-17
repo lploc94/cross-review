@@ -16,7 +16,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-const IS_WIN = process.platform === "win32";
+import { commandAvailable, programOf, resolveSpawn } from "../command.js";
 
 export const name = "agy";
 export const label = "Antigravity";
@@ -30,8 +30,7 @@ export const fullAccessSandbox = "danger-full-access";
 export const efforts = null;
 
 export function isAvailable() {
-  const probe = spawnSync(IS_WIN ? "where" : "which", ["agy"], { encoding: "utf8" });
-  return probe.status === 0;
+  return commandAvailable("agy");
 }
 
 export function encodePrompt(text) {
@@ -85,7 +84,8 @@ let catalogCache = null;
 /** The grouped catalog from `agy models`, or null when it cannot be read. */
 export function readCatalog() {
   if (catalogCache && Date.now() - catalogCache.at < CATALOG_TTL_MS) return catalogCache.value;
-  const r = spawnSync("agy", ["models"], { encoding: "utf8", timeout: CATALOG_TIMEOUT_MS });
+  const { cmd, args } = resolveSpawn("agy", ["models"]);
+  const r = spawnSync(cmd, args, { encoding: "utf8", timeout: CATALOG_TIMEOUT_MS });
   const value = r.status === 0 ? parseCatalog(r.stdout) : null;
   catalogCache = { at: Date.now(), value };
   return value;
@@ -273,10 +273,8 @@ export function logOutcome(state) {
 
 /** True when a process command line is a print-mode stream-json agy turn this runner may kill. */
 export function matchesCmdline(cmdline) {
-  const words = cmdline.trim().split(/\s+/);
-  // either separator: a Windows command line read on any platform
-  const exe = (words[0] || "").split(/[\\/]/).pop().toLowerCase();
-  if (exe !== "agy" && exe !== "agy.exe") return false;
+  const { program, words } = programOf(cmdline);
+  if (!["agy", "agy.exe", "agy.js"].includes(program)) return false;
   return words.includes("--print=") && words.includes("stream-json");
 }
 
@@ -284,7 +282,8 @@ export function matchesCmdline(cmdline) {
 
 function runAgy(args, timeout) {
   return new Promise(resolve => {
-    execFile("agy", args, { encoding: "utf8", timeout }, (err, stdout) => resolve({ ok: !err, stdout: stdout || "" }));
+    const { cmd, args: argv } = resolveSpawn("agy", args);
+    execFile(cmd, argv, { encoding: "utf8", timeout }, (err, stdout) => resolve({ ok: !err, stdout: stdout || "" }));
   });
 }
 

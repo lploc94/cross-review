@@ -120,6 +120,8 @@ test("matchesCmdline: only print-mode stream-json Claude turns", () => {
     "claude -p --output-format stream-json --verbose --effort high --dangerously-skip-permissions",
     "/Users/x/.local/bin/claude --print --output-format stream-json --verbose",
     "C:\\tools\\claude.exe -p --output-format stream-json",
+    "\"C:\\Program Files\\x\\claude.exe\" -p --output-format stream-json",
+    "\"C:\\Program Files\\nodejs\\node.exe\" C:\\t\\node_modules\\fake-claude\\claude.js -p --output-format stream-json --verbose",
   ]) assert.equal(claude.matchesCmdline(yes), true, yes);
   for (const no of [
     "claude",
@@ -127,6 +129,8 @@ test("matchesCmdline: only print-mode stream-json Claude turns", () => {
     "/opt/homebrew/bin/node /x/codex.js exec --json",
     "vim claude.md -p stream-json",
     "claude-helper -p --output-format stream-json",
+    "code.exe C:\\x\\claude.md -p stream-json",
+    "\"C:\\Program Files\\x\\claude.exe\" --resume abc",
   ]) assert.equal(claude.matchesCmdline(no), false, no);
 });
 

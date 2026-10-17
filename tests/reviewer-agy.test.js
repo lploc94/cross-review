@@ -212,6 +212,8 @@ test("matchesCmdline: only print-mode stream-json agy turns", () => {
     "agy --input-format stream-json --output-format stream-json --effort high --dangerously-skip-permissions --print=",
     "/Users/x/.local/bin/agy --input-format stream-json --output-format stream-json --conversation c --print=",
     "C:\\tools\\agy.exe --output-format stream-json --print=",
+    "\"C:\\Users\\x y\\AppData\\Local\\agy\\bin\\agy.exe\" --output-format stream-json --print=",
+    "\"C:\\Program Files\\nodejs\\node.exe\" C:\\t\\node_modules\\fake-agy\\agy.js --input-format stream-json --output-format stream-json --print=",
   ]) assert.equal(agy.matchesCmdline(yes), true, yes);
   for (const no of [
     "agy",
@@ -219,6 +221,7 @@ test("matchesCmdline: only print-mode stream-json agy turns", () => {
     "agy -p hello --output-format stream-json",
     "agy-helper --output-format stream-json --print=",
     "vim agy --print= stream-json",
+    "code.exe C:\\x\\agy.md --print= stream-json",
   ]) assert.equal(agy.matchesCmdline(no), false, no);
 });
 

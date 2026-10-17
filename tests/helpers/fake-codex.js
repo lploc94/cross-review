@@ -4,12 +4,10 @@
 // FAKE_CODEX_FAIL fails the turn after the thread started, with that message (e.g. a usage limit).
 // FAKE_CODEX_TERM_LINE keeps running and, when terminated (SIGTERM), writes one more event before exiting.
 // FAKE_CODEX_STEPS prints that many reasoning events, FAKE_CODEX_STEP_MS apart, before the turn ends.
-import fs from "node:fs";
-import path from "node:path";
+import { writeFakeCli } from "./fake-cli.js";
 
 export function writeFakeCodex(binDir) {
-  const fake = path.join(binDir, "codex");
-  fs.writeFileSync(fake, `#!/usr/bin/env node
+  writeFakeCli(binDir, "codex", `#!/usr/bin/env node
 const fs = require("node:fs");
 let prompt = "";
 try { prompt = fs.readFileSync(0, "utf8"); } catch {}
@@ -52,5 +50,5 @@ const out = [
   { type: "turn.completed" },
 ];
 process.stdout.write(out.map(e => JSON.stringify(e)).join("\\n") + "\\n");
-`, { mode: 0o755 });
+`);
 }

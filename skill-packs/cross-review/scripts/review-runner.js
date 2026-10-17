@@ -13,6 +13,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
+import { resolveSpawn } from "./lib/command.js";
 import { parseOutputMarkdown } from "./lib/parse.js";
 import { beginSession, waitSession, replySession, endSession, DEFAULT_MAX_WAIT_S } from "./lib/review-core.js";
 import { getReviewer } from "./lib/reviewers/index.js";
@@ -79,7 +80,10 @@ function launchReviewer(reviewer, stateDir, workingDir, threadId, effort, model,
     spawnOpts.windowsHide = true;
   }
 
-  const child = spawn(cmd, args, spawnOpts);
+  // Windows: an npm .cmd shim runs as what it points at (node + script, or its .exe)
+  const resolved = resolveSpawn(cmd, args);
+  if (resolved.windowsVerbatimArguments) spawnOpts.windowsVerbatimArguments = true;
+  const child = spawn(resolved.cmd, resolved.args, spawnOpts);
   child.unref();
 
   const pid = child.pid;
