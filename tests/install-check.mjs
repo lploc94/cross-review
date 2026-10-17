@@ -185,7 +185,8 @@ if (IS_WIN) {
     const dir = process.env.npm_config_prefix || runCli("npm", ["prefix", "-g"], { encoding: "utf8" }).trim().split(/\r?\n/).pop().trim();
     const cmd = path.join(dir, "cross-review.cmd");
     const expected = [
-      [cmd, `"${runner}"`],
+      // the .cmd names the profile through %USERPROFILE% (cmd.exe does not read batch files as UTF-8)
+      [cmd, `"%USERPROFILE%${runner.slice(home.length)}"`],
       [path.join(dir, "cross-review.ps1"), `'${runner.replace(/'/g, "''")}'`],
       [path.join(dir, "cross-review"), `'${slashed(runner).replace(/'/g, `'\\''`)}'`],
     ];

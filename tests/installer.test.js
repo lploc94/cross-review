@@ -224,7 +224,8 @@ test("the cross-review command never replaces a file or link the installer did n
 });
 
 test("Windows: the command is cross-review.cmd, .ps1 and sh in npm's global folder; a foreign file is left as it is", { skip: !IS_WIN && "Windows command", timeout: 600_000 }, () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), "install-wincommand-"));
+  // a user name with diacritics: cmd.exe reads a .cmd in the console's code page, not UTF-8
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "install-wincommand-Lộc-"));
   const prefix = path.join(home, "npm-global");
   const env = { ...process.env, HOME: home, USERPROFILE: home, CODEX_HOME: path.join(home, ".codex"), npm_config_prefix: prefix };
   const install = () => {
@@ -238,6 +239,7 @@ test("Windows: the command is cross-review.cmd, .ps1 and sh in npm's global fold
       assert.ok(fs.readFileSync(path.join(prefix, name), "utf8").includes(MARKER), `${name} carries the marker`);
     }
     assert.equal(runCmdFile(path.join(prefix, "cross-review.cmd"), ["version"], { env }).trim(), "15");
+    assert.match(fs.readFileSync(path.join(prefix, "cross-review.cmd"), "utf8"), /^[\x00-\x7f]*$/, "the .cmd is ASCII: the profile is named through %USERPROFILE%");
 
     const foreign = "@ECHO off\r\necho my own cross-review\r\n";
     fs.writeFileSync(path.join(prefix, "cross-review.cmd"), foreign);

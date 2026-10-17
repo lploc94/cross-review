@@ -227,15 +227,25 @@ function installWindowsCommand(nodePath) {
   if ([nodePath, runnerPath].some(p => p.includes('"'))) {
     return { written: false, path: cmdPath, notes: [`no cross-review command: a path contains a double quote (${nodePath}, ${runnerPath}); run the dashboard with: ${npxHint}`] };
   }
-  const batch = s => s.replace(/%/g, '%%');
+  // cmd.exe reads a batch file in the console's code page, not UTF-8: a path in the profile is named
+  // through %USERPROFILE%, which it expands intact, so a user name with diacritics still works
+  const batch = s => {
+    const inProfile = s.toLowerCase().startsWith(`${home.toLowerCase()}\\`);
+    return inProfile ? `%USERPROFILE%${s.slice(home.length).replace(/%/g, '%%')}` : s.replace(/%/g, '%%');
+  };
+  const cmdLine = `"${batch(nodePath)}" "${batch(runnerPath)}" %*`;
   const psQuote = s => `'${s.replace(/'/g, "''")}'`;
   const slash = s => s.replace(/\\/g, '/');
   const files = [
-    [cmdPath, ['@ECHO off', `REM ${MARKER_TEXT}`, `"${batch(nodePath)}" "${batch(runnerPath)}" %*`, ''].join('\r\n')],
+    [cmdPath, ['@ECHO off', `REM ${MARKER_TEXT}`, cmdLine, ''].join('\r\n')],
     [path.join(dir, `${PACK}.ps1`), [COMMAND_MARKER, `& ${psQuote(nodePath)} ${psQuote(runnerPath)} @args`, 'exit $LASTEXITCODE', ''].join('\n')],
     [path.join(dir, PACK), ['#!/bin/sh', COMMAND_MARKER, `exec ${shellQuote(slash(nodePath))} ${shellQuote(slash(runnerPath))} "$@"`, ''].join('\n')],
   ];
   const notes = [];
+  if (/[^\x00-\x7f]/.test(cmdLine)) {
+    files.shift();
+    notes.push(`no ${cmdPath}: cmd.exe cannot read the non-ASCII path in it; run cross-review in PowerShell 7 or Git Bash`);
+  }
   let written = false;
   try {
     fs.mkdirSync(dir, { recursive: true });
