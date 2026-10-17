@@ -15,18 +15,19 @@ const j = e => JSON.stringify(e);
 const CATALOG = agy.parseCatalog(FAKE_AGY_MODELS);
 
 let tmp;
-const saved = { PATH: process.env.PATH, HOME: process.env.HOME };
+const saved = { PATH: process.env.PATH, HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
 before(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), "reviewer-agy-"));
   fs.mkdirSync(path.join(tmp, "bin"));
   writeFakeAgy(path.join(tmp, "bin"));
   process.env.PATH = `${path.join(tmp, "bin")}${path.delimiter}${process.env.PATH}`;
   process.env.HOME = path.join(tmp, "home");
+  // os.homedir() reads USERPROFILE on Windows
+  process.env.USERPROFILE = process.env.HOME;
   fs.mkdirSync(process.env.HOME);
 });
 after(() => {
-  process.env.PATH = saved.PATH;
-  process.env.HOME = saved.HOME;
+  for (const [k, v] of Object.entries(saved)) if (v === undefined) delete process.env[k]; else process.env[k] = v;
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 

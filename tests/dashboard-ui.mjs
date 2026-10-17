@@ -36,6 +36,8 @@ const root = path.join(tmp, "root");
 const fx = buildFixture(root, { now: Math.floor(Date.now() / 1000), livePid: process.pid });
 // Settings and avatars live under HOME: never the real one
 process.env.HOME = path.join(tmp, "home");
+// os.homedir() reads USERPROFILE on Windows
+process.env.USERPROFILE = process.env.HOME;
 fs.mkdirSync(process.env.HOME);
 // An invented model catalog instead of asking the codex CLI
 const catalog = {

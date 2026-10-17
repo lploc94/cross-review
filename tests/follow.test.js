@@ -7,6 +7,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { writeSession } from "./helpers/dashboard-fixture.js";
 import { followInDashboard } from "../skill-packs/cross-review/scripts/lib/dashboard/follow.js";
@@ -14,10 +15,13 @@ import { discoveryFile } from "../skill-packs/cross-review/scripts/lib/dashboard
 
 let tmp;
 const savedHome = process.env.HOME;
+const savedUserProfile = process.env.USERPROFILE;
 const spawned = [];
 before(() => {
   tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "follow-test-")));
   process.env.HOME = path.join(tmp, "home");
+  // os.homedir() reads USERPROFILE on Windows
+  process.env.USERPROFILE = process.env.HOME;
   fs.mkdirSync(process.env.HOME);
 });
 after(async () => {
@@ -26,6 +30,7 @@ after(async () => {
   const alive = pid => { try { process.kill(pid, 0); return true; } catch { return false; } };
   for (let i = 0; i < 100 && spawned.some(alive); i++) await new Promise(r => setTimeout(r, 50));
   process.env.HOME = savedHome;
+  if (savedUserProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = savedUserProfile;
   fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -109,10 +114,13 @@ test("the browser does not open: dashboard_error says so and keeps the link; ope
   }
 });
 
-test("CLI begin with Follow reviews on waits for the browser launcher and prints its JSON", async () => {
+// On Windows the launcher is `cmd /c start`, which a PATH fake cannot replace: these two would open a real browser
+const OPENS_A_BROWSER = { skip: process.platform === "win32" && "opens a real browser on Windows" };
+
+test("CLI begin with Follow reviews on waits for the browser launcher and prints its JSON", OPENS_A_BROWSER, async () => {
   const { writeFakeCodex } = await import("./helpers/fake-codex.js");
   const { placeholderNames, endSession } = await import("../skill-packs/cross-review/scripts/lib/review-core.js");
-  const repo = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+  const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
   const bin = path.join(tmp, "cli-bin");
   fs.mkdirSync(bin, { recursive: true });
   writeFakeCodex(bin);
@@ -145,8 +153,8 @@ test("CLI begin with Follow reviews on waits for the browser launcher and prints
   }
 });
 
-test("Follow plans: `plans --finished` opens the plan's Plan tab, also in workspaces that have no sessions", async () => {
-  const repo = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+test("Follow plans: `plans --finished` opens the plan's Plan tab, also in workspaces that have no sessions", OPENS_A_BROWSER, async () => {
+  const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
   const bin = path.join(tmp, "plans-bin");
   fs.mkdirSync(bin, { recursive: true });
   fs.writeFileSync(path.join(bin, "open"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });

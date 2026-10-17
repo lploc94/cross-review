@@ -26,14 +26,18 @@ const nowS = () => Math.floor(Date.now() / 1000);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 const savedHome = process.env.HOME;
+const savedUserProfile = process.env.USERPROFILE;
 before(() => {
   tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "dashboard-server-")));
   // Settings and avatars live under HOME: never the real one
   process.env.HOME = path.join(tmp, "home");
+  // os.homedir() reads USERPROFILE on Windows
+  process.env.USERPROFILE = process.env.HOME;
   fs.mkdirSync(process.env.HOME);
 });
 after(() => {
   process.env.HOME = savedHome;
+  if (savedUserProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = savedUserProfile;
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -408,7 +412,8 @@ test("dashboard.json: written 0600 with pid, port, token, root; removed on close
   const file = path.join(mk("home"), ".cross-review", "dashboard.json");
   const d = await startDashboard({ root, port: 0, open: false, discoveryFile: file, catalogs: { codex: CATALOG } });
   const info = JSON.parse(fs.readFileSync(file, "utf8"));
-  assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+  // Windows has no POSIX mode bits (it reports 0o666)
+  if (process.platform !== "win32") assert.equal(fs.statSync(file).mode & 0o777, 0o600);
   assert.deepEqual({ pid: info.pid, port: info.port, token: info.token, root: info.root }, { pid: process.pid, port: d.port, token: d.token, root: fs.realpathSync(root) });
   assert.equal(typeof info.started_at, "number");
   await d.close();
@@ -486,9 +491,15 @@ for (const [name, script] of [["review-runner.js dashboard", RUNNER], ["bin/cros
       const disc = JSON.parse(fs.readFileSync(path.join(home, ".cross-review", "dashboard.json"), "utf8"));
       assert.equal(disc.port, info.port);
       run.child.kill("SIGTERM");
-      const { code } = await run.exited;
-      assert.equal(code, 0);
-      assert.equal(fs.existsSync(path.join(home, ".cross-review", "dashboard.json")), false);
+      const { code, signal } = await run.exited;
+      if (process.platform === "win32") {
+        // Windows has no SIGTERM to handle: kill() ends the process at once, so dashboard.json stays
+        // (follow.js reuses it only while its pid is alive)
+        assert.ok(code !== null || signal === "SIGTERM", `still running: ${code} ${signal}`);
+      } else {
+        assert.equal(code, 0);
+        assert.equal(fs.existsSync(path.join(home, ".cross-review", "dashboard.json")), false);
+      }
       assert.equal(fs.existsSync(path.join(home, ".claude")), false);
       assert.equal(fs.existsSync(path.join(home, ".agents")), false);
     } finally {

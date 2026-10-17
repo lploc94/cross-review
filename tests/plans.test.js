@@ -23,13 +23,17 @@ const SYNC = fs.readFileSync(path.join(FIXTURES, "sync-offline-plan.md"), "utf8"
 
 let tmp;
 const savedHome = process.env.HOME;
+const savedUserProfile = process.env.USERPROFILE;
 before(() => {
   tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "plans-test-")));
   process.env.HOME = path.join(tmp, "home");
+  // os.homedir() reads USERPROFILE on Windows
+  process.env.USERPROFILE = process.env.HOME;
   fs.mkdirSync(process.env.HOME);
 });
 after(() => {
   process.env.HOME = savedHome;
+  if (savedUserProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = savedUserProfile;
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 

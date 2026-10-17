@@ -14,14 +14,18 @@ import { SKILL_TEMPLATES } from "../skill-packs/cross-review/scripts/lib/review-
 let tmp;
 let home;
 const savedHome = process.env.HOME;
+const savedUserProfile = process.env.USERPROFILE;
 before(() => {
   tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "config-test-")));
   home = path.join(tmp, "home");
   fs.mkdirSync(home);
   process.env.HOME = home;
+  // os.homedir() reads USERPROFILE on Windows
+  process.env.USERPROFILE = process.env.HOME;
 });
 after(() => {
   process.env.HOME = savedHome;
+  if (savedUserProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = savedUserProfile;
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 

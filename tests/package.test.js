@@ -27,6 +27,17 @@ test("package: homepage, repository, issues and license point at the project", (
   assert.match(fs.readFileSync(path.join(REPO, "LICENSE"), "utf8"), /^MIT License\n/);
 });
 
+/**
+ * Run npm without a shell. Windows has only npm.cmd, which Node does not spawn without one, so npm's own
+ * npm-cli.js runs under this node: npm_execpath (under npm) or the copy next to node.exe.
+ */
+function npm(args, opts) {
+  const nextToNode = path.join(path.dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
+  const cli = [process.env.npm_execpath, process.platform === "win32" ? nextToNode : null]
+    .find(p => p && p.endsWith(".js") && fs.existsSync(p));
+  return cli ? execFileSync(process.execPath, [cli, ...args], opts) : execFileSync("npm", args, opts);
+}
+
 test("package: npm pack ships the runtime lock file and LICENSE, never the runtime's node_modules", () => {
   // a copy of the working tree (tracked and new files) with a planted node_modules, as on a
   // developer's machine after `npm ci --prefix skill-packs/cross-review`
@@ -42,7 +53,7 @@ test("package: npm pack ships the runtime lock file and LICENSE, never the runti
     fs.mkdirSync(path.dirname(probe), { recursive: true });
     fs.writeFileSync(probe, "// planted by the test\n");
 
-    const [packed] = JSON.parse(execFileSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], { cwd: tmp, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }));
+    const [packed] = JSON.parse(npm(["pack", "--dry-run", "--json", "--ignore-scripts"], { cwd: tmp, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }));
     const paths = packed.files.map(f => f.path);
     for (const want of ["package.json", "README.md", "LICENSE", "bin/cross-review.js", "skill-packs/cross-review/manifest.json", "skill-packs/cross-review/package-lock.json", "skill-packs/cross-review/scripts/review-runner.js"]) {
       assert.ok(paths.includes(want), `${want} is packed`);

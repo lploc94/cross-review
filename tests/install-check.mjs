@@ -116,7 +116,7 @@ for (const skill of PLAIN_SKILLS) {
 {
   const ws = fs.mkdtempSync(path.join(home, "plans-check-"));
   try {
-    const out = JSON.parse(execFileSync(process.execPath, [runner, "plans", "--working-dir", ws], { encoding: "utf8", env: { ...process.env, HOME: home } }));
+    const out = JSON.parse(execFileSync(process.execPath, [runner, "plans", "--working-dir", ws], { encoding: "utf8", env: { ...process.env, HOME: home, USERPROFILE: home } }));
     check(out.dir === path.join(fs.realpathSync(ws), ".cross-review", "plans") && fs.existsSync(out.dir), `plans: unexpected dir ${out.dir}`);
     check(Array.isArray(out.plans), "plans: no plans list");
   } catch (e) {
@@ -178,7 +178,7 @@ try {
   const { Client } = await import(pathToFileURL(path.join(sdk, "index.js")).href);
   const { StdioClientTransport } = await import(pathToFileURL(path.join(sdk, "stdio.js")).href);
   const client = new Client({ name: "install-check", version: "1.0.0" });
-  await client.connect(new StdioClientTransport({ command: process.execPath, args: [mcpServer], env: { ...process.env, HOME: home } }));
+  await client.connect(new StdioClientTransport({ command: process.execPath, args: [mcpServer], env: { ...process.env, HOME: home, USERPROFILE: home } }));
   const { tools } = await client.listTools();
   check(JSON.stringify(tools.map(t => t.name).sort()) === JSON.stringify(TOOLS), `mcp: tools ${tools.map(t => t.name).join(",")}`);
   await client.close();

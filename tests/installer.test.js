@@ -28,7 +28,7 @@ function onPath(cmd) {
 
 test("upgrading from the codex-review pack removes its skills, runtime, MCP server and guidance, and keeps foreign ones", { timeout: 600_000 }, () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "install-upgrade-"));
-  const env = { ...process.env, HOME: home, CODEX_HOME: path.join(home, ".codex") };
+  const env = { ...process.env, HOME: home, USERPROFILE: home, CODEX_HOME: path.join(home, ".codex"), npm_config_prefix: path.join(home, "npm-global") };
   try {
     // codex-review pack install for Claude Code: runtime, skills, a skill removed even earlier
     const claude = path.join(home, ".claude", "skills");
@@ -118,7 +118,7 @@ test("a failed npm ci still removes the old MCP registrations and adds no guidan
   const bin = path.join(home, "bin");
   write(path.join(bin, "npm"), "#!/bin/sh\nexit 1\n");
   fs.chmodSync(path.join(bin, "npm"), 0o755);
-  const env = { ...process.env, HOME: home, CODEX_HOME: path.join(home, ".codex"), PATH: `${bin}${path.delimiter}${process.env.PATH}` };
+  const env = { ...process.env, HOME: home, USERPROFILE: home, CODEX_HOME: path.join(home, ".codex"), npm_config_prefix: path.join(home, "npm-global"), PATH: `${bin}${path.delimiter}${process.env.PATH}` };
   try {
     const claude = path.join(home, ".claude", "skills");
     write(path.join(claude, "codex-review", "scripts", "codex-runner.js"), "// v14\n");
@@ -148,7 +148,7 @@ test("a trusted project's Codex config does not decide which global registration
   for (const globalIsOld of [false, true]) {
     const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "install-project-")));
     // TMPDIR inside the project too: the lookup must not depend on where temp files go
-    const env = { ...process.env, HOME: home, CODEX_HOME: path.join(home, ".codex"), TMPDIR: path.join(home, "proj", ".tmp") };
+    const env = { ...process.env, HOME: home, USERPROFILE: home, CODEX_HOME: path.join(home, ".codex"), npm_config_prefix: path.join(home, "npm-global"), TMPDIR: path.join(home, "proj", ".tmp") };
     fs.mkdirSync(env.TMPDIR, { recursive: true });
     try {
       const oldServer = path.join(home, ".claude", "skills", "codex-review", "scripts", "mcp-server.js");
@@ -172,7 +172,7 @@ test("a trusted project's Codex config does not decide which global registration
 
 test("cleanup never deletes the new install when the Codex skills root is an alias", { timeout: 600_000 }, () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "install-alias-"));
-  const env = { ...process.env, HOME: home, CODEX_HOME: path.join(home, ".codex") };
+  const env = { ...process.env, HOME: home, USERPROFILE: home, CODEX_HOME: path.join(home, ".codex"), npm_config_prefix: path.join(home, "npm-global") };
   try {
     fs.mkdirSync(path.join(home, ".agents", "skills"), { recursive: true });
     fs.mkdirSync(path.join(home, ".codex"), { recursive: true });
@@ -187,7 +187,7 @@ test("cleanup never deletes the new install when the Codex skills root is an ali
 
 test("the cross-review command never replaces a file or link the installer did not write", { skip: process.platform === "win32", timeout: 600_000 }, () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "install-command-"));
-  const env = { ...process.env, HOME: home, CODEX_HOME: path.join(home, ".codex") };
+  const env = { ...process.env, HOME: home, USERPROFILE: home, CODEX_HOME: path.join(home, ".codex"), npm_config_prefix: path.join(home, "npm-global") };
   const command = path.join(home, ".local", "bin", "cross-review");
   const install = () => {
     const r = spawnSync(process.execPath, [INSTALLER], { env, encoding: "utf8" });
@@ -215,7 +215,7 @@ test("a HOME with an apostrophe gets a working cross-review command", { skip: pr
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "install-quote-"));
   const home = path.join(tmp, "user's home");
   fs.mkdirSync(home);
-  const env = { ...process.env, HOME: home, CODEX_HOME: path.join(home, ".codex") };
+  const env = { ...process.env, HOME: home, USERPROFILE: home, CODEX_HOME: path.join(home, ".codex"), npm_config_prefix: path.join(home, "npm-global") };
   try {
     execFileSync(process.execPath, [INSTALLER], { env, stdio: "pipe" });
     const out = execFileSync(process.execPath, [CHECK, home], { env, encoding: "utf8" });
@@ -232,7 +232,7 @@ test("install-check rejects a broken install", () => {
     writeOldSkill(home, path.join(home, ".claude", "skills"), "codex-plan-review");
     let failed = false;
     try {
-      execFileSync(process.execPath, [CHECK, home], { env: { ...process.env, CODEX_HOME: path.join(home, ".codex") }, stdio: "pipe" });
+      execFileSync(process.execPath, [CHECK, home], { env: { ...process.env, HOME: home, USERPROFILE: home, CODEX_HOME: path.join(home, ".codex"), npm_config_prefix: path.join(home, "npm-global") }, stdio: "pipe" });
     } catch (e) {
       failed = true;
       assert.match(String(e.stderr), /unrendered placeholder/);

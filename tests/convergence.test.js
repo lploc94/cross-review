@@ -43,7 +43,7 @@ test("runner poll and the dashboard agree on a round that repeats the open issue
       return `${summary.group}/${summary.state}`;
     };
     const before = state();
-    const r = spawnSync(process.execPath, [RUNNER, "poll", dir], { encoding: "utf8", env: { ...process.env, HOME: tmp, CODEX_HOME: path.join(tmp, ".codex") } });
+    const r = spawnSync(process.execPath, [RUNNER, "poll", dir], { encoding: "utf8", env: { ...process.env, HOME: tmp, USERPROFILE: tmp, CODEX_HOME: path.join(tmp, ".codex") } });
     const final = JSON.parse(fs.readFileSync(path.join(dir, "final.txt"), "utf8"));
     assert.equal(final.convergence?.stalemate, true, r.stdout + r.stderr);
     assert.deepEqual(final.convergence.unchanged_issue_ids, [1]);

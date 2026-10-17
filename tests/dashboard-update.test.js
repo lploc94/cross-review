@@ -17,19 +17,28 @@ const CATALOG = { listModels: async () => null, defaultModel: () => null, cliInf
 
 let tmp;
 const savedHome = process.env.HOME;
+const savedUserProfile = process.env.USERPROFILE;
 before(() => {
   tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "dashboard-update-")));
   // Settings live under HOME: never the real one
   process.env.HOME = path.join(tmp, "home");
+  // os.homedir() reads USERPROFILE on Windows
+  process.env.USERPROFILE = process.env.HOME;
   fs.mkdirSync(process.env.HOME);
 });
 after(() => {
   process.env.HOME = savedHome;
+  if (savedUserProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = savedUserProfile;
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
 let n = 0;
-const mk = name => fs.mkdirSync(path.join(tmp, `${name}-${++n}`), { recursive: true });
+// mkdirSync's return value is a \\?\ path on Windows, so return the path itself
+const mk = name => {
+  const dir = path.join(tmp, `${name}-${++n}`);
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+};
 const globalFile = () => path.join(process.env.HOME, ".cross-review", "config.json");
 const setGlobal = obj => {
   fs.mkdirSync(path.dirname(globalFile()), { recursive: true });

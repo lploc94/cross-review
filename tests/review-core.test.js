@@ -31,10 +31,13 @@ let logPath;
 let outputPath;
 
 const savedHome = process.env.HOME;
+const savedUserProfile = process.env.USERPROFILE;
 before(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), "review-core-test-"));
   // begin reads ~/.cross-review/config.json: never the real one
   process.env.HOME = path.join(tmp, "home");
+  // os.homedir() reads USERPROFILE on Windows
+  process.env.USERPROFILE = process.env.HOME;
   fs.mkdirSync(process.env.HOME);
   const bin = path.join(tmp, "bin");
   fs.mkdirSync(bin);
@@ -56,6 +59,7 @@ before(() => {
 
 after(() => {
   process.env.HOME = savedHome;
+  if (savedUserProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = savedUserProfile;
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -587,7 +591,9 @@ test("the watchdog stamps output lines and exits after the reviewer", async () =
   }
 });
 
-test("output written while the deadline stops the reviewer is stamped", async () => {
+// Windows stops the reviewer with taskkill /F, which sends no SIGTERM to write on_term after; the drain after a
+// plain exit is covered by the next two tests
+test("output written while the deadline stops the reviewer is stamped", { skip: process.platform === "win32" && "needs SIGTERM" }, async () => {
   setCodexOutput("### VERDICT\n- Status: APPROVE\n");
   process.env.FAKE_CODEX_TERM_LINE = "1";
   try {

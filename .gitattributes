@@ -1,0 +1,3 @@
+# LF everywhere, also in Windows checkouts (core.autocrlf): templates, front matter and workflows are parsed by line
+* text=auto eol=lf
+*.png binary

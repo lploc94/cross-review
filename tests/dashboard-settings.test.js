@@ -11,7 +11,7 @@ import { FALLBACK_EFFORTS, OTHER, effectiveReviewer, effortLevels, effortOptions
 import { startDashboard } from "../skill-packs/cross-review/scripts/lib/dashboard/server.js";
 
 let tmp;
-const saved = { PATH: process.env.PATH, HOME: process.env.HOME, CODEX_HOME: process.env.CODEX_HOME };
+const saved = { PATH: process.env.PATH, HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE, CODEX_HOME: process.env.CODEX_HOME };
 
 // An invented catalog in the shape `codex debug models` prints: 9 models, 7 listed
 const level = effort => ({ effort, description: `Invented ${effort} level` });
@@ -50,6 +50,8 @@ process.exit(2);
 `, { mode: 0o755 });
   process.env.PATH = `${bin}${path.delimiter}${process.env.PATH}`;
   process.env.HOME = path.join(tmp, "home");
+  // os.homedir() reads USERPROFILE on Windows
+  process.env.USERPROFILE = process.env.HOME;
   fs.mkdirSync(process.env.HOME);
 });
 after(() => {

@@ -9,6 +9,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+// The runner reads ~/.cross-review/config.json: never the real one (os.homedir() reads USERPROFILE on Windows)
+const TEMP_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "review-runner-home-"));
+process.env.HOME = TEMP_HOME;
+process.env.USERPROFILE = TEMP_HOME;
+process.env.CODEX_HOME = path.join(TEMP_HOME, ".codex");
+process.on("exit", () => fs.rmSync(TEMP_HOME, { recursive: true, force: true }));
+
 const RUNNER = process.env.REVIEW_RUNNER
   ? path.resolve(process.env.REVIEW_RUNNER)
   : path.resolve("skill-packs/cross-review/scripts/review-runner.js");
