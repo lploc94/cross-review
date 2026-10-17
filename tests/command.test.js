@@ -110,7 +110,8 @@ test("Windows: a batch file that is not a shim runs through cmd only when allowe
     assert.equal(commandAvailable("batch", { env }), false);
     const viaCmd = resolveSpawn("batch", ["prefix", "-g"], { env, allowCmdShell: true });
     assert.deepEqual(viaCmd, {
-      cmd: env.ComSpec || "cmd.exe",
+      // Git Bash spells it COMSPEC; Windows reads variables case-insensitively
+      cmd: Object.entries(env).find(([k]) => k.toUpperCase() === "COMSPEC")?.[1] || "cmd.exe",
       args: ["/d", "/s", "/c", `""${file}" "prefix" "-g""`],
       windowsVerbatimArguments: true,
     });
