@@ -169,7 +169,7 @@ Besides the prompts and outputs, a session keeps what the dashboard needs to ret
 ## Breaking Changes
 
 ### pack 10.4.0: Claude Code and Antigravity reviewers
-- **Reviewers**: `reviewer` may be `codex` (default), `claude` (Claude Code) or `agy` (Antigravity), on `review_begin`/`--reviewer` or in the settings files. Review skills say so in their descriptions.
+- **Reviewers**: `reviewer` may be `codex` (default), `claude` (Claude Code) or `agy` (Antigravity), on `review_begin`/`--reviewer` or in the settings files. Review skills say so in their descriptions, and the protocol rule is now "Pass `reviewer`, `model` or `effort` only when the user names one or the plan's review checkpoint does; otherwise omit them, without asking the user which reviewer to use".
 - **Settings per reviewer**: model and effort live under `reviewers.<name>` (with `skills.<skill>` inside). Top-level `model`, `effort` and `skills` are read as `reviewers.codex`; the dashboard and `writeConfig` save them there. A file nothing has saved since 10.4.0 keeps the old form and works as before.
 - **Checks before start**: an effort Claude Code does not have, or one an agy model family lacks, or a model agy does not list, fails `begin`/`reply` with `INVALID_SELECTION`; `begin` inside a reviewer fails with `NESTED_REVIEW`.
 - **Dashboard**: `/api/settings` returns `reviewers.<name>` (`label`, `models`, `modelsFetchedAt`, `modelsRefreshing`, `defaultModel`, `cli`, `efforts`, `allowCustomModel`), `reviewerNames` and `defaultReviewer` instead of top-level `models`/`codexDefault`/`reviewer`; `/api/models` takes `?reviewer=`; a save accepts only `reviewers.<name>.…` model and effort paths (the old ones get 400). agy's list is kept in `~/.cross-review/models-agy.json`.
