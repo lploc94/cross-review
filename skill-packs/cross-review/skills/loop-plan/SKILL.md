@@ -14,7 +14,7 @@ Use it for large work: several features, many files or components, or work that 
 1. Read applicable {{CLIENT_INSTRUCTIONS}}/repository instructions, inspect `git status`, recent history, relevant files, symbols, callers, commands, and existing tests before drafting.
 2. Separate the user's target from reports, assumptions, completed work, and out-of-scope ideas. Preserve the user's expected behavior as the source of truth.
 3. For each proposed change, cite the repository pattern (path/symbol) and the current established standard for the problem (a current source). When the repository pattern is itself the tangled part, present two options, patch within it or move to the standard, as a user decision. Otherwise choose the smallest project-consistent design, reusing existing helpers by name (a new helper states why they do not fit); do not add speculative abstractions or compatibility behavior.
-4. Spike every technical assumption you have not seen work here (library API, platform behavior, external capacity, performance) in `.cross-review/spikes/<plan-name>/`, and record it in `Feasibility evidence`.
+4. Spike every technical assumption you have not seen work here (library API, platform behavior, external capacity, performance) in `.cross-review/spikes/<plan-name>/`, and record it in `Feasibility evidence`. A pilot run on a small subset is recorded with its command, subset, duration, and what it caught, so the phase can reuse it.
 5. Resolve assumptions at plan time, by spike or by asking the user. The plan handed to implementation must not contain hard stops that depend on something nobody can verify; record what remains as an assumption with a default and a fallback. Hard stops are only for data loss, security, or irreversible actions.
 6. Resolve ordinary engineering choices autonomously. Ask only when a material product, API, schema, dependency, compatibility, or operational decision cannot be inferred safely.
 
@@ -53,7 +53,7 @@ loop-plan/v1
 ```
 
 - `Fixed decisions`: choices implementation must not change on its own (technology, dependency, interface, limit), each with its reason.
-- `Baseline`: completed work, and the real duration of each gate command.
+- `Baseline`: completed work, and the real duration of each gate command and each long run (batch, data processing, training, migration over real data).
 - `Feasibility evidence`: assumption | spike or source | result | date.
 - `Capacity`: the limits described under Limits, or `N/A`.
 - `Review checkpoints`: which phases end with `{{CLIENT_SKILL}}review-impl` and why (after phases that build a contract, schema, migration, state, or money flow), plus one final checkpoint on the cumulative diff. Name a model per checkpoint when the user wants one.
@@ -87,7 +87,7 @@ Checkpoint: `{{CLIENT_SKILL}}review-impl` | None (covered by the checkpoint afte
 `<proposed commit message>`
 ```
 
-Every phase must describe code evidence, the observable contract, production obligations separately from tests, failure/boundary/state cases where relevant, for a migration, destructive, or state-changing step whether rerunning it is safe and its retry or rollback path, an oracle that rejects the plausible naive implementation, exact commands and expected outcomes, and a single cohesive commit boundary. Test ladder: a narrow command per AC, light phase gates, and the full suite only in `Global Gates`.
+Every phase must describe code evidence, the observable contract, production obligations separately from tests, failure/boundary/state cases where relevant, for a migration, destructive, or state-changing step whether rerunning it is safe and its retry or rollback path, an oracle that rejects the plausible naive implementation, exact commands and expected outcomes, and a single cohesive commit boundary. Test ladder: a narrow command per AC, light phase gates, and the full suite only in `Global Gates`. A run longer than about 10 minutes gets two steps in `Focused verification`: a pilot on a small subset that finishes in minutes and covers the hard cases (boundaries, bad data, the largest item), with its expected output and pass check, then the full run, started only after the pilot passes.
 
 ## Quality and review
 

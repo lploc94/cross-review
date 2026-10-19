@@ -20,7 +20,7 @@ For each phase, in order:
 1. Re-read the phase. Revalidate only the paths and symbols the code is about to touch.
 2. Update owning documentation first when the phase requires it. Write or strengthen the tests, see them fail, and note the red result in one line. Tests vary inputs/state and reject hardcoded or fixture-only implementations.
 3. Implement the complete production obligations through the real integration path (errors, state transitions, persistence, concurrency, invariants the phase names), minimal and project-consistent. Plan limits come with their stated soft handling.
-4. Run each AC's narrow command, then the phase gates. Smoke-test only where the plan asks.
+4. Run each AC's narrow command, then the phase gates. Smoke-test only where the plan asks, except for long runs (below).
 5. Inspect the staged diff once: phase-owned files only, no secrets, no leftovers of renamed or removed names.
 6. Commit once with the planned message. In the plan, tick `- [x]` each of the phase's acceptance criteria that is met (an unmet one stays `- [ ]`, its reason in the progress line) and write the phase's progress line in `Progress Log`: result, AC evidence, and any deviation from the plan, plus a `Discovery:` line with evidence for each surprise that shaped the work. Stage the plan only when `git check-ignore -q <plan>` exits 1; when it exits 0, git ignores the plan: update it in place, do not stage it, and do not treat that as an error. Never amend, force, skip hooks, or create an empty commit.
 7. If the plan lists this phase as a review checkpoint, run `{{CLIENT_SKILL}}review-impl` with the model the plan names, if any. The review skill governs how findings are handled. Then report the phase and move on.
@@ -30,6 +30,8 @@ Gate discipline:
 - A gate that cannot run is a problem to solve (install, build, start what the plan names), not something to note and skip.
 - A failure that also occurs without your changes is a baseline failure: record it in the progress line and continue. Only new failures block.
 - An AC that is not fully met is reported `not done` with the reason, never as done.
+- A run longer than about 10 minutes always goes through a pilot on a small subset first, the plan's or, when it names none, one you build that covers the hard cases. Watch the first minutes and partial output of the full run, and stop it at the first sign of failure.
+- Never use a full run to test a fix. Reproduce the failure on the smallest input that shows it, fix it, pass the pilot, then start the full run again. A failure the pilot missed means the pilot lacks that kind of case: add it to the pilot before the next full run, and record it as a `Discovery:` line.
 - When a migration, destructive, or state-changing step fails partway, follow the plan's retry or rollback path; without one, stop and ask rather than improvise a destructive recovery.
 
 Plan changes:
