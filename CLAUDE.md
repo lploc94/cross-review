@@ -170,6 +170,10 @@ Besides the prompts and outputs, a session keeps what the dashboard needs to ret
 
 ## Breaking Changes
 
+### pack 10.5.1: Claude Code reviewer without ReportFindings
+- **Reviewer**: Claude Code turns run with `--disallowedTools ReportFindings`. That tool hands findings to the host UI, so a reviewer that used it left a turn whose findings and verdict never reached the event log (`next: ask_user`, no verdict); it did so in 12 of 168 benchmark reviews.
+- `package.json` and `manifest.json` 10.5.1.
+
 ### pack 10.5.0: Windows
 - **Command**: the installer writes `cross-review.cmd`, `cross-review.ps1` and `cross-review` (sh, for Git Bash) into npm's global folder (`npm prefix -g`, usually `%APPDATA%\npm`, already on PATH), so `cross-review dashboard` works in PowerShell 7, cmd and Git Bash. Windows PowerShell 5.1 blocks `.ps1` files under its default execution policy: run `cross-review.cmd` there, or `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`. A file of the same name without the installer's marker is left alone.
 - **Reviewers on Windows**: codex, claude and agy start from an `.exe` or an npm `.cmd` shim without a shell (`lib/command.js`); the runner recognises them by their program name even under a quoted `C:\Program Files\…` path or a node host, so `stop` can kill them.

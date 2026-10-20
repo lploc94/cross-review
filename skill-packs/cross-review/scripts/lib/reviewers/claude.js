@@ -37,9 +37,13 @@ export function checkSelection({ effort }) {
   return { ok: true };
 }
 
-/** Command for one turn: threadId empty → new session; otherwise resume that session. */
+/**
+ * Command for one turn: threadId empty → new session; otherwise resume that session. ReportFindings
+ * is left out: it hands a review to the host UI, so its findings and verdict never reach the event
+ * log, and a reviewer that used it left a turn with no verdict.
+ */
 export function buildCommand({ threadId, workingDir, model, effort, sandbox }) {
-  const args = ["-p", "--output-format", "stream-json", "--verbose", "--effort", effort];
+  const args = ["-p", "--output-format", "stream-json", "--verbose", "--effort", effort, "--disallowedTools", "ReportFindings"];
   if (model !== undefined && model !== null) args.push("--model", model);
   args.push(...(sandbox === fullAccessSandbox ? ["--dangerously-skip-permissions"] : ["--permission-mode", "plan"]));
   if (threadId) args.push("--resume", threadId);

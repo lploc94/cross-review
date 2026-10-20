@@ -19,7 +19,7 @@ test("claude is a registered reviewer", () => {
 });
 
 test("buildCommand: new and resumed turns, both sandboxes, with and without a model", () => {
-  const base = ["-p", "--output-format", "stream-json", "--verbose", "--effort", "xhigh"];
+  const base = ["-p", "--output-format", "stream-json", "--verbose", "--effort", "xhigh", "--disallowedTools", "ReportFindings"];
   assert.deepEqual(
     claude.buildCommand({ threadId: "", workingDir: "/w", model: null, effort: "xhigh", sandbox: "danger-full-access" }),
     { cmd: "claude", args: [...base, "--dangerously-skip-permissions"], cwd: "/w" },
@@ -30,8 +30,16 @@ test("buildCommand: new and resumed turns, both sandboxes, with and without a mo
   );
   assert.deepEqual(
     claude.buildCommand({ threadId: "sid-9", workingDir: "/w", model: "sonnet", effort: "low", sandbox: "danger-full-access" }).args,
-    ["-p", "--output-format", "stream-json", "--verbose", "--effort", "low", "--model", "sonnet", "--dangerously-skip-permissions", "--resume", "sid-9"],
+    ["-p", "--output-format", "stream-json", "--verbose", "--effort", "low", "--disallowedTools", "ReportFindings", "--model", "sonnet", "--dangerously-skip-permissions", "--resume", "sid-9"],
   );
+  // ReportFindings sends a review to the host UI, so its findings and verdict never reach the
+  // event log the runner parses; every turn, new or resumed, leaves it out
+  for (const threadId of ["", "sid-9"]) {
+    for (const sandbox of ["danger-full-access", "read-only"]) {
+      const args = claude.buildCommand({ threadId, workingDir: "/w", model: null, effort: "high", sandbox }).args;
+      assert.equal(args[args.indexOf("--disallowedTools") + 1], "ReportFindings");
+    }
+  }
   const ro = claude.buildCommand({ threadId: "sid-9", workingDir: "/w", model: undefined, effort: "high", sandbox: "read-only" }).args;
   assert.ok(!ro.includes("--model") && !ro.includes("--dangerously-skip-permissions"));
   assert.deepEqual(ro.slice(-4), ["--permission-mode", "plan", "--resume", "sid-9"]);
