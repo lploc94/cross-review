@@ -720,6 +720,10 @@ test("global effort reaches the reviewer with its source; a requested effort win
     // a reply that names a model and effort records them as requested; the reviewer keeps its source
     await replySession(a.session_dir, { inputText: inputFor("review-plan", "ge2"), model: "model-invented-2", effort: "medium" });
     await waitSession(a.session_dir, { maxWaitSeconds: 30 });
+    assert.ok(
+      codexCalls().every(c => c.args.some(arg => arg.startsWith('model_instructions_file=') && arg.includes('review-plan.compiled.md'))),
+      "both initial and resumed Codex turns receive the compiled skill system prompt via model_instructions_file"
+    );
     assert.deepEqual(stateOf(a.session_dir).settings_sources, { reviewer: "default", model: "requested", effort: "requested", open_dashboard: "default" });
     await endSession(a.session_dir);
     await endSession(b.session_dir);
@@ -873,6 +877,7 @@ test("claude reviewer round trip: begin → wait → reply resumes the same sess
   assert.ok(!calls[0].args.includes("--resume"));
   assert.equal(argAfter(calls[1].args, "--resume"), "session-fake-1");
   assert.equal(argAfter(calls[1].args, "--effort"), "max");
+  assert.ok(calls.every(c => (argAfter(c.args, "--system-prompt-file") || "").endsWith("review-impl.compiled.md") && c.args.includes("--disable-slash-commands")));
   assert.ok(calls.every(c => c.args.includes("--dangerously-skip-permissions") && c.reviewerEnv === "claude"));
   assert.equal(codexCalls().length, 0, "Codex is not started for a Claude review");
   const end = await endSession(begun.session_dir);
@@ -970,6 +975,7 @@ test("agy reviewer round trip: NDJSON on stdin, resumed by --conversation", asyn
   assert.equal(argAfter(calls[1].args, "--conversation"), "conv-fake-1");
   assert.equal(calls[1].args.at(-1), "--print=");
   assert.ok(calls.every(c => argAfter(c.args, "--model") === "gemini-x-flash" && argAfter(c.args, "--effort") === "low"));
+  assert.ok(calls.every(c => argAfter(c.args, "--agent") === "cross-reviewer-review-impl" && c.args.includes("--disable-slash-commands")));
   assert.ok(calls.every(c => c.args.includes("--dangerously-skip-permissions") && c.reviewerEnv === "agy"));
   assert.equal(codexCalls().length, 0, "Codex is not started for an agy review");
   const end = await endSession(begun.session_dir);

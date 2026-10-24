@@ -22,6 +22,7 @@ import { convergence, issueIds } from "./lib/convergence.js";
 import { ensureCrossReviewDir } from "./lib/config.js";
 
 const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // --- Constants ---
 const RUNNER_VERSION = 15;
@@ -50,12 +51,42 @@ const ABSOLUTE_USER_AUTHORITY = [
 // Process management
 // ============================================================
 
-function launchReviewer(reviewer, stateDir, workingDir, threadId, effort, model, sandbox) {
+function resolveSystemPromptFile(skillName, skillsDir) {
+  if (!skillName) return "";
+  const candidates = [];
+  if (skillsDir) {
+    candidates.push(path.resolve(skillsDir, "cross-review", "prompts", "compiled", `${skillName}.compiled.md`));
+  }
+  candidates.push(path.resolve(__dirname, "..", "prompts", "compiled", `${skillName}.compiled.md`));
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return "";
+}
+
+function launchReviewer(
+  reviewer,
+  stateDir,
+  workingDir,
+  threadId,
+  effort,
+  model,
+  sandbox,
+  { systemPromptFile = "", skillName = "" } = {},
+) {
   const promptFile = path.join(stateDir, "prompt.txt");
   const jsonlFile = path.join(stateDir, "output.jsonl");
   const errFile = path.join(stateDir, "error.log");
 
-  const { cmd, args, cwd } = reviewer.buildCommand({ threadId, workingDir, model, effort, sandbox });
+  const { cmd, args, cwd } = reviewer.buildCommand({
+    threadId,
+    workingDir,
+    model,
+    effort,
+    sandbox,
+    systemPromptFile,
+    skillName,
+  });
 
   // A reviewer that reads its prompt in its own format gets that on stdin; prompt.txt stays the text
   let stdinFile = promptFile;
@@ -1072,8 +1103,10 @@ function cmdStart(argv) {
   }
 
   try {
+    const systemPromptFile = resolveSystemPromptFile(skillName, state.skills_dir);
     const { pid: reviewerPid, pgid } = launchReviewer(
       reviewer, resolvedSessionDir, resolvedWorkingDir, "", effort, values.model, sandbox,
+      { systemPromptFile, skillName },
     );
     reviewerPgid = pgid;
 
@@ -1303,9 +1336,12 @@ function cmdResume(argv) {
   }
 
   try {
+    const skillName = prevState.skill_name || "";
+    const systemPromptFile = resolveSystemPromptFile(skillName, prevState.skills_dir);
     const { pid: reviewerPid, pgid } = launchReviewer(
       reviewer, resolvedSessionDir, resolvedWorkingDir, threadId, effort, values.model,
       prevState.sandbox || reviewer.defaultSandbox,
+      { systemPromptFile, skillName },
     );
     reviewerPgid = pgid;
 

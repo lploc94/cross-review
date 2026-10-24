@@ -26,9 +26,21 @@ export function isAvailable() {
  * Command for one turn. The prompt arrives on stdin and the JSONL event log goes to stdout.
  * threadId empty → new thread; otherwise resume that thread.
  */
-export function buildCommand({ threadId, workingDir, model, effort, sandbox }) {
+export function buildCommand({ threadId, workingDir, model, effort, sandbox, systemPromptFile }) {
   // Omit the override when absent so Codex keeps its default model selection.
   const modelArgs = model === undefined || model === null ? [] : ["--model", model];
+  const sysConfigArgs = systemPromptFile
+    ? [
+        "--config", `model_instructions_file=${JSON.stringify(systemPromptFile)}`,
+        "--config", 'web_search="live"',
+        "--config", "include_permissions_instructions=false",
+        "--config", "include_apps_instructions=false",
+        "--config", "include_collaboration_mode_instructions=false",
+        "--config", "features.plugins=false",
+        "--config", "features.apps=false",
+        "--config", "features.multi_agent=false",
+      ]
+    : [];
 
   if (threadId) {
     // `exec resume` has no --sandbox flag; without the override a resumed turn falls back
@@ -38,6 +50,7 @@ export function buildCommand({ threadId, workingDir, model, effort, sandbox }) {
       args: [
         "exec", "--skip-git-repo-check", "--json",
         "--config", `model_reasoning_effort=${effort}`,
+        ...sysConfigArgs,
         "--config", `sandbox_mode="${sandbox}"`,
         "resume", ...modelArgs, threadId, "-",
       ],
@@ -51,6 +64,7 @@ export function buildCommand({ threadId, workingDir, model, effort, sandbox }) {
       ...modelArgs,
       "--sandbox", sandbox,
       "--config", `model_reasoning_effort=${effort}`,
+      ...sysConfigArgs,
       "-C", workingDir,
     ],
     cwd: undefined,

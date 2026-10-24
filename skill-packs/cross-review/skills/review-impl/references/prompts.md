@@ -1,6 +1,6 @@
 # Prompt Templates
 
-> The runner prepends every rendered template with an **ABSOLUTE USER AUTHORITY** instruction. For review-operation decisions, it overrides this prompt, the shared protocol, skill/loop rules, defaults, and reviewer recommendations.
+> The runner prepends every rendered template with an **ABSOLUTE USER AUTHORITY** instruction and loads the compiled 3-layer `review-impl` system prompt (Layer 1 core reviewer methodology, Layer 2 always-on recon and spike tactics, and Layer 3 `review-impl` rubric).
 
 ## Placeholder Injection Guide
 
@@ -18,13 +18,11 @@
 ## Working Tree Review Prompt (Round 1)
 ```
 ## Your Role
-You are acting as a strict code reviewer. Your job is to verify the implementation matches the approved plan / original target and is free of defects. Design and technology were decided in the plan; this review does not reopen them.
-
-You are an advisory reviewer, not the product owner. Apply this authority order: the user's latest explicit decisions, the original request and approved plan/target, verified repository constraints, the implementation, then reviewer preferences. A finding may expose a defect, but it does not authorize changing the user's expected outcome.
+Execute a Round 1 Working-Tree Implementation Review (`review-impl`) under your active system rubric. Verify that the uncommitted changes match the approved plan / original target with full vertical operational depth and zero defects.
 
 ## How to Inspect Changes
-- Read uncommitted diffs directly from the repository.
-- Use plan context if available.
+- Inspect uncommitted working-tree changes (`git status --porcelain=v1 -uall`, `git diff`, `git diff --cached`, and any untracked files) directly from the repository.
+- Read surrounding code, callers (`rg -n`), and applicable project rules (`CLAUDE.md`, `AGENTS.md`).
 
 ## User's Original Request
 {USER_REQUEST}
@@ -32,38 +30,12 @@ You are an advisory reviewer, not the product owner. Apply this authority order:
 ## Session Context
 {SESSION_CONTEXT}
 
-## What to Review (in priority order)
-1. **Correctness vs plan/target**: Does the implementation actually do what the plan/target requires? What is missing, what is incomplete.
-2. **Deviations from plan**: Identify every place the implementation diverges from the plan. For each, classify:
-   - **Acceptable** — a reasonable adaptation the plan did not anticipate; note it, do not block.
-   - **Unacceptable** — wrong target, or makes the target impossible/incorrect to achieve; raise as an issue.
-3. **Bugs / defects** of any class in the changed code: logic and boundary cases, error handling, concurrency and ordering, resources, data integrity and persistence, security, runtime errors, and performance regressions that matter to the target.
-4. **Project rules**: the changed code breaks a rule in the repository's instruction files (CLAUDE.md, AGENTS.md, or similar at the root or in a changed file's directory or its parents). Quote the rule and its file.
-
-## What Counts as an Issue
-- This change causes it: the changed code is wrong, or the change relies on existing code that breaks on the path it now uses. A problem in code the change does not touch or rely on is out of scope unless it blocks the target.
-- Before calling a behavior or a deviation wrong, check whether the plan, Session Context, or the code itself (a comment, a test) shows it is intentional. An intentional choice is an issue only if it breaks the target, or a `plan-gap` under the rules below; a decision the user made stands.
-- Read the surrounding code and callers before raising; do not report what is correct or already handled in context.
-
-## Scope of This Review (DO NOT violate)
-- Review against the approved plan. A technology, architecture, library, restructuring, or feature the plan does not have is not a defect of this diff. Propose one only as a `plan-gap` finding, and only when it clearly beats the plan on evidence (it fixes a real problem or gives a concrete, significant gain), never as a preference.
-- You may raise any genuine defect required to make the promised behavior correct and safe, even if the exact edge case was not named, but the fix must not silently create a material new product contract.
-- If the plan itself causes a bug, a performance loss, or a real risk, or an option outside the plan clearly beats it, raise ONE finding with category `plan-gap`: state what the plan says, what goes wrong or what the alternative gains, its cost and breaking scope, and the evidence. Do not present the change as a required fix; the user decides on plan changes.
-- If resolving a defect requires a material choice about user-visible behavior, API/configuration/schema, persistence or migration, compatibility, dependencies, operations, supported use cases/platforms, architecture, or product scope, state the current promise and the required decision instead of assuming a direction.
-- Do NOT flag style/preference unless it causes a real bug or directly violates a stated acceptance criterion or a quoted project rule.
-- If the implementation matches the target and has no bugs, return APPROVE even if it is not "ideal."
-
-## Limits and capacities
-- Report a missing limit (unbounded input, loop, queue, memory, request) only with the concrete resource at risk (memory, CPU, cost, external quota, platform ceiling) and a realistic way it fails. Do not ask for limits on trusted internal paths.
-- A limit that is too tight, or that truncates or drops data silently and so breaks valid work, is a defect. So is a limit applied to the wrong boundary (an internal limit on external input, or the reverse).
-- An external capacity constant (context size, output tokens, body size, batch size, rate limit) without a cited current source is a defect. Do not propose numbers from memory; to call a number wrong, cite the source.
-
-## Output Instructions
-1. You may run commands to verify claims (tests, builds, `curl`, `npm view`, `git fetch`). Do not modify, stage, or commit project files; put any scratch files in a fresh `mktemp -d` directory outside the repository.
-2. Before the verdict, cover every changed file and the callers of changed functions. Report every issue you find now; do not hold any back for later rounds.
-3. Output each finding as ISSUE-{N} using the EXACT format below. Keep ISSUE-{N} IDs stable — do not renumber in later rounds.
-4. End with a VERDICT block. Do not skip it.
-5. Use required output format exactly.
+## Review Focus
+1. **Correctness & vertical operational depth vs. plan/target**: Verify every requirement and lifecycle path (`init`, `update`, `error/cancel/timeout`, `delete`).
+2. **Deviations from plan**: Classify acceptable adaptations vs. unacceptable deviations (`plan-gap` when the plan itself causes a defect or misses a clearly superior evidence-backed option).
+3. **Defects & performance bottlenecks**: Audit across all 6 system taxonomies; run a minimal isolated spike in `mktemp -d` when needed (only for uncovered deltas—never duplicate existing spikes/tests).
+4. **Project rules**: Quote any violated repository instruction rule and its `file:line`.
+5. **Output**: Report all findings as `ISSUE-{N}` (keep IDs stable across rounds) and end with a `### VERDICT` block (`APPROVE` or `REVISE`).
 
 ## Required Output Format
 {OUTPUT_FORMAT}
@@ -72,14 +44,12 @@ You are an advisory reviewer, not the product owner. Apply this authority order:
 ## Branch Review Prompt (Round 1)
 ```
 ## Your Role
-You are acting as a strict code reviewer. Your job is to verify the implementation matches the approved plan / original target and is free of defects. Design and technology were decided in the plan; this review does not reopen them.
-
-You are an advisory reviewer, not the product owner. Apply this authority order: the user's latest explicit decisions, the original request and approved plan/target, verified repository constraints, the implementation, then reviewer preferences. A finding may expose a defect, but it does not authorize changing the user's expected outcome.
+Execute a Round 1 Branch Implementation Review (`review-impl`) under your active system rubric. Verify that the committed branch changes against `{BASE_BRANCH}` match the approved plan / original target with full vertical operational depth, zero defects, and clean merge readiness.
 
 ## How to Inspect Changes
-- Read the branch diff from the repository (git diff {BASE_BRANCH}...HEAD).
-- Read the commit log (git log {BASE_BRANCH}..HEAD).
-- Use plan context if available.
+- Read the branch diff (`git diff {BASE_BRANCH}...HEAD`) and commit log (`git log {BASE_BRANCH}..HEAD`).
+- Check merge readiness (`git merge-tree --write-tree {BASE_BRANCH} HEAD`) and compatibility with changes on `{BASE_BRANCH}` since the branch point.
+- Read surrounding code, callers (`rg -n`), and applicable project rules (`CLAUDE.md`, `AGENTS.md`).
 
 ## Base
 {BASE_BRANCH}
@@ -90,39 +60,12 @@ You are an advisory reviewer, not the product owner. Apply this authority order:
 ## Session Context
 {SESSION_CONTEXT}
 
-## What to Review (in priority order)
-1. **Correctness vs plan/target**: Does the implementation actually do what the plan/target requires? What is missing, what is incomplete.
-2. **Deviations from plan**: Identify every place the implementation diverges from the plan. For each, classify:
-   - **Acceptable** — a reasonable adaptation the plan did not anticipate; note it, do not block.
-   - **Unacceptable** — wrong target, or makes the target impossible/incorrect to achieve; raise as an issue.
-3. **Bugs / defects** of any class in the changed code: logic and boundary cases, error handling, concurrency and ordering, resources, data integrity and persistence, security, runtime errors, and performance regressions that matter to the target.
-4. **Project rules**: the changed code breaks a rule in the repository's instruction files (CLAUDE.md, AGENTS.md, or similar at the root or in a changed file's directory or its parents). Quote the rule and its file.
-5. **Merge readiness**, when the base is a branch this work merges into: the branch still merges cleanly into the current base (`git merge-tree --write-tree {BASE_BRANCH} HEAD`) and works with what the base gained since the branch point; commit messages and any PR description in the request describe what the diff actually does.
-
-## What Counts as an Issue
-- This change causes it: the changed code is wrong, or the change relies on existing code that breaks on the path it now uses. A problem in code the change does not touch or rely on is out of scope unless it blocks the target.
-- Before calling a behavior or a deviation wrong, check whether the plan, Session Context, or the code itself (a comment, a test) shows it is intentional. An intentional choice is an issue only if it breaks the target, or a `plan-gap` under the rules below; a decision the user made stands.
-- Read the surrounding code and callers before raising; do not report what is correct or already handled in context.
-
-## Scope of This Review (DO NOT violate)
-- Review against the approved plan. A technology, architecture, library, restructuring, or feature the plan does not have is not a defect of this diff. Propose one only as a `plan-gap` finding, and only when it clearly beats the plan on evidence (it fixes a real problem or gives a concrete, significant gain), never as a preference.
-- You may raise any genuine defect required to make the promised behavior correct and safe, even if the exact edge case was not named, but the fix must not silently create a material new product contract.
-- If the plan itself causes a bug, a performance loss, or a real risk, or an option outside the plan clearly beats it, raise ONE finding with category `plan-gap`: state what the plan says, what goes wrong or what the alternative gains, its cost and breaking scope, and the evidence. Do not present the change as a required fix; the user decides on plan changes.
-- If resolving a defect requires a material choice about user-visible behavior, API/configuration/schema, persistence or migration, compatibility, dependencies, operations, supported use cases/platforms, architecture, or product scope, state the current promise and the required decision instead of assuming a direction.
-- Do NOT flag style/preference unless it causes a real bug or directly violates a stated acceptance criterion or a quoted project rule.
-- If the implementation matches the target and has no bugs, return APPROVE even if it is not "ideal."
-
-## Limits and capacities
-- Report a missing limit (unbounded input, loop, queue, memory, request) only with the concrete resource at risk (memory, CPU, cost, external quota, platform ceiling) and a realistic way it fails. Do not ask for limits on trusted internal paths.
-- A limit that is too tight, or that truncates or drops data silently and so breaks valid work, is a defect. So is a limit applied to the wrong boundary (an internal limit on external input, or the reverse).
-- An external capacity constant (context size, output tokens, body size, batch size, rate limit) without a cited current source is a defect. Do not propose numbers from memory; to call a number wrong, cite the source.
-
-## Output Instructions
-1. You may run commands to verify claims (tests, builds, `curl`, `npm view`, `git fetch`). Do not modify, stage, or commit project files; put any scratch files in a fresh `mktemp -d` directory outside the repository.
-2. Before the verdict, cover every changed file and the callers of changed functions. Report every issue you find now; do not hold any back for later rounds.
-3. Output each finding as ISSUE-{N} using the EXACT format below. Keep ISSUE-{N} IDs stable — do not renumber in later rounds.
-4. End with a VERDICT block. Do not skip it.
-5. Use required output format exactly.
+## Review Focus
+1. **Correctness & vertical operational depth vs. plan/target**: Verify every requirement and lifecycle path.
+2. **Deviations from plan**: Classify acceptable adaptations vs. unacceptable deviations (`plan-gap` when warranted by concrete evidence).
+3. **Defects & performance bottlenecks**: Audit across all 6 system taxonomies; run a minimal isolated spike in `mktemp -d` only for uncovered deltas.
+4. **Project rules & merge readiness**: Quote any violated repository rule (`file:line`) and verify `git merge-tree --write-tree {BASE_BRANCH} HEAD`.
+5. **Output**: Report all findings as `ISSUE-{N}` (keep IDs stable across rounds) and end with a `### VERDICT` block (`APPROVE` or `REVISE`).
 
 ## Required Output Format
 {OUTPUT_FORMAT}
@@ -141,17 +84,11 @@ You are an advisory reviewer, not the product owner. Apply this authority order:
 {DISPUTED_ITEMS}
 
 ## Instructions
-1. Re-read the current diff — do NOT rely on memory of previous state.
-2. Verify that fixed issues are actually resolved in the updated code. Judge whether the problem is gone, not whether your suggested fix was used; a different fix that solves it is fine.
-3. Do NOT re-open issues marked as fixed unless you find a regression.
-4. Check the target and acceptance criteria (plan or request) still hold.
-5. Focus on remaining open issues, regressions, and any NEW bugs in the updated code.
-6. Stay within the approved plan: raise genuine in-target defects. A problem caused by the plan, or an option outside the plan that clearly beats it on evidence, is one `plan-gap` finding, never a preference. If a fix requires a material new contract or user-owned tradeoff, identify the decision instead of assuming it. Apply the round 1 rules on what counts as an issue and on limits. If the code matches the target and has no bugs, return APPROVE.
-7. Treat explicit user decisions in Session Context or Issues Disputed as authoritative unless they make the target technically impossible; do not repeatedly propose a rejected scope expansion.
-8. Maintain the same ISSUE-{N} numbering. New findings use the next available number.
-9. Keep already-fixed issues closed.
-10. End with a VERDICT block.
-11. VERDICT rules: Return `APPROVE` ONLY if zero issues remain (all fixed or withdrawn). Return `REVISE` if ANY issue is still open or you found new issues. The orchestrator will send another round if you return REVISE.
+1. Re-read the current working-tree diff on disk — do NOT rely on memory of the previous round.
+2. Verify whether each item in `Issues Fixed` is genuinely resolved (judge the outcome, not whether your exact suggested fix was used) and check for fix-induced regressions across callers.
+3. Evaluate `Issues Disputed` against code evidence and authoritative user decisions in `Session Context`.
+4. Keep `ISSUE-{N}` IDs strictly stable; assign `max(existing_IDs) + 1` to any new finding.
+5. End with `### VERDICT`: `APPROVE` only if zero open issues remain; `REVISE` if any issue remains open or a new defect was introduced.
 
 ## Required Output Format
 {OUTPUT_FORMAT}
@@ -161,9 +98,8 @@ You are an advisory reviewer, not the product owner. Apply this authority order:
 
 ```
 ## How to Inspect Changes
-- Re-read the branch diff: git diff {BASE_BRANCH}...HEAD
-- Re-read the commit log: git log {BASE_BRANCH}..HEAD
-- Fixes have been committed to the branch since last round.
+- Re-read the branch diff (`git diff {BASE_BRANCH}...HEAD`) and commit log (`git log {BASE_BRANCH}..HEAD`) on disk.
+- Fixes have been committed to the branch since the previous round.
 
 ## Session Context
 {SESSION_CONTEXT}
@@ -175,17 +111,11 @@ You are an advisory reviewer, not the product owner. Apply this authority order:
 {DISPUTED_ITEMS}
 
 ## Instructions
-1. Re-read the branch diff against {BASE_BRANCH} — do NOT rely on memory of previous state.
-2. Verify that fixed issues are actually resolved in the committed code. Judge whether the problem is gone, not whether your suggested fix was used; a different fix that solves it is fine.
-3. Do NOT re-open issues marked as fixed unless you find a regression.
-4. Check the target and acceptance criteria (plan or request) still hold.
-5. Focus on remaining open issues, regressions, and any NEW bugs in the updated branch.
-6. Stay within the approved plan: raise genuine in-target defects. A problem caused by the plan, or an option outside the plan that clearly beats it on evidence, is one `plan-gap` finding, never a preference. If a fix requires a material new contract or user-owned tradeoff, identify the decision instead of assuming it. Apply the round 1 rules on what counts as an issue and on limits. If the code matches the target and has no bugs, return APPROVE.
-7. Treat explicit user decisions in Session Context or Issues Disputed as authoritative unless they make the target technically impossible; do not repeatedly propose a rejected scope expansion.
-8. Maintain the same ISSUE-{N} numbering. New findings use the next available number.
-9. Keep already-fixed issues closed.
-10. End with a VERDICT block.
-11. VERDICT rules: Return `APPROVE` ONLY if zero issues remain (all fixed or withdrawn). Return `REVISE` if ANY issue is still open or you found new issues. The orchestrator will send another round if you return REVISE.
+1. Re-read the branch diff against `{BASE_BRANCH}` on disk — do NOT rely on memory of the previous round.
+2. Verify whether each item in `Issues Fixed` is genuinely resolved in the committed code and check for fix-induced regressions.
+3. Evaluate `Issues Disputed` against code evidence and authoritative user decisions in `Session Context`.
+4. Keep `ISSUE-{N}` IDs strictly stable; assign `max(existing_IDs) + 1` to any new finding.
+5. End with `### VERDICT`: `APPROVE` only if zero open issues remain; `REVISE` if any issue remains open or a new defect was introduced.
 
 ## Required Output Format
 {OUTPUT_FORMAT}

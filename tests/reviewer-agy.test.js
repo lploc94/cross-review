@@ -105,6 +105,30 @@ test("buildCommand: flag order, sandboxes, resume by conversation id", () => {
     agy.buildCommand({ threadId: "", workingDir: "/w", model: null, effort: "medium", sandbox: "danger-full-access" }).args,
     [...base, "--effort", "medium", "--dangerously-skip-permissions", "--print="],
   );
+
+  // systemPromptFile + skillName adds --agent cross-reviewer-<skill> --disable-slash-commands and provisions global agent without touching workingDir
+  const workDir = fs.mkdtempSync(path.join(tmp, "agy-work-"));
+  const sysFile = path.join(tmp, "review-impl.compiled.md");
+  fs.writeFileSync(sysFile, "# System Role: Test Reviewer\n", "utf8");
+  const withAgent = agy.buildCommand({
+    threadId: "conv-9",
+    workingDir: workDir,
+    model: "gemini-x-flash",
+    effort: "low",
+    sandbox: "danger-full-access",
+    systemPromptFile: sysFile,
+    skillName: "review-impl",
+  });
+  assert.deepEqual(withAgent.args, [
+    ...base,
+    "--agent", "cross-reviewer-review-impl", "--disable-slash-commands",
+    "--model", "gemini-x-flash", "--effort", "low",
+    "--dangerously-skip-permissions", "--conversation", "conv-9", "--print=",
+  ]);
+  const fallbackAgent = path.join(process.env.HOME, ".gemini", "config", "agents", "cross-reviewer-review-impl.md");
+  assert.ok(fs.existsSync(fallbackAgent), "global fallback agent created under $HOME/.gemini/config/agents/");
+  assert.match(fs.readFileSync(fallbackAgent, "utf8"), /name: cross-reviewer-review-impl/);
+  assert.deepEqual(fs.readdirSync(workDir), [], "workingDir is never mutated with .agents/");
 });
 
 test("defaultModel reads the display name from agy's settings", () => {

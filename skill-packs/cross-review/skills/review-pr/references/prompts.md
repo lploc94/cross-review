@@ -1,6 +1,6 @@
 # Prompt Templates
 
-> The runner prepends every rendered template with an **ABSOLUTE USER AUTHORITY** instruction. For review-operation decisions, it overrides this prompt, the shared protocol, skill/loop rules, defaults, and reviewer recommendations.
+> The runner prepends every rendered template with an **ABSOLUTE USER AUTHORITY** instruction and loads the compiled 3-layer `review-pr` system prompt (Layer 1 core reviewer methodology, Layer 2 always-on recon and spike tactics, and Layer 3 `review-pr` rubric).
 
 ## Placeholder Injection Guide
 
@@ -29,7 +29,7 @@
 ## PR Review Prompt (Round 1)
 ```
 ## Your Role
-You are a peer reviewer of a pull request someone else wrote. Another reviewer is reviewing it independently; you will reconcile afterwards. Your findings become review comments to the PR's author, so each must be real, specific, and worth the author's time.
+Execute an independent Round 1 Peer Pull-Request Review (`review-pr`) under your active system rubric. Another reviewer is evaluating this PR independently; your findings will be cross-checked and reconciled on evidence.
 
 ## PR
 - Title: {PR_TITLE}
@@ -46,27 +46,14 @@ You are a peer reviewer of a pull request someone else wrote. Another reviewer i
 {SESSION_CONTEXT}
 
 ## How to Inspect
-- The change: `git diff {BASE_BRANCH}...{HEAD_REF}`; commits: `git log --oneline {BASE_BRANCH}..{HEAD_REF}`, each with `git show <sha>`; a file as of the PR: `git show {HEAD_REF}:<path>`.
-- Merge check: `git merge-tree --write-tree {BASE_BRANCH} {HEAD_REF}` (conflicts), and whether the change still fits what the base gained since the branch point.
-- Run tests or builds only in the worktree named in Session Context, if any.
+- Inspect `git diff {BASE_BRANCH}...{HEAD_REF}`, `git log --oneline {BASE_BRANCH}..{HEAD_REF}`, `git show {HEAD_REF}:<path>`, and `git merge-tree --write-tree {BASE_BRANCH} {HEAD_REF}`.
+- Run tests or builds only in the detached worktree named in `Session Context`, if any; never mutate or check out anything in the user's working tree.
 
-## What to Review (in priority order)
-1. **Delivers what it claims**: the description and linked issues against the diff. Missing or incomplete parts, and claims the code does not back.
-2. **Defects** of any class in the changed code: logic and boundary cases, error handling, concurrency and ordering, resources, data integrity and persistence, security, runtime errors, regressions in behavior callers rely on, and performance regressions that matter.
-3. **Project rules**: the change breaks a rule in the repository's instruction files (CLAUDE.md, AGENTS.md, CONTRIBUTING, or similar at the root or in a changed file's directory or its parents). Quote the rule and its file.
-4. **Merge**: conflicts with the base, or a break against what the base changed since.
-
-## What Counts as an Issue
-- This PR causes it: the changed code is wrong, or the change relies on existing code that breaks on the path it now uses. A problem in code the PR does not touch or rely on is out of scope.
-- Before calling something wrong, check whether the description, the review discussion in Session Context, or the code itself (a comment, a test) shows it is intentional. An intentional choice is an issue only if it breaks what the PR claims or a project rule.
-- Read the surrounding code and callers before raising; do not report what is correct or handled in context.
-- Do not flag style or preference unless it breaks a quoted project rule. Report a missing limit only with the concrete resource at risk and a realistic way it fails.
-- `Blocking: yes` only for what should stop the merge: a defect users or callers will hit, a security problem, data loss, a conflict, a broken project rule the project enforces, or a claim the PR does not deliver.
-
-## Output Instructions
-1. You may run commands to verify claims (tests, builds, `curl`, `npm view`, `git fetch`). Do not modify, stage, commit, or check out anything in the project; put scratch files in a fresh `mktemp -d` directory outside the repository.
-2. Cover every changed file and the callers of changed functions before the verdict. Report every issue now.
-3. Use the EXACT output format below. Keep ISSUE-{N} IDs stable in later rounds.
+## Review Focus
+1. **Delivers what it claims**: Compare PR description and linked issues against the actual diff.
+2. **Defects & performance**: Audit changed code and callers across all 6 system taxonomies.
+3. **Project rules & merge readiness**: Quote any violated repository instruction rule (`file:line`) and check merge cleanliness against `{BASE_BRANCH}`.
+4. **Blocking discipline**: Set `Blocking: yes` only for defects that must stop the merge; output each finding as `ISSUE-{N}` and end with `### VERDICT`.
 
 ## Required Output Format
 {OUTPUT_FORMAT}
@@ -128,10 +115,9 @@ You are reviewing a pull request someone else wrote, independently. Another revi
 {CONTINUE_OR_CONSENSUS_OR_STALEMATE}
 
 ## Instructions
-1. Check each disagreement and new finding in the code (`git diff {BASE_BRANCH}...{HEAD_REF}`, `git show {HEAD_REF}:<path>`), not from memory. Apply the round 1 rules on what counts as an issue and on blocking.
+1. Verify each disagreement and new finding directly in the code (`git diff {BASE_BRANCH}...{HEAD_REF}`, `git show {HEAD_REF}:<path>`), not from memory.
 2. Do not agree automatically. Keep your position when the other side brought no new evidence, and say why; change it only for evidence you had not weighed, and name it.
-3. Return the full current list of findings you stand behind as ISSUE blocks: yours with their IDs, and the other side's findings you now accept under the next free numbers. For each finding you withdraw or reject, add one line under `### Withdrawn or Rejected` with the reason.
-4. End with VERDICT: `CONSENSUS` only if all disagreements are resolved, `CONTINUE` if a point is still disputed, `STALEMATE` only if you have no new evidence to add. The orchestrator sends another round if you return CONTINUE.
+3. Return the full current list of findings you stand behind as `ISSUE-{N}` blocks (keeping your existing IDs and assigning the next free numbers to accepted peer findings), list withdrawn/rejected items under `### Withdrawn or Rejected`, and end with `### VERDICT` (`CONSENSUS`, `CONTINUE`, or `STALEMATE`).
 
 ## Required Output Format
 {OUTPUT_FORMAT}

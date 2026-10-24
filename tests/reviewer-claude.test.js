@@ -43,6 +43,22 @@ test("buildCommand: new and resumed turns, both sandboxes, with and without a mo
   const ro = claude.buildCommand({ threadId: "sid-9", workingDir: "/w", model: undefined, effort: "high", sandbox: "read-only" }).args;
   assert.ok(!ro.includes("--model") && !ro.includes("--dangerously-skip-permissions"));
   assert.deepEqual(ro.slice(-4), ["--permission-mode", "plan", "--resume", "sid-9"]);
+
+  // systemPromptFile override adds --system-prompt-file and --disable-slash-commands right after ReportFindings
+  const withSys = claude.buildCommand({
+    threadId: "sid-9",
+    workingDir: "/w",
+    model: "sonnet",
+    effort: "high",
+    sandbox: "danger-full-access",
+    systemPromptFile: "/prompts/review-impl.compiled.md",
+  }).args;
+  assert.deepEqual(withSys, [
+    "-p", "--output-format", "stream-json", "--verbose", "--effort", "high",
+    "--disallowedTools", "ReportFindings",
+    "--system-prompt-file", "/prompts/review-impl.compiled.md", "--disable-slash-commands",
+    "--model", "sonnet", "--dangerously-skip-permissions", "--resume", "sid-9",
+  ]);
 });
 
 test("parseEvents: a completed turn gives the session id, the review and its activities", () => {

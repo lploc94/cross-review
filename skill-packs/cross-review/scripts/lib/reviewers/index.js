@@ -1,6 +1,6 @@
 // Reviewer registry. A reviewer module exports: name, label, installHint, sandboxes,
-// defaultSandbox, fullAccessSandbox, isAvailable(), buildCommand(), parseEvents(),
-// activityItems() and newLogState()/foldLog()/logItems()/logOutcome() (the dashboard's
+// defaultSandbox, fullAccessSandbox, isAvailable(), buildCommand({ threadId, workingDir, model, effort, sandbox, systemPromptFile, skillName }),
+// parseEvents(), activityItems() and newLogState()/foldLog()/logItems()/logOutcome() (the dashboard's
 // activity feed, read incrementally), matchesCmdline(). See codex.js.
 // Optional: encodePrompt(text) (what goes on stdin when the CLI does not read plain text),
 // efforts (the fixed effort levels, or null when they depend on the model) and

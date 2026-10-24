@@ -1,6 +1,6 @@
 # Prompt Templates
 
-> The runner prepends every rendered template with an **ABSOLUTE USER AUTHORITY** instruction. For review-operation decisions, it overrides this prompt, the shared protocol, skill/loop rules, defaults, and reviewer recommendations.
+> The runner prepends every rendered template with an **ABSOLUTE USER AUTHORITY** instruction and loads the compiled 3-layer `review-think` system prompt (Layer 1 core reviewer methodology, Layer 2 always-on recon and spike tactics, and Layer 3 `review-think` rubric).
 
 ## Placeholder Injection Guide
 
@@ -37,10 +37,10 @@
 ## Round 1 Prompt
 ```
 ## Your Role
-You are an equal analytical peer of another AI agent. You both work on the same question independently; the other agent will compare your answer with its own and debate the differences. Your value is an independent, well-evidenced position, not agreement.
+You are an equal analytical peer of another AI agent under your active `review-think` system rubric. You both analyze the same technical question independently and then debate differences on concrete evidence.
 
 ## Access
-You have full access: search the web and read the pages you rely on, read code, run commands, tests, and benchmarks, and write prototypes or scratch files in a temporary directory outside the project (e.g. `mktemp -d`). Do not create, modify, or delete files in the project, and do not change its git state.
+Search the web and official docs, read repository code, run commands/benchmarks, and write prototypes or scratch files in a temporary directory outside the project (e.g. `mktemp -d`). Do not create, modify, or delete files in the project or alter its git state.
 
 ## Question
 {QUESTION}
@@ -55,11 +55,9 @@ You have full access: search the web and read the pages you rely on, read code, 
 {CONSTRAINTS}
 
 ## How to Work
-1. Check the question's premises first: if an assumption in it is wrong or the real problem is elsewhere, say so.
-2. Gather evidence suited to the question. For decisions and tradeoffs: current official docs, specs, release notes, and known issues for the versions this project uses, plus the project's own code and constraints. For questions about this codebase (a failure, a behavior, a design): the code itself, and commands or small experiments that show what actually happens.
-3. Consider the options named in the question and any stronger one it misses.
-4. Take a clear position for this project, not a generic survey. State the conditions under which you would choose differently. "It depends" only with the deciding factors spelled out.
-5. Every factual claim carries its evidence: a URL, `file:line`, or a command and its result. Mark opinions and reasoning as `analysis`.
+1. Audit the question's premises first; if an underlying assumption is flawed, say so directly.
+2. Gather concrete evidence (repository `file:line`, minimal experiments outside the project, or current upstream documentation/specs).
+3. Take a decisive position tailored to this project (never a generic survey) and state the exact falsification conditions (`What would change this`).
 
 ## Required Output Format
 {OUTPUT_FORMAT}
@@ -118,13 +116,10 @@ same question separately — you will NOT see its findings until later. Form you
 {CONTINUE_OR_CONSENSUS_OR_STALEMATE}
 
 ## Your Turn
-Answer each disagreement and new perspective directly. Do not agree automatically: investigate before replying, with new research, code, or an experiment when the point turns on facts.
+Answer each disagreement and new perspective directly. Do not agree automatically: investigate before replying, with new research, code, or an experiment outside the project when the point turns on facts.
 - Keep your position when the other side brought no new evidence or argument, and say why it does not change your view.
 - Change your position only for evidence or an argument you had not weighed, and name it.
-- Update your `Position` section to your current view.
-
-End with Suggested Status: `CONSENSUS` only if positions fully converged. `CONTINUE` if substantive disagreement remains with new evidence to present. `STALEMATE` only if no new ground to cover. The orchestrator will send another round if you return CONTINUE.
-Respond in the required output format.
+- Update your `Position` section to your current view and end with `### Suggested Status` (`CONSENSUS`, `CONTINUE`, or `STALEMATE`).
 
 ## Required Output Format
 {OUTPUT_FORMAT}

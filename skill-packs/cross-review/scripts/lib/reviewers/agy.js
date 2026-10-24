@@ -141,9 +141,53 @@ export function checkSelection({ model, effort }, catalog = readCatalog(), defau
   return { ok: true };
 }
 
+export function agentNameForSkill(skillName) {
+  return skillName ? `cross-reviewer-${skillName}` : "";
+}
+
+/**
+ * Ensure the global Antigravity reviewer agent exists under $HOME/.gemini/config without touching workingDir.
+ * If the installer already placed the agent in ~/.gemini/config/plugins/cross-review/agents/<name>.md, use it;
+ * otherwise provision ~/.gemini/config/agents/<name>.md from systemPromptFile.
+ */
+export function ensureAgyAgent(skillName, systemPromptFile) {
+  const agentName = agentNameForSkill(skillName);
+  if (!agentName || !systemPromptFile) return "";
+  const home = os.homedir();
+  const pluginAgentPath = path.join(home, ".gemini", "config", "plugins", "cross-review", "agents", `${agentName}.md`);
+  if (fs.existsSync(pluginAgentPath)) return agentName;
+  const fallbackDir = path.join(home, ".gemini", "config", "agents");
+  const fallbackAgentPath = path.join(fallbackDir, `${agentName}.md`);
+  if (fs.existsSync(systemPromptFile)) {
+    try {
+      const body = fs.readFileSync(systemPromptFile, "utf8").trim();
+      const content = [
+        "---",
+        `name: ${agentName}`,
+        `description: Autonomous Principal Technical Reviewer for ${skillName} (cross-review)`,
+        "---",
+        "",
+        body,
+        "",
+      ].join("\n");
+      fs.mkdirSync(fallbackDir, { recursive: true });
+      fs.writeFileSync(fallbackAgentPath, content, "utf8");
+    } catch {
+      // Best-effort fallback provisioning
+    }
+  }
+  return agentName;
+}
+
 /** Command for one turn: threadId empty → new conversation; otherwise resume it. */
-export function buildCommand({ threadId, workingDir, model, effort, sandbox }) {
+export function buildCommand({ threadId, workingDir, model, effort, sandbox, systemPromptFile, skillName }) {
   const args = ["--input-format", "stream-json", "--output-format", "stream-json"];
+  if (systemPromptFile && skillName) {
+    const agentName = ensureAgyAgent(skillName, systemPromptFile);
+    if (agentName) {
+      args.push("--agent", agentName, "--disable-slash-commands");
+    }
+  }
   args.push(...resolveFlags({ model, effort, catalog: readCatalog(), defaultName: defaultModel() }));
   args.push(...(sandbox === fullAccessSandbox ? ["--dangerously-skip-permissions"] : ["--sandbox", "--mode", "plan"]));
   if (threadId) args.push("--conversation", threadId);

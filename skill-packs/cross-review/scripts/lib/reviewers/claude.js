@@ -42,8 +42,11 @@ export function checkSelection({ effort }) {
  * is left out: it hands a review to the host UI, so its findings and verdict never reach the event
  * log, and a reviewer that used it left a turn with no verdict.
  */
-export function buildCommand({ threadId, workingDir, model, effort, sandbox }) {
+export function buildCommand({ threadId, workingDir, model, effort, sandbox, systemPromptFile }) {
   const args = ["-p", "--output-format", "stream-json", "--verbose", "--effort", effort, "--disallowedTools", "ReportFindings"];
+  if (systemPromptFile) {
+    args.push("--system-prompt-file", systemPromptFile, "--disable-slash-commands");
+  }
   if (model !== undefined && model !== null) args.push("--model", model);
   args.push(...(sandbox === fullAccessSandbox ? ["--dangerously-skip-permissions"] : ["--permission-mode", "plan"]));
   if (threadId) args.push("--resume", threadId);
