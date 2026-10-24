@@ -8,7 +8,8 @@
   },
   "targets": {
     "claude": "~/.claude/skills",
-    "codex": "~/.agents/skills"
+    "codex": "~/.agents/skills",
+    "agy": "~/.gemini/config/plugins/cross-review"
   },
   "skills": [
     "review-plan",

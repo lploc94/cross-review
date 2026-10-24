@@ -14,6 +14,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderSkillTemplate } from './lib/render-skill.js';
 import { commandAvailable, resolveSpawn } from '../skill-packs/cross-review/scripts/lib/command.js';
+import { compilePrompts } from '../skill-packs/cross-review/scripts/build-prompts.js';
 
 // `npx @tlelabs/cross-review dashboard`: run the dashboard from the package itself; no install step runs
 if (process.argv[2] === 'dashboard') {
@@ -38,6 +39,9 @@ const claudeSkillsRoot = path.join(home, '.claude', 'skills');
 const agentsSkillsRoot = path.join(home, '.agents', 'skills');
 const codexHome = process.env.CODEX_HOME || path.join(home, '.codex');
 const legacyCodexSkillsRoot = path.join(codexHome, 'skills');
+// Antigravity (agy) reads plugins (skills + agents) from ~/.gemini/config/plugins/<plugin>
+const agyConfigDir = path.join(home, '.gemini', 'config');
+const agyPluginsRoot = path.join(agyConfigDir, 'plugins');
 
 const runtimeDir = path.join(claudeSkillsRoot, PACK);
 const runnerPath = path.join(runtimeDir, 'scripts', 'review-runner.js');
@@ -320,27 +324,33 @@ const uid = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const targets = [
   { root: claudeSkillsRoot, dirs: [PACK, ...SKILLS] },
   { root: agentsSkillsRoot, dirs: [...SKILLS] },
+  { root: agyPluginsRoot, dirs: [PACK] },
 ];
 for (const t of targets) t.staging = path.join(t.root, `.${PACK}-staging-${uid}`);
-const [claudeTarget, agentsTarget] = targets;
+const [claudeTarget, agentsTarget, agyTarget] = targets;
 
 try {
   for (const t of targets) fs.mkdirSync(t.staging, { recursive: true });
 
-  // 1. Shared runtime: runner, its modules, MCP server, and the MCP SDK from the lock file
+  // 1. Shared runtime: runner, its modules, MCP server, prompts, and the MCP SDK from the lock file
   const stagedRuntime = path.join(claudeTarget.staging, PACK);
   const stagedScripts = path.join(stagedRuntime, 'scripts');
   fs.mkdirSync(stagedScripts, { recursive: true });
-  for (const file of ['review-runner.js', 'mcp-server.js']) {
+  for (const file of ['review-runner.js', 'mcp-server.js', 'build-prompts.js']) {
     fs.copyFileSync(path.join(skillPackDir, 'scripts', file), path.join(stagedScripts, file));
   }
   copyDirSync(path.join(skillPackDir, 'scripts', 'lib'), path.join(stagedScripts, 'lib'));
+  copyDirSync(path.join(skillPackDir, 'prompts'), path.join(stagedRuntime, 'prompts'));
+  // Compile the 3-layer reviewer prompts inside stagedRuntime
+  compilePrompts({ promptsDir: path.join(stagedRuntime, 'prompts'), quiet: true });
   // manifest.json gives the dashboard its pack version
   for (const file of ['package.json', 'package-lock.json', 'manifest.json']) {
     fs.copyFileSync(path.join(skillPackDir, file), path.join(stagedRuntime, file));
   }
   if (!IS_WIN) {
-    fs.chmodSync(path.join(stagedScripts, 'review-runner.js'), 0o755);
+    for (const file of ['review-runner.js', 'build-prompts.js']) {
+      fs.chmodSync(path.join(stagedScripts, file), 0o755);
+    }
   }
 
   console.log('Installing MCP server dependencies ...');
@@ -351,16 +361,32 @@ try {
     console.warn(`   ${npmCi.output.split('\n').slice(-3).join('\n   ')}`);
   }
 
-  // 2. Skills for both clients. Codex copies use the shared runtime under ~/.claude/skills.
+  // 2. Skills for Claude Code, Codex, and Antigravity (agy). All clients use the shared runtime under ~/.claude/skills.
   const renderOpts = {
     runnerPath: escapeForDoubleQuotedShell(runnerPath),
     skillsDir: escapeForDoubleQuotedShell(claudeSkillsRoot),
   };
+  const stagedAgyPlugin = path.join(agyTarget.staging, PACK);
+  fs.mkdirSync(stagedAgyPlugin, { recursive: true });
+  const manifestObj = JSON.parse(fs.readFileSync(path.join(skillPackDir, 'manifest.json'), 'utf8'));
+  fs.writeFileSync(
+    path.join(stagedAgyPlugin, 'plugin.json'),
+    JSON.stringify({
+      name: PACK,
+      version: manifestObj.version,
+      description: 'Autonomous multi-round review & loop skills for Antigravity, Claude Code, and Codex',
+    }, null, 2) + '\n',
+    'utf8'
+  );
   for (const skill of SKILLS) {
     const skillSrcDir = path.join(skillPackDir, 'skills', skill);
     const isRunnerSkill = RUNNER_SKILLS.includes(skill);
-    for (const [target, client] of [[claudeTarget, 'claude'], [agentsTarget, 'codex']]) {
-      const skillDestDir = path.join(target.staging, skill);
+    for (const [destBase, client] of [
+      [claudeTarget.staging, 'claude'],
+      [agentsTarget.staging, 'codex'],
+      [path.join(stagedAgyPlugin, 'skills'), 'agy'],
+    ]) {
+      const skillDestDir = path.join(destBase, skill);
       fs.mkdirSync(skillDestDir, { recursive: true });
       const rendered = renderSkillTemplate(skillPackDir, skill, isRunnerSkill ? renderOpts : { ...renderOpts, client });
       fs.writeFileSync(path.join(skillDestDir, 'SKILL.md'), rendered, 'utf8');
@@ -374,6 +400,22 @@ try {
     // Codex UI metadata
     const agentsMeta = path.join(skillSrcDir, 'agents');
     if (fs.existsSync(agentsMeta)) copyDirSync(agentsMeta, path.join(agentsTarget.staging, skill, 'agents'));
+  }
+  const stagedAgyAgents = path.join(stagedAgyPlugin, 'agents');
+  fs.mkdirSync(stagedAgyAgents, { recursive: true });
+  for (const skill of RUNNER_SKILLS) {
+    const agentName = `cross-reviewer-${skill}`;
+    const body = fs.readFileSync(path.join(stagedRuntime, 'prompts', 'compiled', `${skill}.compiled.md`), 'utf8').trim();
+    const agentMd = [
+      '---',
+      `name: ${agentName}`,
+      `description: Autonomous Principal Technical Reviewer for ${skill} (cross-review)`,
+      '---',
+      '',
+      body,
+      '',
+    ].join('\n');
+    fs.writeFileSync(path.join(stagedAgyAgents, `${agentName}.md`), agentMd, 'utf8');
   }
 
   // 3. Verify runner works
@@ -461,14 +503,30 @@ try {
     try { fs.rmSync(t.staging, { recursive: true, force: true }); } catch { /* already gone */ }
   }
 
-  // 5. Register the MCP server with both clients (idempotent: remove then add for Claude; Codex overwrites).
+  // Enable the cross-review plugin in Antigravity's ~/.gemini/config/config.json while preserving existing plugins/keys
+  try {
+    const agyConfigPath = path.join(agyConfigDir, 'config.json');
+    let agyCfg = {};
+    if (fs.existsSync(agyConfigPath)) {
+      try { agyCfg = JSON.parse(fs.readFileSync(agyConfigPath, 'utf8')); } catch { agyCfg = {}; }
+    }
+    if (!agyCfg.plugins || typeof agyCfg.plugins !== 'object') agyCfg.plugins = {};
+    agyCfg.plugins[PACK] = { ...(agyCfg.plugins[PACK] || {}), enabled: true };
+    fs.mkdirSync(agyConfigDir, { recursive: true });
+    fs.writeFileSync(agyConfigPath, JSON.stringify(agyCfg, null, 2) + '\n', 'utf8');
+  } catch (e) {
+    console.warn(`Warning: could not update Antigravity plugin config: ${e.message}`);
+  }
+
+  // 5. Register the MCP server with clients (idempotent: remove then add for Claude; Codex & Antigravity overwrite).
   // The earlier pack's registration goes with its runtime, even when the new server cannot be registered.
   // `codex mcp remove` also drops the server's tool approval tables.
   if (commandExists('claude') && claudeHasLegacyServer()) run('claude', ['mcp', 'remove', '-s', 'user', LEGACY_MCP_NAME]);
   if (commandExists('codex') && codexHasLegacyServer()) run('codex', ['mcp', 'remove', LEGACY_MCP_NAME]);
   const registered = [];
   if (mcpReady) {
-    const serverCmd = ['--', stableNodePath(), mcpServerPath];
+    const nodeBin = stableNodePath();
+    const serverCmd = ['--', nodeBin, mcpServerPath];
     if (commandExists('claude')) {
       run('claude', ['mcp', 'remove', '-s', 'user', MCP_NAME]);
       const r = run('claude', ['mcp', 'add', '-s', 'user', MCP_NAME, '-e', `REVIEW_WAIT_DEFAULT_S=${WAIT_DEFAULT_S}`, ...serverCmd]);
@@ -485,6 +543,25 @@ try {
         console.warn(`Warning: could not register the MCP server with Codex: ${r.output}`);
       }
     }
+    try {
+      const agyMcpPath = path.join(agyConfigDir, 'mcp_config.json');
+      let agyMcp = {};
+      if (fs.existsSync(agyMcpPath)) {
+        try { agyMcp = JSON.parse(fs.readFileSync(agyMcpPath, 'utf8')); } catch { agyMcp = {}; }
+      }
+      if (!agyMcp.mcpServers || typeof agyMcp.mcpServers !== 'object') agyMcp.mcpServers = {};
+      agyMcp.mcpServers[MCP_NAME] = {
+        command: nodeBin,
+        args: [mcpServerPath],
+        disabled: false,
+        env: { REVIEW_WAIT_DEFAULT_S: String(WAIT_DEFAULT_S) },
+      };
+      fs.mkdirSync(agyConfigDir, { recursive: true });
+      fs.writeFileSync(agyMcpPath, JSON.stringify(agyMcp, null, 2) + '\n', 'utf8');
+      if (commandExists('agy')) registered.push('Antigravity');
+    } catch (e) {
+      console.warn(`Warning: could not register the MCP server with Antigravity: ${e.message}`);
+    }
   }
 
   // 6. The cross-review command (Windows: .cmd, .ps1 and sh in npm's global folder)
@@ -496,11 +573,12 @@ try {
   console.log(`  Runtime:       ${runtimeDir}`);
   console.log(`  Claude Code:   ${claudeSkillsRoot}`);
   console.log(`  Codex:         ${agentsSkillsRoot}`);
+  console.log(`  Antigravity:   ${path.join(agyPluginsRoot, PACK)}`);
   console.log(`  MCP server:    ${registered.length ? `registered with ${registered.join(' and ')}` : 'not registered (runner CLI fallback)'}`);
   console.log(`  Command:       ${command.written ? `${command.path} (cross-review dashboard)` : 'npx @tlelabs/cross-review dashboard'}`);
   for (const note of command.notes) console.warn(`  Note: ${note}`);
   console.log('');
-  console.log('Skills (Claude Code: /name, Codex: $name):');
+  console.log('Skills (Claude Code & Antigravity: /name, Codex: $name):');
   console.log('  loop-plan             — write a phased, code-grounded implementation plan');
   console.log('  loop-implement        — execute an approved loop plan phase by phase');
   console.log('  review-plan           — debate plans before implementation');
@@ -508,41 +586,38 @@ try {
   console.log('  review-think          — peer reasoning/debate');
   console.log('  review-pr             — review PRs (branch diff + description)');
 
-  // Review guidance in ~/.claude/CLAUDE.md. --auto adds it; a block already there is refreshed on every
-  // install, so one written by the earlier pack stops recommending its removed skills.
-  try {
-    const claudeDir = path.join(home, '.claude');
-    const claudeMdPath = path.join(claudeDir, 'CLAUDE.md');
-    const START_MARKER = `<!-- ${PACK}-start -->`;
-    const END_MARKER = `<!-- ${PACK}-end -->`;
-    // Blocks written by the earlier pack are replaced in place
-    const MARKERS = [[START_MARKER, END_MARKER], ['<!-- codex-auto-review-start -->', '<!-- codex-auto-review-end -->']];
+  // Review guidance in ~/.claude/CLAUDE.md and ~/.gemini/GEMINI.md. --auto adds it; a block already there
+  // is refreshed on every install, so one written by the earlier pack stops recommending its removed skills.
+  const START_MARKER = `<!-- ${PACK}-start -->`;
+  const END_MARKER = `<!-- ${PACK}-end -->`;
+  const MARKERS = [[START_MARKER, END_MARKER], ['<!-- codex-auto-review-start -->', '<!-- codex-auto-review-end -->']];
 
-    const guidanceBlock = [
-      START_MARKER,
-      '',
-      '## Cross Review — automatic reviews',
-      '',
-      'Run these review skills yourself; do not ask first. They apply to every plan and implementation, not only those of the loop-plan and loop-implement skills:',
-      '- After you finish writing a plan (a plan file, plan mode, or a design doc you were asked to write): use the `review-plan` skill on it before presenting it as final or starting to code.',
-      '- After you finish implementing a change and its tests pass, before you report it done or commit: use the `review-impl` skill on the uncommitted changes (or the branch diff).',
-      '',
-      'Skip the review when:',
-      '- the change is trivial: docs or comments only, or a one-line fix with no behaviour risk;',
-      '- a skill already ran it: the loop-plan skill gets its plan approved through review-plan, and the loop-implement skill runs review-impl at its checkpoints;',
-      '- the user said to skip it this time.',
-      '',
-      END_MARKER,
-    ].join('\n');
+  const guidanceBlock = [
+    START_MARKER,
+    '',
+    '## Cross Review — automatic reviews',
+    '',
+    'Run these review skills yourself; do not ask first. They apply to every plan and implementation, not only those of the loop-plan and loop-implement skills:',
+    '- After you finish writing a plan (a plan file, plan mode, or a design doc you were asked to write): use the `review-plan` skill on it before presenting it as final or starting to code.',
+    '- After you finish implementing a change and its tests pass, before you report it done or commit: use the `review-impl` skill on the uncommitted changes (or the branch diff).',
+    '',
+    'Skip the review when:',
+    '- the change is trivial: docs or comments only, or a one-line fix with no behaviour risk;',
+    '- a skill already ran it: the loop-plan skill gets its plan approved through review-plan, and the loop-implement skill runs review-impl at its checkpoints;',
+    '- the user said to skip it this time.',
+    '',
+    END_MARKER,
+  ].join('\n');
 
+  function syncGuidanceFile(mdPath, displayLabel) {
     let existing = '';
     try {
-      existing = fs.readFileSync(claudeMdPath, 'utf8');
+      existing = fs.readFileSync(mdPath, 'utf8');
     } catch (readErr) {
       if (readErr?.code === 'ENOENT') {
         existing = '';
       } else {
-        throw readErr; // Permission error, etc. — let outer catch handle
+        throw readErr;
       }
     }
 
@@ -551,34 +626,42 @@ try {
 
     let updated;
     if (block) {
-      // Replace existing block (idempotent)
       updated = existing.slice(0, block.startIdx) + guidanceBlock + existing.slice(block.endIdx + block.end.length);
     } else if (!autoMode) {
       updated = null;
     } else if (found.some(m => m.startIdx !== -1 || m.endIdx !== -1)) {
-      // Partial/corrupt markers — warn and skip to avoid data corruption
-      throw new Error('Found partial review-guidance markers in ~/.claude/CLAUDE.md — remove them manually and re-run');
+      throw new Error(`Found partial review-guidance markers in ${displayLabel} — remove them manually and re-run`);
     } else {
-      // Append to end
       const separator = existing.length > 0 && !existing.endsWith('\n') ? '\n\n' : existing.length > 0 ? '\n' : '';
       updated = existing + separator + guidanceBlock + '\n';
     }
 
-    if (updated === null) {
-      console.log('');
-      console.log('Optional: npx @tlelabs/cross-review --auto');
-      console.log('  Has Claude Code use the review-plan and review-impl skills automatically (block in ~/.claude/CLAUDE.md)');
-    } else {
-      fs.mkdirSync(claudeDir, { recursive: true });
-      fs.writeFileSync(claudeMdPath, updated, 'utf8');
-      console.log('');
-      console.log(`Automatic review block ${block ? 'updated' : 'added'} in ~/.claude/CLAUDE.md`);
+    if (updated === null) return false;
+    fs.mkdirSync(path.dirname(mdPath), { recursive: true });
+    fs.writeFileSync(mdPath, updated, 'utf8');
+    console.log('');
+    console.log(`Automatic review block ${block ? 'updated' : 'added'} in ${displayLabel}`);
+    return true;
+  }
+
+  let wroteAnyGuidance = false;
+  for (const [mdPath, displayLabel] of [
+    [path.join(home, '.claude', 'CLAUDE.md'), '~/.claude/CLAUDE.md'],
+    [path.join(home, '.gemini', 'GEMINI.md'), '~/.gemini/GEMINI.md'],
+  ]) {
+    try {
+      if (syncGuidanceFile(mdPath, displayLabel)) wroteAnyGuidance = true;
+    } catch (err) {
+      console.warn('');
+      console.warn(`Warning: could not write the automatic review block into ${displayLabel}`);
+      console.warn(`  Reason: ${err.message}`);
+      console.warn('  Skills were installed successfully — only the automatic review block failed.');
     }
-  } catch (err) {
-    console.warn('');
-    console.warn(`Warning: could not write the automatic review block into ~/.claude/CLAUDE.md`);
-    console.warn(`  Reason: ${err.message}`);
-    console.warn('  Skills were installed successfully — only the automatic review block failed.');
+  }
+  if (!wroteAnyGuidance && !autoMode) {
+    console.log('');
+    console.log('Optional: npx @tlelabs/cross-review --auto');
+    console.log('  Has Claude Code and Antigravity use the review-plan and review-impl skills automatically (block in ~/.claude/CLAUDE.md and ~/.gemini/GEMINI.md)');
   }
 } catch (err) {
   // Cleanup staging on any error

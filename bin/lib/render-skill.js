@@ -12,10 +12,11 @@ export const PROTOCOL_VARIANTS = {
   'review-think': 'cross-analysis',
 };
 
-// Values for {{CLIENT_*}} placeholders in skills installed for both Claude Code and Codex
+// Values for {{CLIENT_*}} placeholders in skills installed for Claude Code, Codex, and Antigravity
 export const CLIENTS = {
   claude: { CLIENT_SKILL: '/', CLIENT_INSTRUCTIONS: '`CLAUDE.md`/`AGENTS.md`' },
   codex: { CLIENT_SKILL: '$', CLIENT_INSTRUCTIONS: '`AGENTS.md`' },
+  agy: { CLIENT_SKILL: '/', CLIENT_INSTRUCTIONS: '`GEMINI.md`/`AGENTS.md`' },
 };
 
 function readProtocol(skillPackDir, name) {

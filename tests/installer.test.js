@@ -76,6 +76,14 @@ test("upgrading from the codex-review pack removes its skills, runtime, MCP serv
     // Guidance block written by the old --auto, inside user content
     write(path.join(home, ".claude", "CLAUDE.md"),
       "# Mine\n\n<!-- codex-auto-review-start -->\nold guidance\n<!-- codex-auto-review-end -->\n\nkeep me\n");
+    write(path.join(home, ".gemini", "GEMINI.md"),
+      "# Gemini Mine\n\n<!-- codex-auto-review-start -->\nold agy guidance\n<!-- codex-auto-review-end -->\n\nkeep agy\n");
+    write(path.join(home, ".gemini", "config", "config.json"), JSON.stringify({
+      plugins: { "other-plugin": { enabled: false } },
+    }));
+    write(path.join(home, ".gemini", "config", "mcp_config.json"), JSON.stringify({
+      mcpServers: { "other-mcp": { command: "node", args: [], disabled: false } },
+    }));
 
     // The cross-review command an earlier install wrote, pointing at a runner that moved
     if (IS_WIN) write(path.join(env.npm_config_prefix, "cross-review.cmd"), `@ECHO off\r\nREM ${MARKER}\r\n"node" "C:\\old\\place\\review-runner.js" %*\r\n`);
@@ -102,6 +110,16 @@ test("upgrading from the codex-review pack removes its skills, runtime, MCP serv
     assert.ok(md.startsWith("# Mine\n") && md.includes("keep me"), "user content kept");
     execFileSync(process.execPath, [INSTALLER, "--auto"], { env, stdio: "pipe" });
     assert.equal(fs.readFileSync(path.join(home, ".claude", "CLAUDE.md"), "utf8"), md, "--auto leaves a current block as it is");
+    const agyMd = fs.readFileSync(path.join(home, ".gemini", "GEMINI.md"), "utf8");
+    assert.ok(!agyMd.includes("codex-auto-review") && !agyMd.includes("old agy guidance"), "old agy guidance block replaced");
+    assert.equal(agyMd.split("<!-- cross-review-start -->").length, 2, "one new agy guidance block");
+    assert.ok(agyMd.startsWith("# Gemini Mine\n") && agyMd.includes("keep agy"), "agy user content kept");
+    const agyCfg = JSON.parse(fs.readFileSync(path.join(home, ".gemini", "config", "config.json"), "utf8"));
+    assert.deepEqual(agyCfg.plugins["other-plugin"], { enabled: false }, "foreign Antigravity plugin preserved");
+    assert.deepEqual(agyCfg.plugins["cross-review"], { enabled: true }, "cross-review Antigravity plugin enabled");
+    const agyMcp = JSON.parse(fs.readFileSync(path.join(home, ".gemini", "config", "mcp_config.json"), "utf8"));
+    assert.ok(agyMcp.mcpServers["other-mcp"], "foreign Antigravity MCP server preserved");
+    assert.ok(agyMcp.mcpServers["cross-review"], "cross-review Antigravity MCP server registered");
 
     for (const dir of [
       path.join(claude, "codex-review"), path.join(claude, "codex-plan-review"), path.join(claude, "codex-security-review"),
@@ -150,6 +168,8 @@ test("a failed npm ci still removes the old MCP registrations and adds no guidan
     assert.ok(!servers["codex-review"], "old Claude MCP registration removed");
     assert.ok(!fs.readFileSync(path.join(home, ".codex", "config.toml"), "utf8").includes("codex-review"), "old Codex MCP registration and approvals removed");
     assert.ok(!fs.existsSync(path.join(home, ".claude", "CLAUDE.md")), "no guidance without --auto");
+    assert.ok(!fs.existsSync(path.join(home, ".gemini", "GEMINI.md")), "no agy guidance without --auto");
+    assert.ok(!fs.existsSync(path.join(home, ".gemini", "config", "mcp_config.json")), "no agy MCP config when npm ci fails");
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }

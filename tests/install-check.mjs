@@ -142,9 +142,99 @@ for (const name of [LEGACY_RUNTIME, ...LEGACY_SKILLS]) {
   check(!isLegacyCopy(dir, name), `legacy: old ${name} still in ${dir}`);
 }
 
-// Runtime: runner, modules, MCP server, SDK
-for (const p of [runner, mcpServer, path.join(runtime, "scripts", "lib", "review-core.js"), path.join(runtime, "scripts", "lib", "config.js"), path.join(runtime, "node_modules", "@modelcontextprotocol", "sdk", "package.json")]) {
+// Runtime: runner, modules, MCP server, SDK, build-prompts, and compiled prompts
+const buildPrompts = path.join(runtime, "scripts", "build-prompts.js");
+for (const p of [
+  runner,
+  mcpServer,
+  buildPrompts,
+  path.join(runtime, "scripts", "lib", "review-core.js"),
+  path.join(runtime, "scripts", "lib", "config.js"),
+  path.join(runtime, "node_modules", "@modelcontextprotocol", "sdk", "package.json"),
+]) {
   check(fs.existsSync(p), `runtime: missing ${p}`);
+}
+for (const skill of RUNNER_SKILLS) {
+  const compiledPath = path.join(runtime, "prompts", "compiled", `${skill}.compiled.md`);
+  check(fs.existsSync(compiledPath), `runtime: missing compiled prompt ${compiledPath}`);
+  if (fs.existsSync(compiledPath)) {
+    const content = fs.readFileSync(compiledPath, "utf8");
+    check(content.includes("## 9. Always-On Core Tactics"), `runtime: ${skill}.compiled.md lacks the always-on tactics layer`);
+    check(!content.includes(".cross-review-staging-"), `runtime: ${skill}.compiled.md contains staging path`);
+  }
+}
+
+// Antigravity (agy) plugin: plugin.json, 6 skills, 4 reviewer agents, config.json, mcp_config.json
+const agyPluginsRoot = path.join(home, ".gemini", "config", "plugins");
+const agyPluginDir = path.join(agyPluginsRoot, "cross-review");
+const agyPluginJson = path.join(agyPluginDir, "plugin.json");
+check(fs.existsSync(agyPluginJson), `agy: missing ${agyPluginJson}`);
+if (fs.existsSync(agyPluginJson)) {
+  try {
+    const pj = JSON.parse(fs.readFileSync(agyPluginJson, "utf8"));
+    check(pj.name === "cross-review" && typeof pj.version === "string", "agy: invalid plugin.json");
+  } catch (e) {
+    failures.push(`agy: corrupt plugin.json: ${e.message}`);
+  }
+}
+for (const skill of SKILLS) {
+  const file = path.join(agyPluginDir, "skills", skill, "SKILL.md");
+  if (!fs.existsSync(file)) { failures.push(`agy: missing ${file}`); continue; }
+  const text = fs.readFileSync(file, "utf8");
+  const fm = text.match(/^---\n([\s\S]*?)\n---\n/);
+  check(fm && new RegExp(`^name: ${skill}$`, "m").test(fm[1]) && /^description: \S/m.test(fm[1]), `agy: ${skill} front matter lacks name/description`);
+  check(!text.includes("{{"), `agy: ${skill} has an unrendered placeholder`);
+  check(text.includes(`node "${runnerRef}"`), `agy: ${skill} does not point at the installed runner`);
+  if (PLAIN_SKILLS.includes(skill)) {
+    check(text.includes("`GEMINI.md`/`AGENTS.md`"), `agy: ${skill} does not reference GEMINI.md/AGENTS.md`);
+  }
+}
+for (const skill of RUNNER_SKILLS) {
+  const agentName = `cross-reviewer-${skill}`;
+  const agentFile = path.join(agyPluginDir, "agents", `${agentName}.md`);
+  if (!fs.existsSync(agentFile)) { failures.push(`agy: missing agent ${agentFile}`); continue; }
+  const text = fs.readFileSync(agentFile, "utf8");
+  check(new RegExp(`^name: ${agentName}$`, "m").test(text), `agy: ${agentName}.md lacks name front matter`);
+  check(text.includes("## 1. Authority Hierarchy") && text.includes("# Active Skill Rubric:"), `agy: ${agentName}.md lacks 3-layer prompt content`);
+  check(!text.includes(".cross-review-staging-"), `agy: ${agentName}.md contains staging path`);
+}
+for (const name of fs.existsSync(agyPluginsRoot) ? fs.readdirSync(agyPluginsRoot) : []) {
+  check(!/^\.cross-review-staging-|^\..+-backup-/.test(name), `agy: leftover ${path.join(agyPluginsRoot, name)}`);
+}
+const agyConfigPath = path.join(home, ".gemini", "config", "config.json");
+check(fs.existsSync(agyConfigPath), `agy: missing ${agyConfigPath}`);
+if (fs.existsSync(agyConfigPath)) {
+  try {
+    const cfg = JSON.parse(fs.readFileSync(agyConfigPath, "utf8"));
+    check(cfg.plugins?.["cross-review"]?.enabled === true, "agy: cross-review plugin not enabled in config.json");
+  } catch (e) {
+    failures.push(`agy: corrupt config.json: ${e.message}`);
+  }
+}
+const agyMcpPath = path.join(home, ".gemini", "config", "mcp_config.json");
+check(fs.existsSync(agyMcpPath), `agy: missing ${agyMcpPath}`);
+if (fs.existsSync(agyMcpPath)) {
+  try {
+    const mcpCfg = JSON.parse(fs.readFileSync(agyMcpPath, "utf8"));
+    const entry = mcpCfg.mcpServers?.["cross-review"];
+    check(entry && entry.args?.includes(mcpServer), "agy: cross-review MCP server not registered at installed path in mcp_config.json");
+    check(entry?.disabled === false, "agy: cross-review MCP server disabled is not false");
+    check(entry?.env?.REVIEW_WAIT_DEFAULT_S === "270", "agy: REVIEW_WAIT_DEFAULT_S is not 270");
+  } catch (e) {
+    failures.push(`agy: corrupt mcp_config.json: ${e.message}`);
+  }
+}
+if (process.argv.includes("--auto")) {
+  for (const [label, mdPath] of [
+    ["claude", path.join(home, ".claude", "CLAUDE.md")],
+    ["agy", path.join(home, ".gemini", "GEMINI.md")],
+  ]) {
+    check(fs.existsSync(mdPath), `${label}: --auto did not write ${mdPath}`);
+    if (fs.existsSync(mdPath)) {
+      const md = fs.readFileSync(mdPath, "utf8");
+      check(md.split("<!-- cross-review-start -->").length === 2, `${label}: ${mdPath} does not have exactly one cross-review block`);
+    }
+  }
 }
 
 // Dashboard: server, UI, the Lucide licence and the pack version it shows

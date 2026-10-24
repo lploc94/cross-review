@@ -24,8 +24,8 @@ function lineCount(text) {
   return text.trimEnd().split("\n").length;
 }
 
-test("both clients are known and an unknown client is rejected", () => {
-  assert.deepEqual(Object.keys(CLIENTS).sort(), ["claude", "codex"]);
+test("all three clients are known and an unknown client is rejected", () => {
+  assert.deepEqual(Object.keys(CLIENTS).sort(), ["agy", "claude", "codex"]);
   assert.throws(() => render("loop-plan", "cursor"), /unknown client/i);
   assert.throws(() => renderSkillTemplate(PACK, "loop-plan", {}), /\{\{CLIENT_/);
   for (const skill of ["loop-plan", "loop-implement"]) {
@@ -73,8 +73,10 @@ test("loop-plan template lists the plan headings in order", () => {
 test("loop-plan renders per client without placeholders", () => {
   const claude = render("loop-plan", "claude");
   const codex = render("loop-plan", "codex");
-  for (const text of [claude, codex]) assert.ok(!text.includes("{{"));
+  const agy = render("loop-plan", "agy");
+  for (const text of [claude, codex, agy]) assert.ok(!text.includes("{{"));
   assert.ok(claude.includes("/loop-implement") && claude.includes("/review-plan"));
+  assert.ok(agy.includes("/loop-implement") && agy.includes("/review-plan") && agy.includes("`GEMINI.md`/`AGENTS.md`"));
   assert.ok(codex.includes("$loop-implement") && codex.includes("$review-plan"));
   assert.ok(!codex.includes("CLAUDE.md"), "codex copy does not mention CLAUDE.md");
   assert.ok(!/(^|[\s`(])\/(loop|review)-/.test(codex), "codex copy has no slash commands");
@@ -111,13 +113,15 @@ test("loop-plan stays within 1.4x of the original 80 lines", () => {
 test("loop-implement keeps its four blocks and the checkpoint review", () => {
   const claude = render("loop-implement", "claude");
   const codex = render("loop-implement", "codex");
-  for (const text of [claude, codex]) {
+  const agy = render("loop-implement", "agy");
+  for (const text of [claude, codex, agy]) {
     assert.ok(!text.includes("{{"));
     for (const heading of ["## Admission", "## Per-phase loop", "## Finalization", "## Stop conditions and reporting"]) {
       assert.ok(text.includes(`\n${heading}`), heading);
     }
   }
   assert.ok(claude.includes("/review-impl"));
+  assert.ok(agy.includes("/review-impl") && agy.includes("/loop-plan") && agy.includes("`GEMINI.md`/`AGENTS.md`"));
   assert.ok(codex.includes("$review-impl") && codex.includes("$loop-plan"));
   assert.ok(!codex.includes("CLAUDE.md"), "codex copy does not mention CLAUDE.md");
   assert.ok(!/(^|[\s`(])\/(loop|review)-/.test(codex), "codex copy has no slash commands");
