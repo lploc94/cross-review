@@ -1,10 +1,10 @@
 # CLAUDE.md
 
-This repository provides a single-command installer (`npx @tlelabs/cross-review`, npm package `@tlelabs/cross-review`) that installs the `cross-review` skill pack for Claude Code (`~/.claude/skills/`) and Codex (`~/.agents/skills/`), and registers its MCP server with both.
+This repository provides a single-command installer (`npx @tlelabs/cross-review`, npm package `@tlelabs/cross-review`) that installs the `cross-review` skill pack for Claude Code (`~/.claude/skills/`), Codex (`~/.agents/skills/`), and Antigravity (`~/.gemini/config/plugins/cross-review/`), and registers its MCP server with all three clients.
 
 ## Project Overview
 
-`cross-review` provides six skills: four review skills, where a second model (the reviewer: Codex CLI by default, or Claude Code or Antigravity) reviews the orchestrator's work, and two plain planning/execution skills (Claude Code: `/name`, Codex: `$name`):
+`cross-review` provides six skills: four review skills, where a second model (the reviewer: Codex CLI by default, or Claude Code or Antigravity) reviews the orchestrator's work under a compiled 3-layer Principal Reviewer system prompt, and two plain planning/execution skills (Claude Code & Antigravity: `/name`, Codex: `$name`):
 - `loop-plan` — write a phased, code-grounded implementation plan (`loop-plan/v1`) into `<workspace>/.cross-review/plans/`
 - `loop-implement` — execute an approved loop plan phase by phase with TDD, checkpoint reviews, and commits
 - `review-plan` — debate plans before implementation
@@ -18,14 +18,14 @@ The project was called `codex-review` (repo `lploc94/codex_skill`, skills `codex
 
 - Single command install: `npx @tlelabs/cross-review` (npm); `npx github:lploc94/cross-review` installs the default branch
 - One version number: `package.json` `version` equals `skill-packs/cross-review/manifest.json` `version` (a test checks it); `files` leaves out `skill-packs/cross-review/node_modules`
-- Installs to `~/.claude/skills/` (skills + shared runtime in `cross-review/`) and `~/.agents/skills/` (Codex copies)
+- Installs to `~/.claude/skills/` (skills + shared runtime in `cross-review/`), `~/.agents/skills/` (Codex copies), and `~/.gemini/config/plugins/cross-review/` (Antigravity plugin: `plugin.json`, 6 skills, 4 reviewer agents `cross-reviewer-review-{impl,plan,pr,think}.md`, enabled in `~/.gemini/config/config.json`)
 - Runtime dependencies (`@modelcontextprotocol/sdk`, `zod`) are installed with `npm ci --omit=dev` from the committed lock file into `~/.claude/skills/cross-review/node_modules`
 - Removes this pack's old copies from Codex's deprecated `$CODEX_HOME/skills`; foreign skills there are left in place
 
 ## Requirements
 
 - Node.js >= 22 and npm
-- Claude Code CLI and/or Codex CLI
+- Claude Code CLI, Codex CLI, and/or Antigravity CLI (`agy`)
 - At least one reviewer CLI in PATH: `codex` (the default reviewer), `claude` or `agy` (Antigravity)
 - Windows: the reviewer CLIs as an `.exe` or an npm `.cmd` shim; the `cross-review` command runs in PowerShell 7, cmd and Git Bash
 
@@ -33,8 +33,9 @@ The project was called `codex-review` (repo `lploc94/codex_skill`, skills `codex
 
 ```bash
 npm ci --prefix skill-packs/cross-review                          # MCP SDK for tests and the MCP server
+node skill-packs/cross-review/scripts/build-prompts.js             # compile the 3-layer reviewer system prompts
 node test-default-timeout.js && node test-stall-recovery.js && node test-timeout-resume.js && node --test "tests/*.test.js"
-H=$(mktemp -d) && HOME="$H" CODEX_HOME="$H/.codex" node bin/cross-review.js && node tests/install-check.mjs "$H"
+H=$(mktemp -d) && HOME="$H" USERPROFILE="$H" CODEX_HOME="$H/.codex" node bin/cross-review.js && node tests/install-check.mjs "$H" && rm -rf "$H"
 node skill-packs/cross-review/scripts/review-runner.js version     # runner version
 node tests/dashboard-ui.mjs                                         # dashboard in headless Chrome (CHROME=<path>)
 node docs/screenshots.mjs                                           # README pictures (docs/images/) from the invented fixture, in OFL fonts (video/fonts.mjs)
@@ -50,12 +51,12 @@ Never test the installer against the real HOME; use a temporary `HOME` and `CODE
 ### Installer
 
 `bin/cross-review.js` with `bin/lib/render-skill.js`:
-1. Runtime guard: Node.js >= 22; `--auto` adds a block to `~/.claude/CLAUDE.md` that runs review-plan/review-impl automatically after any plan/implementation; `-full` only prints a notice
-2. Stage the shared runtime (runner, `lib/`, `mcp-server.js`, `package.json`, lock) and run `npm ci --omit=dev` in it
-3. Render every SKILL.md template. Review skills get `{{PROTOCOL_CORE}}`, `{{PROTOCOL_VARIANT}}` (from `shared/protocol/`) and `{{RUNNER_PATH}}`; loop skills get `{{CLIENT_*}}` values per client and `{{RUNNER_PATH}}` (for the `plans` command). Any leftover `{{` fails the install
+1. Runtime guard: Node.js >= 22; `--auto` adds/refreshes a block in `~/.claude/CLAUDE.md` and `~/.gemini/GEMINI.md` that runs `review-plan`/`review-impl` automatically after any plan/implementation; `-full` only prints a notice
+2. Stage the shared runtime (runner, `lib/`, `mcp-server.js`, `build-prompts.js`, `prompts/`, `package.json`, lock), recompile `prompts/compiled/*.compiled.md`, and run `npm ci --omit=dev` in it
+3. Render every SKILL.md template for `claude`, `codex`, and `agy`. Review skills get `{{PROTOCOL_CORE}}`, `{{PROTOCOL_VARIANT}}` (from `shared/protocol/`) and `{{RUNNER_PATH}}`; loop skills get `{{CLIENT_*}}` values per client (`claude`, `codex`, `agy`) and `{{RUNNER_PATH}}` (for the `plans` command). Stage the Antigravity plugin (`plugin.json`, `skills/`, and `agents/cross-reviewer-review-{impl,plan,pr,think}.md`). Any leftover `{{` fails the install
 4. Verify the runner (`node review-runner.js version`)
-5. Atomic swap in both skill roots with full rollback; delete the old `codex-review` pack (runtime and skills, ownership checked) and this pack's copies in `$CODEX_HOME/skills`
-6. Remove the old `codex-review` MCP registration when it points at that pack's runtime, then register MCP server `cross-review` (Claude: `claude mcp remove` + `add -s user`, `REVIEW_WAIT_DEFAULT_S=270`; Codex: `codex mcp add`, `REVIEW_WAIT_DEFAULT_S=270` and `tool_timeout_sec = 300`). Skipped with a warning when `npm ci` failed. CLI calls never use a shell: `lib/command.js` `resolveSpawn` runs an npm `.cmd` shim on Windows as node + script or as its `.exe`, and only a batch file that is not a shim (`npm.cmd`) through `cmd.exe /d /s /c`
+5. Atomic swap across all three roots (`~/.claude/skills`, `~/.agents/skills`, `~/.gemini/config/plugins`) with full rollback; enable `cross-review` in `~/.gemini/config/config.json`; delete the old `codex-review` pack (runtime and skills, ownership checked) and this pack's copies in `$CODEX_HOME/skills`
+6. Remove the old `codex-review` MCP registration when it points at that pack's runtime, then register MCP server `cross-review` (Claude: `claude mcp remove` + `add -s user`, `REVIEW_WAIT_DEFAULT_S=270`; Codex: `codex mcp add`, `REVIEW_WAIT_DEFAULT_S=270` and `tool_timeout_sec = 300`; Antigravity: `~/.gemini/config/mcp_config.json` with `REVIEW_WAIT_DEFAULT_S=270`). Skipped with a warning when `npm ci` failed. CLI calls never use a shell: `lib/command.js` `resolveSpawn` runs an npm `.cmd` shim on Windows as node + script or as its `.exe`, and only a batch file that is not a shim (`npm.cmd`) through `cmd.exe /d /s /c`
 7. Write the `cross-review` command, each file atomically with a marker line. POSIX: `~/.local/bin/cross-review` (`#!/bin/sh` + marker + `exec <node> <installed runner> "$@"`). Windows: `cross-review.cmd`, `cross-review.ps1` and `cross-review` (sh, for Git Bash) in `npm prefix -g` (`%APPDATA%\npm`, which npm keeps on PATH), each judged on its own; the `.cmd` names paths in the profile through `%USERPROFILE%`, since cmd.exe reads batch files in the console code page, not UTF-8. A file there without the marker, or a link, is left in place with a note; a command folder missing from `PATH` is reported. Failures only warn
 
 ### Skill Pack Layout
@@ -64,10 +65,16 @@ Never test the installer against the real HOME; use a temporary `HOME` and `CODE
 skill-packs/cross-review/
 ├── manifest.json
 ├── package.json, package-lock.json   ← runtime dependencies (MCP server only)
+├── prompts/
+│   ├── production-reviewer-base.md   ← Layer 1: core reviewer methodology, 6 system taxonomies, Anti-Dogma
+│   ├── reviewer-system.md            ← Layer 1 + Layer 2 standalone prompt (Layer 2: always-on recon and spike tactics)
+│   ├── skills/                       ← Layer 3: review-{impl,plan,pr,think}.system.md rubrics
+│   └── compiled/                     ← compiled 3-layer prompts: review-{impl,plan,pr,think}.compiled.md
 ├── shared/protocol/                  ← core.md, apply-rebut.md, cross-analysis.md (inlined at install)
 ├── scripts/
 │   ├── review-runner.js               ← runner CLI (stdlib only)
 │   ├── mcp-server.js                 ← MCP stdio server: review_begin/wait/reply/end
+│   ├── build-prompts.js              ← compiles 3-layer reviewer prompts (stdlib only)
 │   └── lib/                          ← parse.js, review-core.js (the four verbs), config.js (review and plan settings), plans.js (plans and the `plans` command), command.js (find and start a CLI without a shell), reviewers/ (one adapter per reviewer CLI)
 │       └── dashboard/                ← server.js (node:http, SSE), scan.js, model.js, follow.js, avatars.js, discovery.js, ui/ (static page, no build)
 └── skills/
@@ -75,7 +82,7 @@ skill-packs/cross-review/
     │   ├── SKILL.md                  ← template
     │   └── references/               ← prompts.md, output-format.md, analysis templates
     └── loop-plan/, loop-implement/
-        ├── SKILL.md                  ← two-client template
+        ├── SKILL.md                  ← three-client template (claude, codex, agy)
         └── agents/openai.yaml        ← Codex UI metadata
 ```
 
@@ -83,12 +90,19 @@ skill-packs/cross-review/
 
 ```text
 ~/.claude/skills/
-├── cross-review/        ← runtime: scripts/, node_modules/, package.json (shared by both clients)
+├── cross-review/        ← runtime: scripts/, prompts/, node_modules/, package.json (shared by all clients)
 ├── review-*/            ← SKILL.md (rendered) + references/
 └── loop-plan/, loop-implement/
 ~/.agents/skills/
 ├── review-*/            ← SKILL.md only; points at the shared runtime
 └── loop-plan/, loop-implement/   ← SKILL.md + agents/openai.yaml
+~/.gemini/config/
+├── config.json          ← plugins["cross-review"].enabled = true
+├── mcp_config.json      ← mcpServers["cross-review"]
+└── plugins/cross-review/
+    ├── plugin.json
+    ├── skills/          ← 6 rendered SKILL.md files (review-*, loop-plan, loop-implement)
+    └── agents/          ← 4 reviewer agents: cross-reviewer-review-{impl,plan,pr,think}.md
 ~/.local/bin/cross-review  ← runs the installed runner: `cross-review dashboard`, `cross-review version`, …
 %APPDATA%\npm\cross-review.cmd, cross-review.ps1, cross-review   ← the same on Windows (npm's global folder)
 ```
@@ -96,7 +110,7 @@ skill-packs/cross-review/
 ### Core Execution Flow
 
 1. A review skill calls `review_begin` (MCP) or `review-runner.js begin` (CLI fallback) with the skill, mode, optional reviewer, model and effort, and a markdown input of placeholder values. Values not given come from the review settings (see Review settings)
-2. `begin` renders round 1 from `references/prompts.md`, starts the reviewer detached (Codex: `codex exec --json --sandbox danger-full-access`; Claude Code: `claude -p --output-format stream-json --verbose --dangerously-skip-permissions`; agy: `agy --input-format stream-json --output-format stream-json --dangerously-skip-permissions --print=`), and returns `session_dir` (peer skills also get `analysis_prompt`)
+2. `begin` renders round 1 from `references/prompts.md`, resolves the compiled 3-layer system prompt (`prompts/compiled/<skill>.compiled.md`), starts the reviewer detached (Codex: `codex exec --json --sandbox danger-full-access --config model_instructions_file=... --config web_search="live"` plus bloat-disable flags; Claude Code: `claude -p --output-format stream-json --verbose --disallowedTools ReportFindings --system-prompt-file ... --disable-slash-commands --dangerously-skip-permissions`; agy: `agy --input-format stream-json --output-format stream-json --agent cross-reviewer-<skill> --disable-slash-commands --dangerously-skip-permissions --print=`), and returns `session_dir` (peer skills also get `analysis_prompt`)
 3. `wait` polls until the round ends and returns `next`: `running`, `respond`, `cross_check`, `done`, `ask_user`, or `stopped`
 4. The orchestrator fixes/rebuts (`respond`, plan/impl) or compares its own analysis (`cross_check`, peer skills), then calls `reply`; the runner renders the right reply template and resumes the same reviewer thread with the stored reviewer, model, effort and sandbox
 5. `end` finalizes (`meta.json`), stops, and records `ended_at` and `end_outcome` (`finalized` | `stopped`) in `state.json`; a later `reply` clears them. Session state lives in `.cross-review/sessions/<skill>-<yyyymmdd>-<NNN>/`; the runner writes `.cross-review/.gitignore` (`*`)
@@ -169,6 +183,13 @@ Besides the prompts and outputs, a session keeps what the dashboard needs to ret
 - `skill-packs/` is the single source of truth for templates, runtime and prompts.
 
 ## Breaking Changes
+
+### pack 11.0.0: 3-layer reviewer system prompts and Antigravity client install
+- **3-Layer Reviewer System Prompts**: Every review skill (`review-impl`, `review-plan`, `review-pr`, `review-think`) compiles a 3-layer system prompt (`prompts/compiled/<skill>.compiled.md`) from Layer 1 (`prompts/production-reviewer-base.md`: Principal Reviewer methodology, 6 system taxonomies, Anti-Dogma lifecycle calibration, Audit-Existing-Spikes-First rule), Layer 2 (always-on recon and batched falsification-spike tactics, generated by `scripts/build-prompts.js`), and Layer 3 (`prompts/skills/<skill>.system.md`).
+- **Reviewer System Prompt Override**: `review-runner.js` passes `systemPromptFile` and `skillName` into each adapter's `buildCommand`: Claude Code adds `--system-prompt-file <compiled> --disable-slash-commands`; Codex adds `--config model_instructions_file="<compiled>" --config web_search="live"` plus flags disabling interactive instructions/plugins/apps/multi-agent; Antigravity (`agy`) adds `--agent cross-reviewer-<skill> --disable-slash-commands` (provisioning global fallback agents in `~/.gemini/config/agents/` when not yet installed). Direct `buildCommand` calls without `systemPromptFile` retain their exact prior arguments.
+- **Antigravity (`agy`) Client Install**: `bin/cross-review.js` and `bin/lib/render-skill.js` (`CLIENTS.agy`) atomically stage and install the `cross-review` plugin into `~/.gemini/config/plugins/cross-review/` (`plugin.json`, 6 skills, 4 reviewer agents), enable it in `~/.gemini/config/config.json`, register the MCP server in `~/.gemini/config/mcp_config.json`, and support `--auto` in `~/.gemini/GEMINI.md` alongside `~/.claude/CLAUDE.md`.
+- **Going back to 10.5.1**: `npx @tlelabs/cross-review@10.5.1`, and if you want to remove the Antigravity plugin/MCP registration, delete `~/.gemini/config/plugins/cross-review` and remove `cross-review` from `~/.gemini/config/config.json` and `~/.gemini/config/mcp_config.json`.
+- `package.json` and `manifest.json` 11.0.0.
 
 ### pack 10.5.1: Claude Code reviewer without ReportFindings
 - **Reviewer**: Claude Code turns run with `--disallowedTools ReportFindings`. That tool hands findings to the host UI, so a reviewer that used it left a turn whose findings and verdict never reached the event log (`next: ask_user`, no verdict); it did so in 12 of 168 benchmark reviews.

@@ -10,11 +10,11 @@
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/npm/l/@tlelabs/cross-review"></a>
 </p>
 
-Cross-model review skills for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and [OpenAI Codex CLI](https://github.com/openai/codex): the agent you work with orchestrates, and a second model reviews its plans, code and reasoning. The reviewer is the Codex CLI by default; Claude Code (`claude`) and Antigravity (`agy`) can review too. The runner drives each reviewer CLI through its own adapter (`scripts/lib/reviewers/`).
+Cross-model review skills for [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [OpenAI Codex CLI](https://github.com/openai/codex), and [Antigravity CLI](https://antigravity.google/docs): the agent you work with orchestrates, and a second model reviews its plans, code and reasoning under a compiled 3-layer Principal Reviewer system prompt. The reviewer is the Codex CLI by default; Claude Code (`claude`) and Antigravity (`agy`) can review too. The runner drives each reviewer CLI through its own adapter (`scripts/lib/reviewers/`).
 
 ![A review session in the dashboard: the reviewer's rounds, the agent's replies, the issue ledger](docs/images/session.png)
 
-Six skills (Claude Code: `/name`, Codex: `$name`):
+Six skills (Claude Code & Antigravity: `/name`, Codex: `$name`):
 - `loop-plan` — write a phased, code-grounded implementation plan for large, multi-feature work
 - `loop-implement` — execute an approved loop plan phase by phase with TDD, checkpoint reviews, and commits
 - `review-plan` — debate implementation plans before coding
@@ -43,10 +43,10 @@ npx @tlelabs/cross-review
 From GitHub instead: `npx github:lploc94/cross-review`.
 
 ### What it does
-1. Installs the skills for Claude Code into `~/.claude/skills/` and for Codex into `~/.agents/skills/`
-2. Installs the shared runtime (runner, MCP server, and its dependencies from the lock file) into `~/.claude/skills/cross-review/`
+1. Installs the skills for Claude Code into `~/.claude/skills/`, for Codex into `~/.agents/skills/`, and for Antigravity (`agy`) as the `cross-review` plugin into `~/.gemini/config/plugins/cross-review/` (including 6 skills, 4 reviewer agents `cross-reviewer-review-{impl,plan,pr,think}`, and enabling the plugin in `~/.gemini/config/config.json`)
+2. Installs the shared runtime (runner, MCP server, `build-prompts.js`, compiled 3-layer reviewer prompts, and dependencies from the lock file) into `~/.claude/skills/cross-review/`
 3. Renders each SKILL.md with the shared review protocol and the absolute runner path
-4. Registers the `cross-review` MCP server with Claude Code (user scope) and Codex
+4. Registers the `cross-review` MCP server with Claude Code (user scope), Codex, and Antigravity (`~/.gemini/config/mcp_config.json`)
 5. Swaps directories atomically with rollback on failure; removes the old `codex-review` pack and this pack's copies in `~/.codex/skills`
 6. Writes the `cross-review` command, a small script that runs the installed runner: `~/.local/bin/cross-review` on macOS and Linux; on Windows `cross-review.cmd`, `cross-review.ps1` and `cross-review` (for Git Bash) in npm's global folder (`npm prefix -g`, usually `%APPDATA%\npm`, which is on your `PATH`). A file of that name the installer did not write is left alone. When the folder is not on your `PATH`, the installer says so
 
@@ -69,7 +69,7 @@ Re-running is safe: the MCP registration is replaced, not duplicated.
 ```bash
 npx @tlelabs/cross-review --auto
 ```
-Adds a block to `~/.claude/CLAUDE.md` that has Claude Code use the `review-plan` skill after it finishes any plan and the `review-impl` skill after it finishes any implementation, without asking first. This applies to every plan and implementation, not only `loop-plan` and `loop-implement`. It skips trivial changes, reviews a loop skill already ran, and reviews you asked it to skip. The other skills are never run automatically. Idempotent — safe to re-run. Every install, with or without `--auto`, refreshes a block that is already there, including one written by the old codex-review pack.
+Adds a block to `~/.claude/CLAUDE.md` and `~/.gemini/GEMINI.md` that has Claude Code and Antigravity use the `review-plan` skill after finishing any plan and the `review-impl` skill after finishing any implementation, without asking first. This applies to every plan and implementation, not only `loop-plan` and `loop-implement`. It skips trivial changes, reviews a loop skill already ran, and reviews you asked it to skip. The other skills are never run automatically. Idempotent — safe to re-run. Every install, with or without `--auto`, refreshes a block that is already there, including one written by the old codex-review pack.
 
 ## Usage
 
