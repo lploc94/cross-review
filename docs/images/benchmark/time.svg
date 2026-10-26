@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 672 202" width="672" height="202" role="img" aria-label="Median time per review run in seconds">
+<style>
+.s-codex{--c:#2448b8} .s-claude{--c:#d1490f} .s-agy{--c:#0e8f86} .s-none{--c:#8a877f}
+svg{font-family:-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Helvetica, Arial, sans-serif}
+.grid{stroke:#efece4;stroke-width:1}
+.axis-tick{fill:#8a877f;font-size:11.5px;font-variant-numeric:tabular-nums}
+.axis{fill:#4a4843;font-size:12.5px}
+.contour{fill:none;stroke:#8a877f;stroke-width:1;stroke-dasharray:3 4;opacity:.7}
+.contour-label{fill:#8a877f;font-size:11px}
+.panel-title,.group-title{fill:#1c1b19;font-size:13.5px;font-weight:600}
+.row-label{fill:#4a4843;font-size:12.5px}
+.value{fill:#1c1b19;font-size:12.5px;font-weight:600;font-variant-numeric:tabular-nums}
+.label{fill:#1c1b19;font-size:13px;font-weight:600;paint-order:stroke;stroke:#fffefb;stroke-width:4px}
+.ci{stroke:var(--c);stroke-width:2;stroke-linecap:round;opacity:.55}
+.dot{fill:var(--c);stroke:#fffefb;stroke-width:2}
+.bar{fill:var(--c)}
+.line{fill:none;stroke:var(--c);stroke-width:2;stroke-linejoin:round}
+.hit{fill:transparent}</style>
+<rect width="100%" height="100%" rx="8" fill="#fffefb" stroke="#e3e0d7"/>
+<g transform="translate(16,16)"><line class="grid" x1="110" x2="110" y1="8" y2="140"/><text class="axis-tick" x="110" y="158" text-anchor="middle">0 s</text><line class="grid" x1="168.6" x2="168.6" y1="8" y2="140"/><text class="axis-tick" x="168.6" y="158" text-anchor="middle">50 s</text><line class="grid" x1="227.1" x2="227.1" y1="8" y2="140"/><text class="axis-tick" x="227.1" y="158" text-anchor="middle">100 s</text><line class="grid" x1="285.7" x2="285.7" y1="8" y2="140"/><text class="axis-tick" x="285.7" y="158" text-anchor="middle">150 s</text><line class="grid" x1="344.3" x2="344.3" y1="8" y2="140"/><text class="axis-tick" x="344.3" y="158" text-anchor="middle">200 s</text><line class="grid" x1="402.9" x2="402.9" y1="8" y2="140"/><text class="axis-tick" x="402.9" y="158" text-anchor="middle">250 s</text><line class="grid" x1="461.4" x2="461.4" y1="8" y2="140"/><text class="axis-tick" x="461.4" y="158" text-anchor="middle">300 s</text><line class="grid" x1="520" x2="520" y1="8" y2="140"/><text class="axis-tick" x="520" y="158" text-anchor="middle">350 s</text><g class="mk s-claude"><title>Claude Code: median 141 s per run (setup, the review and any second round)</title><rect class="hit" x="0" y="8" width="640" height="44"/><text class="row-label" x="0" y="34">Claude Code</text><path class="bar" d="M110,17h161.2a4,4 0 0 1 4,4v18a4,4 0 0 1 -4,4h-161.2z"/><text class="value" x="283.2" y="34">141 s</text></g><g class="mk s-codex"><title>Codex: median 179 s per run (setup, the review and any second round)</title><rect class="hit" x="0" y="52" width="640" height="44"/><text class="row-label" x="0" y="78">Codex</text><path class="bar" d="M110,61h205.7a4,4 0 0 1 4,4v18a4,4 0 0 1 -4,4h-205.7z"/><text class="value" x="327.7" y="78">179 s</text></g><g class="mk s-agy"><title>Antigravity: median 325 s per run (setup, the review and any second round)</title><rect class="hit" x="0" y="96" width="640" height="44"/><text class="row-label" x="0" y="122">Antigravity</text><path class="bar" d="M110,105h376.7a4,4 0 0 1 4,4v18a4,4 0 0 1 -4,4h-376.7z"/><text class="value" x="498.7" y="122">325 s</text></g></g>
+</svg>

@@ -24,6 +24,54 @@ Six skills (Claude Code & Antigravity: `/name`, Codex: `$name`):
 
 This project was called **codex-review** (`lploc94/codex_skill`, skills `codex-plan-review`, `codex-impl-review`, `codex-think-about`, `codex-commit-review`, `codex-pr-review`). Installing removes that pack's skills, runtime and MCP server registration. Finish any review that is still running before you update: sessions started under the old names cannot be resumed.
 
+## Benchmark: which reviewer to pick
+
+We gave the same 168 pull requests (144 with planted bugs, clean ones and decoys, plus 24 real bugs from open source) to Codex (`gpt-6-astra`), Claude Code (`claude-opus-5-5`) and Antigravity (`gemini-4-argon`), three runs each at effort `high`, all through `review-impl`, and graded every finding blind with a three-judge panel and an audit. The method was pre-registered. Full write-up: [cross-review.tlelabs.com/benchmark](https://cross-review.tlelabs.com/benchmark/); code, public tasks and report: [lploc94/cross-review-bench](https://github.com/lploc94/cross-review-bench).
+
+- **Codex and Claude Code find the most bugs**: about 90% of the planted bug weight, with no significant gap between them.
+- **Antigravity raises the fewest false alarms**: 87% of its findings were real, and it asked for changes on 5% of correct pull requests, against 21% for Claude Code and 48% for Codex. That gives it the best F1, but it misses more of the hard bugs.
+- **Claude Code is the best all-rounder**: Codex-level detection, less than half of Codex's false alarms, and the fastest median run (141 s).
+- **On real bugs Codex leads** (F1 0.58, Claude Code 0.53, Antigravity 0.45).
+- **A second model did not fix more bugs**: when Claude Code or Codex fixed buggy pull requests, adding a reviewer did not raise the share fixed over the agent reviewing its own work.
+
+Planted corpus (144 pull requests); brackets are 95% bootstrap intervals over tasks:
+
+![F1, recall and precision by reviewer on the planted corpus](docs/images/benchmark/leaderboard.svg)
+
+Detection against noise (the dotted curves are equal F1):
+
+![Precision against recall for the three reviewers](docs/images/benchmark/tradeoff.svg)
+
+False alarms: the share of correct pull requests (clean or decoy) on which the reviewer asked for changes over something that was not a bug:
+
+![False alarms by reviewer](docs/images/benchmark/false-alarms.svg)
+
+Recall by difficulty, from L1 (visible in the diff) to L4 (needs running the code):
+
+![Recall by difficulty level](docs/images/benchmark/difficulty.svg)
+
+Real defects nobody planted, confirmed by the audit (60 in all):
+
+![Unplanted real defects found by each reviewer](docs/images/benchmark/unplanted.svg)
+
+Real bugs from public repositories, fixed after every model's training cutoff (21 scored):
+
+![F1, recall and precision on real bugs](docs/images/benchmark/real-bugs.svg)
+
+The second round: does the reviewer accept a correct fix, catch a wrong one, and hold against a false rebuttal?
+
+![Second-round behavior by scenario](docs/images/benchmark/second-round.svg)
+
+Fix loops: share of bugs fixed when Claude Code or Codex fixes 40 buggy pull requests alone or with each reviewer:
+
+![Share of bugs fixed with and without a reviewer](docs/images/benchmark/fix-loops.svg)
+
+Median time per review run:
+
+![Median time per review run](docs/images/benchmark/time.svg)
+
+Pick Codex or Claude Code when a missed bug costs more than a false alarm, Antigravity when noise is the problem, and Claude Code for a balance of both. See [Choosing the reviewer](#choosing-the-reviewer-optional).
+
 ## Requirements
 
 - Node.js >= 22 and npm
