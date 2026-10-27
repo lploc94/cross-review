@@ -18,12 +18,13 @@ Use it for large work: several features, many files or components, or work that 
 5. Resolve assumptions at plan time, by spike or by asking the user. The plan handed to implementation must not contain hard stops that depend on something nobody can verify; record what remains as an assumption with a default and a fallback. Hard stops are only for data loss, security, or irreversible actions.
 6. Resolve ordinary engineering choices autonomously. Ask only when a material product, API, schema, dependency, compatibility, or operational decision cannot be inferred safely.
 
-## Limits
+## Limits and decision points
 
-Only when the plan sets or depends on a limit:
-- Correctness validation (rejecting bad input) is not a capacity limit; keep them apart.
-- Each capacity limit states the protected resource, the failure it prevents, why that number (a real ceiling, a measurement, or well above the largest normal load), and the soft handling when reached (continue in parts, backpressure, signalled degradation). Never truncate or drop silently.
-- External capacity (context size, rate limits, body size, quotas) comes from a current source or a measurement, with source and date.
+Every regex, parser, detector, validation guard, allow/deny list, default, fallback, timeout, retry and numeric bound the plan sets is a decision point. List each in the phase's `Behavioral contract` with:
+- Source: where its shape or number comes from: samples collected from this repository or system (logs, fixtures, real outputs, data), a cited specification, an exhaustive or property-based test over a stated input domain, or a measurement or current source with its date. An invented example or round number with nothing behind it does not count.
+- Both-sided check: a spike or test on those inputs shows what it misses and what legitimate input it blocks or cuts; record it in `Feasibility evidence`.
+- Failure handling: what happens when it is wrong (continue in parts, backpressure, signalled degradation; fail closed only where a wrong pass is dangerous). Never truncate, drop, or swallow silently.
+Correctness validation (rejecting bad input) is not a capacity limit; keep them apart. A capacity limit also states the protected resource and the failure it prevents; external capacity (context size, rate limits, body size, quotas) needs a current source or measurement.
 
 ## Plan contract
 
@@ -87,7 +88,7 @@ Checkpoint: `{{CLIENT_SKILL}}review-impl` | None (covered by the checkpoint afte
 `<proposed commit message>`
 ```
 
-Every phase must describe code evidence, the observable contract, production obligations separately from tests, failure/boundary/state cases where relevant, for a migration, destructive, or state-changing step whether rerunning it is safe and its retry or rollback path, an oracle that rejects the plausible naive implementation, exact commands and expected outcomes, and a single cohesive commit boundary. Test ladder: a narrow command per AC, light phase gates, and the full suite only in `Global Gates`. A run longer than about 10 minutes gets two steps in `Focused verification`: a pilot on a small subset that finishes in minutes and covers the hard cases (boundaries, bad data, the largest item), with its expected output and pass check, then the full run, started only after the pilot passes.
+Every phase must describe code evidence, the observable contract, production obligations separately from tests, failure/boundary/state cases where relevant, for a migration, destructive, or state-changing step whether rerunning it is safe and its retry or rollback path, an oracle built from grounded inputs that rejects the plausible naive implementation, exact commands and expected outcomes, and a single cohesive commit boundary. Test ladder: a narrow command per AC, light phase gates, and the full suite only in `Global Gates`. A run longer than about 10 minutes gets two steps in `Focused verification`: a pilot on a small subset that finishes in minutes and covers the hard cases (boundaries, bad data, the largest item), with its expected output and pass check, then the full run, started only after the pilot passes.
 
 ## Quality and review
 
@@ -103,10 +104,9 @@ Stop briefly three times; the goal is that the user understands, not that they r
 3. Handoff: for a plan in the printed `dir`, first run `node "{{RUNNER_PATH}}" plans --working-dir "$PWD" --finished <plan file>`; for a plan the user put elsewhere, run `git check-ignore -q <plan>` instead (exit 1: git keeps it). Then give the implementation story in plain words, the review checkpoints, remaining risks, the exact plan path and whether git keeps it (that plan's `tracked`, or the check; repeat any `warning` word for word), the `dashboard_url` when there is one (a `dashboard_error` is one line, then go on), phase count, and review status. Ask whether to run `{{CLIENT_SKILL}}review-plan` or whether the user approves directly, and invite correction before `{{CLIENT_SKILL}}loop-implement` starts.
 
 Present each decision on its own, in the user's language, explaining any term you must use:
-1. Context: what this part of the system does today, in 1–3 sentences.
-2. Problem: what happens if it is left as is, with a concrete example the user can see.
-3. Options: for each, what changes, what it costs (time, scope, breaking), its risk, and whether it can be reversed.
-4. Recommendation and why, tied to evidence (spike, source, data), with its benefit, its harm if any, and its concrete impact.
-5. If agreed, what happens next: scope, files or areas changed, what stays the same.
+1. Context and problem: what this part of the system does today (1–3 sentences), and what happens if it is left as is, with a concrete example the user can see.
+2. Options: for each, what changes, what it costs (time, scope, breaking), its risk, and whether it can be reversed.
+3. Recommendation and why, tied to evidence (spike, source, data), with its benefit, its harm if any, and its concrete impact.
+4. If agreed, what happens next: scope, files or areas changed, what stays the same.
 
 Silence or a generic "ok" approves nothing that was not presented. Do not modify production code.

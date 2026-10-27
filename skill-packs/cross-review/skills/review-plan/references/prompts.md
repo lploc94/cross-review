@@ -8,7 +8,7 @@
 |-------------|--------|----------|---------|
 | `{PLAN_PATH}` | Absolute path to plan file | Yes | — |
 | `{USER_REQUEST}` | User's original task description | No | "Review this plan for quality and completeness" |
-| `{SESSION_CONTEXT}` | What the reviewer cannot find in the plan or the repository: the user's decisions and constraints from the conversation | No | "None beyond the request and the plan" |
+| `{SESSION_CONTEXT}` | What the reviewer cannot find in the plan or the repository: the user's decisions and constraints from the conversation, and where real samples of the data live | No | "None beyond the request and the plan" |
 | `{OUTPUT_FORMAT}` | Copy the entire fenced code block from `references/output-format.md` (the single block after "Use this exact shape") | Yes | — |
 
 ---

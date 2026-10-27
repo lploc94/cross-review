@@ -18,9 +18,9 @@ Execute the approved `loop-plan/v1` plan from the next incomplete phase through 
 For each phase, in order:
 
 1. Re-read the phase. Revalidate only the paths and symbols the code is about to touch.
-2. Update owning documentation first when the phase requires it. Write or strengthen the tests, see them fail, and note the red result in one line. Tests vary inputs/state and reject hardcoded or fixture-only implementations.
+2. Update owning documentation first when the phase requires it. Write or strengthen the tests, see them fail, and note the red result in one line. Tests vary inputs/state, include cases from the plan's grounded inputs (real samples, the cited specification, or the stated domain), and reject hardcoded or fixture-only implementations.
 3. Implement the complete production obligations through the real integration path (errors, state transitions, persistence, concurrency, invariants the phase names), minimal and project-consistent. Plan limits come with their stated soft handling.
-4. Run each AC's narrow command, then the phase gates. Smoke-test only where the plan asks, except for long runs (below).
+4. Run each AC's narrow command, then the phase gates, and run each decision point on its grounded inputs in both directions (what it misses, what legitimate input it blocks or cuts), recording the result in the progress line. Smoke-test only where the plan asks, except for long runs (below).
 5. Inspect the staged diff once: phase-owned files only, no secrets, no leftovers of renamed or removed names.
 6. Commit once with the planned message. In the plan, tick `- [x]` each of the phase's acceptance criteria that is met (an unmet one stays `- [ ]`, its reason in the progress line) and write the phase's progress line in `Progress Log`: result, AC evidence, and any deviation from the plan, plus a `Discovery:` line with evidence for each surprise that shaped the work. Stage the plan only when `git check-ignore -q <plan>` exits 1; when it exits 0, git ignores the plan: update it in place, do not stage it, and do not treat that as an error. Never amend, force, skip hooks, or create an empty commit.
 7. If the plan lists this phase as a review checkpoint, run `{{CLIENT_SKILL}}review-impl` with the model the plan names, if any. The review skill governs how findings are handled. Then report the phase and move on.

@@ -144,3 +144,21 @@ test("loop-implement stays within 1.2x of the original 49 lines", () => {
     assert.ok(n <= 59, `${client}: ${n} lines`);
   }
 });
+
+test("loop skills ground decision points in real samples and check both sides", () => {
+  for (const client of Object.keys(CLIENTS)) {
+    const plan = render("loop-plan", client);
+    assert.ok(plan.includes("## Limits and decision points"), `${client}: section`);
+    for (const label of ["- Source:", "- Both-sided check:", "- Failure handling:"]) assert.ok(plan.includes(label), `${client}: ${label}`);
+    assert.ok(/samples collected from this repository or system/.test(plan) && /cited specification/.test(plan), `${client}: grounded sources`);
+    assert.ok(/an exhaustive or property-based test over a stated input domain/.test(plan), `${client}: domain-based grounding`);
+    assert.ok(/An invented example or round number with nothing behind it does not count/.test(plan), `${client}: no invented examples`);
+    assert.ok(/shows what it misses and what legitimate input it blocks or cuts; record it in `Feasibility evidence`/.test(plan), `${client}: both-sided body`);
+    assert.ok(/what happens when it is wrong \(continue in parts, backpressure, signalled degradation; fail closed only where a wrong pass is dangerous\)\. Never truncate, drop, or swallow silently/.test(plan), `${client}: failure handling body`);
+    assert.ok(/Correctness validation \(rejecting bad input\) is not a capacity limit/.test(plan), `${client}: validation versus capacity`);
+    assert.ok(/oracle built from grounded inputs that rejects the plausible naive implementation/.test(plan), `${client}: grounded oracle`);
+    const impl = render("loop-implement", client);
+    assert.ok(/include cases from the plan's grounded inputs \(real samples, the cited specification, or the stated domain\)/.test(impl), `${client}: sample-based tests`);
+    assert.ok(/run each decision point on its grounded inputs in both directions/.test(impl), `${client}: both-direction run`);
+  }
+});

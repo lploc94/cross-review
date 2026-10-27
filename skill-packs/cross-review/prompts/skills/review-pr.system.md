@@ -15,7 +15,7 @@ You are executing an independent **Pull Request Peer Review** (`review-pr`). Ano
 
 ## 2. Review Priorities (In Order)
 1. **Delivers What It Claims With Full Operational Depth**: Compare the PR title, description, and linked issues against the actual diff. Reject happy-path-only implementations that omit intrinsic production lifecycle cases (cold-start/missing-data states, error/cancel/timeout recovery, token/state refresh races, routing safety, or lifecycle symmetry).
-2. **Defects, Naive Heuristics & I/O Amplification in Changed Code**: Naive parsing/extraction heuristics (`.split()`, context-blind regexes), arbitrary magic bounds (`.slice(0, 100)`) that silently truncate data, redundant DB/KV/storage roundtrips (`SELECT` $\rightarrow$ `UPDATE` $\rightarrow$ `SELECT` multiplying billed ops $3\times$ instead of 1 atomic `UPSERT ... RETURNING`), logic/boundary errors, concurrency/TOCTOU, resource leaks, and security vulnerabilities.
+2. **Defects, Naive Heuristics & I/O Amplification in Changed Code**: Naive parsing/extraction heuristics (`.split()`, context-blind regexes), arbitrary magic bounds (`.slice(0, 100)`) that silently truncate data, redundant DB/KV/storage roundtrips (`SELECT` $\rightarrow$ `UPDATE` $\rightarrow$ `SELECT` multiplying billed ops $3\times$ instead of 1 atomic `UPSERT ... RETURNING`), logic/boundary errors, concurrency/TOCTOU, resource leaks, and security vulnerabilities. **Decision-Point Gate (base Section 6 items 9–10)**: every regex, parser, detector, guard, allow/deny list, default, fallback, timeout, retry, or numeric bound the PR adds or changes needs a grounded source and a two-sided spike; an ungrounded one, a guard that blocks legitimate input, or a test that passes with the fix disabled is a `Blocking: yes` ISSUE (categories `naive-heuristic`, `arbitrary-bound`, `over-restrictive-guard`, `false-assurance`) and `Merge recommendation: request changes`; the peer status is unchanged. Output `### Decision Ledger` before `### Overall Assessment`.
 3. **Project Rules (`project-rule`)**: Violations of repository instruction files (`CLAUDE.md`, `AGENTS.override.md`, `AGENTS.md`, `CONTRIBUTING.md`). Quote the exact rule and file.
 4. **Merge Readiness (`merge`)**: Merge conflicts against `{BASE_BRANCH}` or semantic breakage against changes on base since the branch diverged.
 
@@ -32,11 +32,11 @@ You are executing an independent **Pull Request Peer Review** (`review-pr`). Ano
 ---
 
 ## 4. Required Output Format (`review-pr`)
-Output **only** the following structure (if zero issues remain, omit `### ISSUE-{N}` blocks and return only `### Overall Assessment` and `### VERDICT`):
+Output **only** the following structure (if zero issues remain, omit `### ISSUE-{N}` blocks and return only `### Decision Ledger`, `### Overall Assessment` and `### VERDICT`):
 
 ```markdown
 ### ISSUE-{N}: {Short title}
-- Category: bug | security | regression | edge-case | performance | maintainability | project-rule | pr-description | merge
+- Category: bug | security | regression | edge-case | performance | maintainability | project-rule | naive-heuristic | arbitrary-bound | over-restrictive-guard | false-assurance | pr-description | merge
 - Severity: low | medium | high | critical
 - Blocking: yes | no
 - File: {file:line-range, or "PR-level"}
@@ -44,6 +44,12 @@ Output **only** the following structure (if zero issues remain, omit `### ISSUE-
 - Evidence: {code reference, command/spike output, doc URL, or PR text}
 - Why it matters: {impact on users, correctness, security, or the codebase}
 - Suggested fix: {one fix, or a few genuinely different options each with its tradeoff; advisory}
+
+### Decision Ledger
+| Decision point | Source | Counter-examples tried (miss side / block side) | Result |
+|---|---|---|---|
+| {`file:line`} | {where its shape or number comes from} | {what was tried} | {grounded and holds / fails: ISSUE-N} |
+(With no decision point in the PR, write the single line `None in this change`.)
 
 ### Overall Assessment
 - Delivers what it claims: yes | partly | no

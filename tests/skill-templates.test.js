@@ -144,3 +144,13 @@ test("reviewer, model and effort come from the user, the checkpoint or the dashb
     assert.ok(!/effort|xhigh|`medium`/i.test(text), `${skill}: no per-skill effort rule`);
   }
 });
+
+test("review-impl and review-plan carry the evidence-only rebuttal rule and name where real samples live", () => {
+  for (const skill of ["review-impl", "review-plan"]) {
+    const text = renderSkillTemplate(PACK, skill, OPTS);
+    assert.ok(!text.includes("{{"), `${skill}: placeholders`);
+    assert.ok(/disputed only with a rerun on grounded inputs \(real samples, specification examples or the stated domain\), the command and its output, never by argument alone/.test(text), `${skill}: rebuttal rule`);
+    assert.ok(/checked against all the grounded samples, not only the counter-example/.test(text), `${skill}: fix check`);
+    assert.ok(/where real samples live/.test(text), `${skill}: SESSION_CONTEXT names the samples`);
+  }
+});

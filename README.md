@@ -128,6 +128,8 @@ Adds a block to `~/.claude/CLAUDE.md` and `~/.gemini/GEMINI.md` that has Claude 
 
 The reviewer runs with full access so it can run tests and network commands (`curl`, `npm view`, `git fetch`) to check its findings; its prompts forbid changing project files.
 
+Decision points: every regex, parser, guard, allow/deny list, default, fallback, timeout, retry or numeric bound a change adds needs a grounded source (real samples, a cited specification, or an exhaustive test) and a check of what it misses and what legitimate input it blocks. The reviewer blocks approval on an ungrounded one and lists each in a `### Decision Ledger` table; a test that still passes with the fix disabled is a `high` finding.
+
 ### Choosing the reviewer (optional)
 
 Codex reviews unless you choose another reviewer:

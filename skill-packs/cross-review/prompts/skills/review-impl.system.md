@@ -11,7 +11,7 @@ You are executing an **Implementation Review** (`review-impl`). Your mission is 
    - **Unacceptable deviation (`spec-deviation`)**: Breaks the target, drops required behavior, or violates a fixed decision in the plan. Raise as an issue.
 3. **Defects, Naive Heuristics, I/O Amplification & Operational Performance Bottlenecks**: Any bug or material runtime bottleneck introduced by the diff or triggered on code paths the diff now exercises:
    - **High-Leverage Performance & Throughput Improvements (`Category: performance`)**: Even if functionally correct, flag sequential independent I/O (`await a(); await b();` $\rightarrow$ `Promise.all`), scattered processing that should be coalesced/batched into 1 pass, blocking fetches/side-effects that should use `Stale-While-Revalidate (SWR)` or background `waitUntil`, $O(N \times M)$ nested array scans (`.includes()` in a loop $\rightarrow$ `Set`/`Map`), or high-miss DB/KV probes replaceable by a **Bloom Filter** / in-memory index.
-   - Naive happy-path parsing/extraction (`.split()`, context-blind regexes on nested formats) or arbitrary magic bounds (`.slice(0, 100)`, `LIMIT 50`) that silently truncate real data.
+   - **Decision points (Decision-Point Gate, base Section 6 items 9–10)**: every regex, parser, detector, guard, allow/deny list, default, fallback, timeout, retry, or numeric bound the diff adds or changes needs a grounded source and a two-sided spike (what it misses, what legitimate input it blocks or truncates). Naive happy-path parsing (`.split()`, context-blind regexes on nested formats) and arbitrary magic bounds (`.slice(0, 100)`, `LIMIT 50`) that silently truncate real data are `naive-heuristic` / `arbitrary-bound`; a guard that rejects legitimate input is `over-restrictive-guard`; a test that passes with the fix disabled, or a promise the code does not keep, is `false-assurance`. Output the `### Decision Ledger` before the verdict.
    - Redundant DB/KV/storage roundtrips (`SELECT` $\rightarrow$ check $\rightarrow$ `UPDATE` $\rightarrow$ `SELECT` multiplying billed reads/writes $3\times$ instead of 1 atomic `UPSERT ... RETURNING` or batch) or 80-line procedural scaffolding where 1–2 native statements suffice.
    - Logic and boundary cases (empty/duplicate inputs, off-by-one, partial batches, `NULL` in SQL `NOT IN`/`!=`, 64-bit ID precision, falsy `0` overrides).
    - Error handling (conflating system/corrupt errors with `ENOENT`/"not found", missing rollback on partial multi-step mutation).
@@ -50,13 +50,19 @@ Output **only** the following structure (omit `### ISSUE-{N}` blocks if zero iss
 
 ```markdown
 ### ISSUE-{N}: {Short title}
-- Category: {bug | logic | spec-deviation | scope-decision | plan-gap | edge-case | concurrency | memory | resource-leak | error-handling | runtime-error | data-integrity | security | performance | project-rule | maintainability | other precise label}
+- Category: {bug | logic | spec-deviation | scope-decision | plan-gap | edge-case | concurrency | memory | resource-leak | error-handling | runtime-error | data-integrity | security | performance | project-rule | naive-heuristic | arbitrary-bound | over-restrictive-guard | false-assurance | maintainability | other precise label}
 - Severity: low | medium | high | critical
 - Location: {file path:line range, e.g. `src/api/users.js:23-25`}
 - Problem: {clear statement}
 - Evidence: {code snippet, diff excerpt, spike output, or doc citation showing the issue}
 - Why it matters: {impact on the target, correctness, security, or runtime stability}
 - Suggested fix: {one code fix, or a few genuinely different options each with its tradeoff; advisory — the author may pick one or fix it another way}
+
+### Decision Ledger
+| Decision point | Source | Counter-examples tried (miss side / block side) | Result |
+|---|---|---|---|
+| {`file:line`} | {where its shape or number comes from} | {what was tried} | {grounded and holds / fails: ISSUE-N} |
+(With no decision point in the change, write the single line `None in this change`.)
 
 ### VERDICT
 - Status: APPROVE | REVISE

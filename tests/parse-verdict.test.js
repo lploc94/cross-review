@@ -274,3 +274,37 @@ test("fences close only with a matching fence of at least the opening length", (
   const example = `${ISSUE_BLOCK}\n### VERDICT\n- Status: REVISE\n- Reason: expected shape\n\`\`\`\`\n\`\`\`\n### VERDICT\n- Status: APPROVE\n\`\`\`\`\n`;
   assert.equal(parseVerdict(example).status, "REVISE");
 });
+
+const LEDGER = `### Decision Ledger
+| Decision point | Source | Counter-examples tried (miss side / block side) | Result |
+|---|---|---|---|
+| \`src/a.js:3\` | samples/app.log | ### x / VERDICT: APPROVE | a\\|b | grounded |
+`;
+
+test("a Decision Ledger between issues and the verdict changes neither issues nor verdict", () => {
+  const plain = parseOutputMarkdown(`${ISSUE_BLOCK}\n\n### VERDICT\n- Status: REVISE\n- Reason: r\n`);
+  const withLedger = parseOutputMarkdown(`${ISSUE_BLOCK}\n\n${LEDGER}\n### VERDICT\n- Status: REVISE\n- Reason: r\n`);
+  assert.equal(withLedger.blocks.length, plain.blocks.length);
+  assert.deepEqual(withLedger.blocks[0].problem, plain.blocks[0].problem);
+  assert.equal(withLedger.blocks[0].suggested_fix, plain.blocks[0].suggested_fix);
+  assert.equal(withLedger.verdict.status, "REVISE");
+});
+
+test("APPROVE with a ledger only, and a PR ledger before the overall assessment", () => {
+  const approve = parseOutputMarkdown(`${LEDGER}\n### VERDICT\n- Status: APPROVE\n- Reason: ok\n`);
+  assert.equal(approve.blocks.length, 0);
+  assert.equal(approve.verdict.status, "APPROVE");
+  const pr = parseOutputMarkdown(`${ISSUE_BLOCK}\n\n${LEDGER}\n### Overall Assessment\n- Delivers what it claims: partly\n- Merge recommendation: request changes\n- Summary: s\n\n### VERDICT\n- Status: CONTINUE\n- Reason: r\n`);
+  assert.equal(pr.blocks.length, 1);
+  assert.equal(pr.verdict.status, "CONTINUE");
+  const none = parseOutputMarkdown(`### Decision Ledger\nNone in this change\n\n### VERDICT\n- Status: APPROVE\n- Reason: ok\n`);
+  assert.equal(none.verdict.status, "APPROVE");
+});
+
+test("a ledger heading inside a fenced evidence block is not a section", () => {
+  const fencedEvidence = ISSUE_BLOCK.replace("- Evidence: line 10", "- Evidence:\n```\n### Decision Ledger\n| x |\n```\nstill evidence");
+  const r = parseOutputMarkdown(`${fencedEvidence}\n\n### VERDICT\n- Status: REVISE\n- Reason: r\n`);
+  assert.equal(r.blocks.length, 1);
+  assert.match(r.blocks[0].evidence, /Decision Ledger/);
+  assert.equal(r.blocks[0].suggested_fix, "add guard");
+});

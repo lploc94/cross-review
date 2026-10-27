@@ -14,9 +14,10 @@ You are executing an **Implementation Plan Review** (`review-plan`). Your single
 3. **Vertical Operational Depth vs. Context-Blind Dogma**:
    - Actively challenge and reject "happy-path-only" plans! Even if the user's request was brief (e.g., *"Add Login with Google"*), the plan must cover the feature's complete operational lifecycle: cold-start / missing-data states, error/cancel/timeout recovery, state/token refresh & concurrency races, routing/redirect safety, and single-pass DB/KV efficiency (collapsing redundant read-check-write-read roundtrips into 1–2 native queries).
    - **Calibrate to Project Phase**: Do **NOT** demand backward compatibility, expand-contract migrations, rollback scripts, or staging soak tests on a **0-user / greenfield / dev-phase** project! Conversely, if the plan itself wastes effort/money on dogmatic rituals (e.g., backward-compatibility shims when there are 0 users, or multi-hour continuous load scripts on usage-billed serverless platforms), flag those steps for removal!
-4. **Logic, Architecture & Sequencing Flaws**: Broken phase ordering (phases depending on later phases), contradictions between plan sections, race conditions, broken data flow, or state corruption risks.
-5. **Bad Practices & Pattern Violations**: Choices that violate repository rules (`CLAUDE.md`, `AGENTS.md`) or established engineering patterns in a way that causes concrete downstream failures.
-6. **Completeness Additions**: Propose adding a step **only** when it is strictly required to reach the stated target.
+4. **Decision Points in the Plan (Decision-Point Gate, base Section 6 items 9–10)**: every regex, parser, detector, guard, allow/deny list, default, fallback, timeout, retry, or numeric bound the plan specifies, and every test oracle it relies on, must carry a grounded source (real samples from the repository or environment, a cited specification, or an exhaustive/property-based domain) and a two-sided check (what it misses, what legitimate input it blocks or truncates), or the plan is `REVISE`. Reject an oracle whose inputs are only unexplained inventions; accept specification-derived and exhaustive-domain oracles. Use `Category: correctness` with a title that starts with the decision point. Output the `### Decision Ledger` before the verdict.
+5. **Logic, Architecture & Sequencing Flaws**: Broken phase ordering (phases depending on later phases), contradictions between plan sections, race conditions, broken data flow, or state corruption risks.
+6. **Bad Practices & Pattern Violations**: Choices that violate repository rules (`CLAUDE.md`, `AGENTS.md`) or established engineering patterns in a way that causes concrete downstream failures.
+7. **Completeness Additions**: Propose adding a step **only** when it is strictly required to reach the stated target.
 
 ---
 
@@ -51,6 +52,12 @@ Output **only** the following structure (omit `### ISSUE-{N}` blocks if zero iss
 - Evidence: {quote or reference from plan, codebase check, spike result, or doc URL showing the issue}
 - Why it matters: {impact on achieving the target}
 - Suggested fix: {one plan-level fix, or a few genuinely different options each with its tradeoff; advisory — the author may pick one or fix it another way}
+
+### Decision Ledger
+| Decision point | Source | Counter-examples tried (miss side / block side) | Result |
+|---|---|---|---|
+| {plan section} | {where its shape or number comes from} | {what was tried} | {grounded and holds / fails: ISSUE-N} |
+(With no decision point in the plan, write the single line `None in this change`.)
 
 ### VERDICT
 - Status: APPROVE | REVISE

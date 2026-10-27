@@ -8,13 +8,18 @@ Use this exact shape (copy the entire block below as `{OUTPUT_FORMAT}`):
 
 ```markdown
 ### ISSUE-{N}: {Short title}
-- Category: {bug | logic | spec-deviation | scope-decision | plan-gap | edge-case | concurrency | memory | resource-leak | error-handling | runtime-error | data-integrity | security | performance | project-rule | maintainability | other precise label}
+- Category: {bug | logic | spec-deviation | scope-decision | plan-gap | edge-case | concurrency | memory | resource-leak | error-handling | runtime-error | data-integrity | security | performance | project-rule | naive-heuristic | arbitrary-bound | over-restrictive-guard | false-assurance | maintainability | other precise label}
 - Severity: low | medium | high | critical
 - Location: {file path:line range, e.g. `src/api/users.js:23-25`}
 - Problem: {clear statement}
 - Evidence: {code snippet or diff excerpt showing the issue}
 - Why it matters: {impact on the target, correctness, security, or runtime stability}
 - Suggested fix: {one code fix, or a few genuinely different options each with its tradeoff; advisory — the author may pick one or fix it another way}
+
+### Decision Ledger
+| Decision point | Source | Counter-examples tried (miss side / block side) | Result |
+|---|---|---|---|
+| {`file:line`} | {where its shape or number comes from} | {what was tried} | {grounded and holds / fails: ISSUE-N} |
 
 ### VERDICT
 - Status: APPROVE | REVISE
@@ -23,4 +28,6 @@ Use this exact shape (copy the entire block below as `{OUTPUT_FORMAT}`):
 
 **spec-deviation guidance**: When raising a `spec-deviation`, state in "Why it matters" whether the deviation makes the target wrong/unachievable (raise it) versus an acceptable adaptation (only note it — prefer not raising acceptable deviations as blocking issues).
 
-**Zero-issue rule**: If no issues remain, omit all ISSUE blocks and return only the VERDICT block with `Status: APPROVE` and `Reason: Implementation matches the target and is free of bugs.`
+**Decision points**: every regex, parser, detector, guard, allow/deny list, default, fallback, timeout, retry or numeric bound the diff adds or changes gets one ledger row; with none, the ledger is the single line `None in this change`. Categories `naive-heuristic`, `arbitrary-bound`, `over-restrictive-guard`, `false-assurance` name ungrounded or failing decision points and tests that pass with the fix disabled. An `APPROVE` requires a complete ledger with no failing row.
+
+**Zero-issue rule**: If no issues remain, omit all ISSUE blocks and return the Decision Ledger and the VERDICT block with `Status: APPROVE` and `Reason: Implementation matches the target and is free of bugs.`

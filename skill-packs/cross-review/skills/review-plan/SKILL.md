@@ -13,7 +13,7 @@ After creating a plan, before implementing code. Requires a Markdown plan file w
 
 ## Inputs
 - **Plan path**: the user's (it may be outside the repository, such as a client's plan-mode file), else a single `*-plan.md` in the repo (`ls *plan*.md`, `find ./docs -maxdepth 3 -name "*plan*.md"`). Ask if several or none.
-- Round 1 placeholders: `PLAN_PATH` (absolute), `USER_REQUEST` (original request plus the user's latest decisions), `SESSION_CONTEXT` (only what the reviewer cannot read in the plan or the repository: decisions and constraints from the conversation).
+- Round 1 placeholders: `PLAN_PATH` (absolute), `USER_REQUEST` (original request plus the user's latest decisions), `SESSION_CONTEXT` (only what the reviewer cannot read in the plan or the repository: decisions and constraints from the conversation; where real samples live when the work parses, limits or guards input).
 - Reply placeholders: `PLAN_PATH`, `SESSION_CONTEXT`, `FIXED_ITEMS`, `DISPUTED_ITEMS`.
 - Skill `review-plan`, no mode.
 

@@ -1,6 +1,6 @@
 {
   "name": "@tlelabs/cross-review",
-  "version": "11.0.0",
+  "version": "11.1.0",
   "description": "Cross-model review skills (plan, implementation, PR, reasoning), 3-layer reviewer system prompts, and loop planning for Claude Code, Codex, and Antigravity",
   "keywords": [
     "claude-code",

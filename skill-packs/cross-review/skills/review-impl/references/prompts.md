@@ -7,7 +7,7 @@
 | Placeholder | Source | Required | Default |
 |-------------|--------|----------|---------|
 | `{USER_REQUEST}` | User's original task/PR description | No | "Review these changes for correctness against their target" |
-| `{SESSION_CONTEXT}` | What the reviewer cannot find in the plan, the diff, or the repository: the user's decisions and constraints from the conversation, what was already verified | No | "None beyond the request" |
+| `{SESSION_CONTEXT}` | What the reviewer cannot find in the plan, the diff, or the repository: the user's decisions and constraints from the conversation, what was already verified, and where real samples of the data live (logs, fixtures, exports) | No | "None beyond the request" |
 | `{OUTPUT_FORMAT}` | Copy the entire fenced code block from `references/output-format.md` (the single block after "Use this exact shape") | Yes | — |
 | `{BASE_BRANCH}` | Base commit of the reviewed range (branch mode only): a branch, `@{u}`, `HEAD~N`, or a SHA | Conditional | — |
 | `{FIXED_ITEMS}` | Lines listing accepted+fixed issues (`ISSUE-N: title — fixed in file:line`) | No | "No issues fixed this round" |

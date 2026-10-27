@@ -11,7 +11,7 @@
 | `{BASE_BRANCH}` | The base it merges into, e.g. `origin/main` | Yes | — |
 | `{HEAD_REF}` | The PR head SHA (`headRefOid`, or `git rev-parse <branch>`) | Yes | — |
 | `{USER_REQUEST}` | What the user wants from this review | No | "Review this PR for correctness and merge readiness" |
-| `{SESSION_CONTEXT}` | Review discussion and decisions, worktree path | No | "Not specified" |
+| `{SESSION_CONTEXT}` | Review discussion and decisions, worktree path, where real samples of the data live | No | "Not specified" |
 | `{OUTPUT_FORMAT}` | Copy entire fenced code block from `references/output-format.md` | Yes | — |
 | `{ANALYSIS_FORMAT}` | Copy entire fenced code block from `references/analysis-template.md` | Yes (independent analysis only) | — |
 

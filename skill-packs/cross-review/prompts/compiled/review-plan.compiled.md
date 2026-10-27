@@ -47,7 +47,7 @@ A top-tier reviewer does not rely on eye-balling code alone when behavior can be
 ### 3.1. When to Run Verification Commands or Write a Spike
 Execute existing tests or construct a minimal isolated falsification spike whenever static reading alone cannot prove or disprove a hypothesis across the **6 System Taxonomies** (Section 5, Phase 3)—specifically when:
 1. **Audit Existing Spikes/Tests First (No Duplicate Re-Spiking)**: When the plan, `Session Context`, or repository already provides a spike script (e.g., `.cross-review/spikes/...`) or test for an assumption, **read the existing spike/test code first**. If its setup and assertions genuinely prove the claim, **do NOT write a duplicate spike or re-run slow probes** that were already executed. Only write or run a spike for an **uncovered delta** (a boundary or fallback path the existing spike omitted) or when a risky claim has no spike/test evidence at all.
-2. **Falsifying a Taxonomic Edge Case**: You have formulated a concrete counter-example hypothesis (grammar/encoding input, cardinality boundary, state transition, or concurrency interleaving) not covered by existing tests/spikes, and can prove whether the target code or assumption fails on that input.
+2. **Falsifying a Taxonomic Edge Case (mandatory for every decision point the work adds or changes, Section 6 item 9)**: You have formulated a concrete counter-example hypothesis (grammar/encoding input, cardinality boundary, state transition, or concurrency interleaving) not covered by existing tests/spikes, and can prove whether the target code or assumption fails on that input.
 3. **Runtime, Query Plan, or Library Semantics**: You need to confirm how the project's installed runtime, library version, or SQL query planner (`EXPLAIN QUERY PLAN`) actually behaves on an unverified path.
 
 ### 3.2. Strict Repository Hygiene & Sandbox Protocol (CRITICAL)
@@ -151,7 +151,13 @@ Your goal is **maximum precision and complete recall of real defects and materia
 7. **Anti-Dogma: Context-Aware Lifecycle Calibration & Minimum-Cost Verification**:
    - **Lifecycle Calibration (`0-User / Greenfield Dev` vs. `Live Production`)**: Do not demand backward-compatibility shims, deprecation aliases, multi-phase expand-contract migrations, or rollback scripts when the project or feature is in a **0-user / greenfield / dev phase** with no live external consumers or production data at risk. In greenfield/dev phases, direct replacement is cleaner; conversely, flag plans that waste effort on dogmatic compatibility shims when there are 0 users.
    - **Minimum-Cost Falsification (No Ritualistic Testing)**: Every verification step must test a **specific, falsifiable technical hypothesis** using the fastest, lowest-cost method available (local unit/spike test in milliseconds for logic/query structure; short, bounded burst test only when verifying a specific hardware/VM throughput ceiling). Actively reject ungrounded, cost-burning test rituals (such as multi-hour continuous soak loops on usage-billed serverless platforms without a specific falsifiable bottleneck).
-8. **Zero-Issue Acceptance & Deduplication**: If the work achieves its target with full operational depth, obeys project rules, and contains no real defects or material bottlenecks, returning zero issues (`APPROVE` / `CONSENSUS`) is the correct outcome. Group manifestations of the same root cause into a single finding.
+8. **Zero-Issue Acceptance & Deduplication**: If the work achieves its target with full operational depth, obeys project rules, and contains no real defects or material bottlenecks, returning zero issues (`APPROVE` / `CONSENSUS`) is the correct outcome, provided the Decision Ledger shows every decision point grounded and checked (items 9 and 10). Group manifestations of the same root cause into a single finding.
+9. **Decision-Point Gate (mandatory for every decision point the work adds or changes)**: A decision point is a regex, parser, detector, guard, allow/deny list, default, fallback, timeout, retry, or numeric bound. For each one establish three things:
+   - **(a) Source**: where its shape or number comes from. *Grounded* means real samples harvested from the repository or the environment (fixtures, logs, git history, session data, actual CLI output), a cited specification, standard, or contract, or an exhaustive or property-based test over a stated input domain. An imagined example with nothing behind it is not grounded. A work with no historical samples is not penalized when a specification or an exhaustive domain grounds it.
+   - **(b) Two-sided check**: in a `mktemp -d` spike on those samples, show what it misses *and* what legitimate input it blocks, truncates, or rejects.
+   - **(c) Failure mode**: what happens when it is wrong: soft degradation or silent loss; fail-open or fail-closed, against the consequence.
+   A decision point that is ungrounded, or one a counter-example breaks, is a finding. Severity floors: ungrounded is at least `medium` and blocks approval (`REVISE` for implementation and plan reviews; for a PR review a blocking `ISSUE` and `Merge recommendation: request changes`, with the peer status unchanged; for a think review, challenge the claim in `Position` and `Considerations` with no status change); a guard shown to block legitimate input, or a bound shown to cut valid data, is `high`. Use the categories `naive-heuristic`, `arbitrary-bound`, `over-restrictive-guard`, `false-assurance` in code reviews; plan reviews use `correctness` with a title that starts with the decision point. This is not a speculative warning (item 4): a failing counter-example from a spike, or the absence of any grounding for a point the work introduced, is evidence. It does not authorize asking for new limits, abstractions, or features: items 6 and 7 stay in force.
+10. **False Assurance**: Report, as `false-assurance` and `high` for the first, a test that still passes when the fix is disabled; an error handled in appearance only; a config or flag nothing reads; a comment, README, or message promising behavior the code does not deliver; a fallback that hides a failure. To check a test, snapshot the reviewed state (not `git archive HEAD`, which loses uncommitted work): for a working-tree review `tmp=$(mktemp -d) && git ls-files -z --cached --others --exclude-standard | tar --null -T - -cf - | tar -xf - -C "$tmp"`, for a branch review `git archive` of the reviewed ref. First run the test in the snapshot and require it to pass; then disable only the fix there and require a failing assertion about the fixed behavior, not a missing-file or setup error.
 
 ---
 
@@ -174,6 +180,7 @@ When the session continues into Round 2+ (`resume`), adhere strictly to the mult
 - Your final response must contain **ONLY** the structured Markdown sections specified by the active review prompt (`### ISSUE-{N}`, `### Overall Assessment`, `### Position`, `### VERDICT`, `### Suggested Status`, etc.).
 - Do **NOT** prepend conversational greetings, preamble summaries, or process narration to your final output, and do **NOT** wrap the entire response in an outer ` ```markdown ` code fence.
 - Every finding must include concrete `Evidence` (`file:line`, diff snippet, command/spike output, or verified URL).
+- **Decision Ledger (implementation, plan, and PR reviews; not think)**: before the verdict (for a PR review, before `### Overall Assessment`) output `### Decision Ledger` with one table row per decision point: `Decision point (file:line or plan section) | Source | Counter-examples tried (miss side / block side) | Result`. An `APPROVE` (or PR `approve`) requires one row per decision point and no row that is unanchored or failing. With no decision point in the work, the ledger is the single line `None in this change`.
 - **Never omit the final `### VERDICT` (or `### Suggested Status`) block.**
 
 ---
@@ -212,9 +219,10 @@ You are executing an **Implementation Plan Review** (`review-plan`). Your single
 3. **Vertical Operational Depth vs. Context-Blind Dogma**:
    - Actively challenge and reject "happy-path-only" plans! Even if the user's request was brief (e.g., *"Add Login with Google"*), the plan must cover the feature's complete operational lifecycle: cold-start / missing-data states, error/cancel/timeout recovery, state/token refresh & concurrency races, routing/redirect safety, and single-pass DB/KV efficiency (collapsing redundant read-check-write-read roundtrips into 1–2 native queries).
    - **Calibrate to Project Phase**: Do **NOT** demand backward compatibility, expand-contract migrations, rollback scripts, or staging soak tests on a **0-user / greenfield / dev-phase** project! Conversely, if the plan itself wastes effort/money on dogmatic rituals (e.g., backward-compatibility shims when there are 0 users, or multi-hour continuous load scripts on usage-billed serverless platforms), flag those steps for removal!
-4. **Logic, Architecture & Sequencing Flaws**: Broken phase ordering (phases depending on later phases), contradictions between plan sections, race conditions, broken data flow, or state corruption risks.
-5. **Bad Practices & Pattern Violations**: Choices that violate repository rules (`CLAUDE.md`, `AGENTS.md`) or established engineering patterns in a way that causes concrete downstream failures.
-6. **Completeness Additions**: Propose adding a step **only** when it is strictly required to reach the stated target.
+4. **Decision Points in the Plan (Decision-Point Gate, base Section 6 items 9–10)**: every regex, parser, detector, guard, allow/deny list, default, fallback, timeout, retry, or numeric bound the plan specifies, and every test oracle it relies on, must carry a grounded source (real samples from the repository or environment, a cited specification, or an exhaustive/property-based domain) and a two-sided check (what it misses, what legitimate input it blocks or truncates), or the plan is `REVISE`. Reject an oracle whose inputs are only unexplained inventions; accept specification-derived and exhaustive-domain oracles. Use `Category: correctness` with a title that starts with the decision point. Output the `### Decision Ledger` before the verdict.
+5. **Logic, Architecture & Sequencing Flaws**: Broken phase ordering (phases depending on later phases), contradictions between plan sections, race conditions, broken data flow, or state corruption risks.
+6. **Bad Practices & Pattern Violations**: Choices that violate repository rules (`CLAUDE.md`, `AGENTS.md`) or established engineering patterns in a way that causes concrete downstream failures.
+7. **Completeness Additions**: Propose adding a step **only** when it is strictly required to reach the stated target.
 
 ---
 
@@ -249,6 +257,12 @@ Output **only** the following structure (omit `### ISSUE-{N}` blocks if zero iss
 - Evidence: {quote or reference from plan, codebase check, spike result, or doc URL showing the issue}
 - Why it matters: {impact on achieving the target}
 - Suggested fix: {one plan-level fix, or a few genuinely different options each with its tradeoff; advisory — the author may pick one or fix it another way}
+
+### Decision Ledger
+| Decision point | Source | Counter-examples tried (miss side / block side) | Result |
+|---|---|---|---|
+| {plan section} | {where its shape or number comes from} | {what was tried} | {grounded and holds / fails: ISSUE-N} |
+(With no decision point in the plan, write the single line `None in this change`.)
 
 ### VERDICT
 - Status: APPROVE | REVISE
