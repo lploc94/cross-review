@@ -17,7 +17,7 @@ code { font-family: var(--mono); font-size: 12.5px; background: var(--rule2); pa
 
 /* top bar */
 /* one column for everything: the bar's content shares the page's left and right edges; only its rule runs full width */
-.wrap { max-width: 1180px; margin: 0 auto; padding: 0 40px; }
+.wrap { max-width: 1440px; margin: 0 auto; padding: 0 40px; }
 .top { border-bottom: 1px solid var(--rule); }
 .top .wrap { display: flex; align-items: baseline; gap: 40px; padding-top: 22px; }
 .top .name { font: 600 22px var(--serif); }
@@ -43,10 +43,15 @@ h2 { font: 600 17px var(--serif); margin: 34px 0 10px; }
 [data-i] .i, .with-i .i { margin-right: 6px; }
 .skill { color: var(--muted); margin-right: 8px; }
 .top .name .logo { width: 30px; height: 30px; vertical-align: -7px; margin-right: 9px; }
-/* footer: version and the project's links */
-.site-foot { border-top: 1px solid var(--rule); padding: 14px 0 22px; color: var(--muted); font-size: 12.5px; }
+/* the footer is fixed to the window bottom; --foot is its height (border, padding, one line; two with the update note),
+   kept clear by body and the sticky sidebar */
+:root { --foot: calc(21px + 1.55 * 12.5px); }
+:root:has(#update-note:not([hidden])) { --foot: calc(23px + 2 * 1.55 * 12.5px); }
+body { padding-bottom: var(--foot); }
+.site-foot { position: fixed; left: 0; right: 0; bottom: 0; z-index: 2; background: var(--paper); border-top: 1px solid var(--rule); padding: 10px 0; color: var(--muted); font-size: 12.5px; }
 .site-foot a { color: var(--soft); }
 .site-foot a.new { color: var(--amber); font-weight: 500; }
+.update-note { color: var(--amber); font-weight: 500; margin-top: 2px; }
 #updates-block { display: none; } #updates-block.on { display: block; }
 label.check { margin-right: 12px; }
 label.check input { vertical-align: -1px; margin: 0 6px 0 0; }
@@ -81,7 +86,7 @@ td.soft { color: var(--soft); font-size: 13px; }
 .steps b { color: var(--ink); font-weight: 600; }
 .steps .arrow { color: var(--muted); padding: 0 10px; }
 .grid { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 40px; align-items: start; }
-aside { position: sticky; top: 20px; }
+aside { position: sticky; top: 20px; max-height: calc(100vh - 40px - var(--foot)); overflow-y: auto; }   /* a long issue list scrolls on its own instead of hiding below the screen */
 aside h3 { font: 600 13px var(--sans); margin: 0 0 6px; }
 aside section + section { margin-top: 28px; }
 
@@ -137,7 +142,7 @@ aside section + section { margin-top: 28px; }
 .iss .it { font-weight: 600; } .iss .loc { color: var(--muted); font: 11.5px var(--mono); overflow-wrap: anywhere; }
 .trail { margin-top: 3px; font-size: 12px; color: var(--soft); }
 .trail i { font-style: normal; color: var(--muted); }
-.facts { font-size: 13px; } .facts div { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; border-bottom: 1px solid var(--rule2); }
+.facts { font-size: 13px; } aside > .facts:first-child { position: sticky; top: 0; z-index: 1; background: var(--paper); padding-bottom: 8px; }   /* Session stays pinned while the issue list scrolls under it */ .facts div { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; border-bottom: 1px solid var(--rule2); }
 .facts div span:first-child { color: var(--muted); }
 
 /* settings */
@@ -204,7 +209,7 @@ th.right, td.right { text-align: right; }
 .error { color: var(--red); font-size: 13px; margin: 6px 0 0; }
 .error:empty { display: none; }
 /* settings save as you change them: this note shows that they did */
-.save-state { position: fixed; right: 24px; bottom: 20px; display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 4px; border: 1px solid var(--rule); background: var(--sheet); color: var(--soft); font-size: 13px; box-shadow: 0 2px 8px rgba(28, 27, 25, .08); opacity: 0; pointer-events: none; transition: opacity .2s; }
+.save-state { position: fixed; right: 24px; bottom: calc(var(--foot) + 12px); display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 4px; border: 1px solid var(--rule); background: var(--sheet); color: var(--soft); font-size: 13px; box-shadow: 0 2px 8px rgba(28, 27, 25, .08); opacity: 0; pointer-events: none; transition: opacity .2s; }
 .save-state.on { opacity: 1; }
 .save-state.saved { color: var(--green); }
 .save-state.failed { color: var(--red); border-color: #e9c9c4; }
@@ -267,3 +272,6 @@ li.task .i { color: var(--muted); margin-top: 3px; flex: none; } li.task.met .i 
 .doc pre { margin: 8px 0; }
 .toc { font-size: 13px; } .toc a { display: block; color: var(--soft); padding: 2px 0; cursor: pointer; }
 .toc a.sub { padding-left: 12px; font-size: 12.5px; } .toc a:hover { color: var(--ink); }
+/* a message with a table takes the full column; a table still too wide scrolls inside it, not under the sidebar */
+.bubble:has(table) { max-width: 100%; }
+.bubble, .doc { overflow-x: auto; }

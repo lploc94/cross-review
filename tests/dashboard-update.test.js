@@ -189,3 +189,45 @@ test("updates: turning Check for updates on in Settings checks at once; a worksp
     await d.close();
   }
 });
+
+test("updates on: a dashboard left running asks again every 6 hours; close() stops it", async () => {
+  setGlobal({ check_updates: true });
+  const cache = path.join(mk("cache"), "update.json");
+  // a fresh answer, so nothing is asked at start
+  fs.writeFileSync(cache, JSON.stringify({ latest: "1.0.0", checked_at: nowS(), error: null }));
+  const SIX_H = 6 * 3600 * 1000;
+  const realSet = globalThis.setInterval;
+  const realClear = globalThis.clearInterval;
+  let tick = null;
+  let handle = null;
+  let cleared = false;
+  globalThis.setInterval = (fn, ms, ...rest) => {
+    const h = realSet(fn, ms, ...rest);
+    if (ms === SIX_H) [tick, handle] = [fn, h];
+    return h;
+  };
+  globalThis.clearInterval = h => {
+    if (h !== null && h === handle) cleared = true;
+    return realClear(h);
+  };
+  const latestVersion = source("99.0.0");
+  let d;
+  try {
+    let call;
+    ({ d, call } = await serve({ latestVersion, updateCache: cache }));
+    assert.equal(typeof tick, "function", "a 6-hour timer");
+    assert.equal(latestVersion.calls, 0);
+    tick();
+    const u = await call("/api/update?wait=1");
+    assert.equal(latestVersion.calls, 1);
+    assert.deepEqual([u.latest, u.available], ["99.0.0", true]);
+    await d.close();
+    d = null;
+    assert.ok(cleared, "close() clears the timer");
+  } finally {
+    globalThis.setInterval = realSet;
+    globalThis.clearInterval = realClear;
+    if (d) await d.close();
+    fs.rmSync(globalFile(), { force: true });
+  }
+});
