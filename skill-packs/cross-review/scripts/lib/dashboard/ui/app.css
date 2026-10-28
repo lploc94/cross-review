@@ -17,7 +17,7 @@ code { font-family: var(--mono); font-size: 12.5px; background: var(--rule2); pa
 
 /* top bar */
 /* one column for everything: the bar's content shares the page's left and right edges; only its rule runs full width */
-.wrap { max-width: 1440px; margin: 0 auto; padding: 0 40px; }
+.wrap { max-width: 1180px; margin: 0 auto; padding: 0 40px; }
 .top { border-bottom: 1px solid var(--rule); }
 .top .wrap { display: flex; align-items: baseline; gap: 40px; padding-top: 22px; }
 .top .name { font: 600 22px var(--serif); }
@@ -171,6 +171,8 @@ th.w-session { width: 46%; }
 .pager:empty { display: none; }
 .pager a.off { color: var(--muted); pointer-events: none; }
 td.clip, td.clip > div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* a title with a long unbroken token (a test name, a path) breaks inside it instead of widening the table */
+td.brk { overflow-wrap: anywhere; }
 
 /* empty states use the full-body avatars */
 .empty td { border-bottom: 1px solid var(--rule); padding: 18px 10px 14px; }
