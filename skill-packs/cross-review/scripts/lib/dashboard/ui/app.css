@@ -19,7 +19,11 @@ code { font-family: var(--mono); font-size: 12.5px; background: var(--rule2); pa
 /* one column for everything: the bar's content shares the page's left and right edges; only its rule runs full width.
    1180px up to a ~1790px window, then a little wider on 2K/4K screens, up to 1400px */
 .wrap { max-width: clamp(1180px, 66vw, 1400px); margin: 0 auto; padding: 0 40px; }
-.top { border-bottom: 1px solid var(--rule); }
+/* the bar stays pinned at the window top; --head is its height (set, not measured, so the sticky sidebar and
+   in-page jumps can keep clear of it) */
+:root { --head: 69px; }
+html { scroll-padding-top: var(--head); }
+.top { position: sticky; top: 0; z-index: 2; height: var(--head); background: var(--paper); border-bottom: 1px solid var(--rule); }
 .top .wrap { display: flex; align-items: baseline; gap: 40px; padding-top: 22px; }
 .top .name { font: 600 22px var(--serif); }
 .top nav a { display: inline-block; color: var(--soft); font-size: 15.5px; margin-right: 26px; padding-bottom: 16px; }
@@ -87,7 +91,7 @@ td.soft { color: var(--soft); font-size: 13px; }
 .steps b { color: var(--ink); font-weight: 600; }
 .steps .arrow { color: var(--muted); padding: 0 10px; }
 .grid { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 40px; align-items: start; }
-aside { position: sticky; top: 20px; max-height: calc(100vh - 40px - var(--foot)); overflow-y: auto; }   /* a long issue list scrolls on its own instead of hiding below the screen */
+aside { position: sticky; top: calc(var(--head) + 20px); max-height: calc(100vh - var(--head) - 40px - var(--foot)); overflow-y: auto; }   /* a long issue list scrolls on its own instead of hiding below the screen */
 aside h3 { font: 600 13px var(--sans); margin: 0 0 6px; }
 aside section + section { margin-top: 28px; }
 

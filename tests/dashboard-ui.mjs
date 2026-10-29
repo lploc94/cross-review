@@ -888,8 +888,8 @@ async function plansChecks(browser) {
     return r.stdout.trim();
   };
   const sleep = ms => new Promise(r => setTimeout(r, ms));
-  // scrolled to the element, or as far as the page goes
-  const reached = id => `(Math.abs(document.getElementById("${id}").getBoundingClientRect().top) < 40 || (window.scrollY > 0 && window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 2))`;
+  // scrolled to the element (just under the pinned top bar), or as far as the page goes
+  const reached = id => `(Math.abs(document.getElementById("${id}").getBoundingClientRect().top - document.querySelector(".top").getBoundingClientRect().bottom) < 40 || (window.scrollY > 0 && window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 2))`;
   const t = Math.floor(Date.now() / 1000);
   const planRoot = path.join(tmp, "plans");
   const pfx = buildFixture(planRoot, { now: t, livePid: process.pid });
