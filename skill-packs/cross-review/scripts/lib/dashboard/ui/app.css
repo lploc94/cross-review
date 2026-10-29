@@ -16,8 +16,9 @@ a { color: var(--blue); text-decoration: none; cursor: pointer; } a:hover { text
 code { font-family: var(--mono); font-size: 12.5px; background: var(--rule2); padding: 0 4px; border-radius: 3px; }
 
 /* top bar */
-/* one column for everything: the bar's content shares the page's left and right edges; only its rule runs full width */
-.wrap { max-width: 1180px; margin: 0 auto; padding: 0 40px; }
+/* one column for everything: the bar's content shares the page's left and right edges; only its rule runs full width.
+   1180px up to a ~1790px window, then a little wider on 2K/4K screens, up to 1400px */
+.wrap { max-width: clamp(1180px, 66vw, 1400px); margin: 0 auto; padding: 0 40px; }
 .top { border-bottom: 1px solid var(--rule); }
 .top .wrap { display: flex; align-items: baseline; gap: 40px; padding-top: 22px; }
 .top .name { font: 600 22px var(--serif); }
@@ -274,6 +275,8 @@ li.task .i { color: var(--muted); margin-top: 3px; flex: none; } li.task.met .i 
 .doc pre { margin: 8px 0; }
 .toc { font-size: 13px; } .toc a { display: block; color: var(--soft); padding: 2px 0; cursor: pointer; }
 .toc a.sub { padding-left: 12px; font-size: 12.5px; } .toc a:hover { color: var(--ink); }
-/* a message with a table takes the full column; a table still too wide scrolls inside it, not under the sidebar */
+/* a message with a table takes the full column, and long code tokens (paths, calls) in its cells break so the table
+   fits, while plain words stay whole; a table still too wide scrolls sideways inside it, never down */
 .bubble:has(table) { max-width: 100%; }
-.bubble, .doc { overflow-x: auto; }
+.bubble td code, .doc td code { overflow-wrap: anywhere; }
+.bubble, .doc { overflow-x: auto; overflow-y: hidden; }

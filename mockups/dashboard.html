@@ -20,7 +20,7 @@
 
   /* top bar */
   /* one column for everything: the bar's content shares the page's left and right edges; only its rule runs full width */
-  .wrap { max-width: 1180px; margin: 0 auto; padding: 0 40px; }
+  .wrap { max-width: clamp(1180px, 66vw, 1400px); margin: 0 auto; padding: 0 40px; }
   .top { border-bottom: 1px solid var(--rule); }
   .top .wrap { display: flex; align-items: baseline; gap: 40px; padding-top: 22px; }
   .top .name { font: 600 22px var(--serif); }
