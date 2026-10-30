@@ -147,7 +147,7 @@ aside section + section { margin-top: 28px; }
 .iss .it { font-weight: 600; } .iss .loc { color: var(--muted); font: 11.5px var(--mono); overflow-wrap: anywhere; }
 .trail { margin-top: 3px; font-size: 12px; color: var(--soft); }
 .trail i { font-style: normal; color: var(--muted); }
-.facts { font-size: 13px; } aside > .facts:first-child { position: sticky; top: 0; z-index: 1; background: var(--paper); padding-bottom: 8px; }   /* Session stays pinned while the issue list scrolls under it */ .facts div { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; border-bottom: 1px solid var(--rule2); }
+.facts { font-size: 13px; } .facts div { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; border-bottom: 1px solid var(--rule2); }
 .facts div span:first-child { color: var(--muted); }
 
 /* settings */
@@ -197,7 +197,10 @@ td.brk { overflow-wrap: anywhere; }
 .trail b { font-weight: 600; }
 .act .think { color: var(--soft); }
 .act .bad { color: var(--red); }
-#issues-box { display: none; } #issues-box.on { display: block; }
+/* in a session's sidebar only the issue list scrolls; Session and the Issues heading stay in place */
+#detail aside { display: flex; flex-direction: column; }
+#issues-box { display: none; } #issues-box.on { display: flex; flex-direction: column; min-height: 0; }
+#ledger { overflow-y: auto; min-height: 0; }
 .bubble h3 { font: 600 14px var(--sans); margin: 10px 0 4px; } .bubble h3:first-child { margin-top: 0; }
 .bubble p { margin: 0 0 6px; } .bubble p:last-child { margin-bottom: 0; }
 .bubble ul, .bubble ol { margin: 4px 0 6px; padding-left: 20px; }
