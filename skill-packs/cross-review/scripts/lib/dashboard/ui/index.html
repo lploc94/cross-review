@@ -49,10 +49,6 @@
   <div class="grid">
     <div id="thread"></div>
     <aside>
-      <section id="issues-box">
-        <h3>Issues</h3>
-        <div id="ledger"></div>
-      </section>
       <section class="facts" id="facts">
         <h3>Session</h3>
         <div><span>Reviewer</span><span id="f-reviewer"></span></div>
@@ -62,6 +58,10 @@
         <div><span>Reviewer time</span><span id="f-time"></span></div>
         <div><span>Started</span><span id="f-started"></span></div>
         <div><span>Folder</span><a id="reveal" data-i="folder">open</a></div>
+      </section>
+      <section id="issues-box">
+        <h3>Issues</h3>
+        <div id="ledger"></div>
       </section>
     </aside>
   </div>
@@ -170,7 +170,7 @@
   <div id="updates-block">
     <h2>Updates</h2>
     <div class="form">
-      <div>Check for updates</div><div><label class="check"><input type="checkbox" id="f-updates"> When the dashboard starts, at most every 3 days</label> <button class="plain" id="check-update">Check now</button><div class="help" id="update-help"></div></div>
+      <div>Check for updates</div><div><label class="check"><input type="checkbox" id="f-updates"> When the dashboard starts (at most every 3 days) and every 6 hours while it runs</label> <button class="plain" id="check-update">Check now</button><div class="help" id="update-help"></div></div>
     </div>
     <p class="sub small">A check reads the latest version on npm; nothing about you or your sessions is sent.</p>
   </div>
@@ -182,6 +182,6 @@
   <div class="save-state" id="save-state" role="status" aria-live="polite"></div>
 </section>
 </main>
-<footer class="site-foot"><div class="wrap">cross-review <span id="pack"></span> · <a href="https://github.com/lploc94/cross-review" target="_blank" rel="noopener noreferrer">GitHub</a> · <a id="update-link" href="https://github.com/lploc94/cross-review#reinstall--update" target="_blank" rel="noopener noreferrer">Update</a> · <a href="https://github.com/lploc94/cross-review/issues" target="_blank" rel="noopener noreferrer">Report a problem</a></div></footer>
+<footer class="site-foot"><div class="wrap">cross-review <span id="pack"></span> · <a href="https://github.com/lploc94/cross-review" target="_blank" rel="noopener noreferrer">GitHub</a> · <a id="update-link" href="https://github.com/lploc94/cross-review#reinstall--update" target="_blank" rel="noopener noreferrer">Update</a> · <a href="https://github.com/lploc94/cross-review/issues" target="_blank" rel="noopener noreferrer">Report a problem</a><div class="update-note" id="update-note" hidden></div></div></footer>
 </body>
 </html>

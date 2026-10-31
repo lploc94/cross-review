@@ -20,8 +20,10 @@
 
   /* top bar */
   /* one column for everything: the bar's content shares the page's left and right edges; only its rule runs full width */
-  .wrap { max-width: 1180px; margin: 0 auto; padding: 0 40px; }
-  .top { border-bottom: 1px solid var(--rule); }
+  .wrap { max-width: clamp(1180px, 66vw, 1400px); margin: 0 auto; padding: 0 40px; }
+  :root { --head: 69px; }
+  html { scroll-padding-top: var(--head); }
+  .top { position: sticky; top: 0; z-index: 2; height: var(--head); background: var(--paper); border-bottom: 1px solid var(--rule); }
   .top .wrap { display: flex; align-items: baseline; gap: 40px; padding-top: 22px; }
   .top .name { font: 600 22px var(--serif); }
   .top nav a { display: inline-block; color: var(--soft); font-size: 15.5px; margin-right: 26px; padding-bottom: 16px; }
@@ -80,7 +82,7 @@
   .steps b { color: var(--ink); font-weight: 600; }
   .steps .arrow { color: var(--muted); padding: 0 10px; }
   .grid { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 40px; align-items: start; }
-  aside { position: sticky; top: 20px; }
+  aside { position: sticky; top: calc(var(--head) + 20px); }
   aside h3 { font: 600 13px var(--sans); margin: 0 0 6px; }
   aside section + section { margin-top: 28px; }
 
@@ -379,7 +381,7 @@
   <div id="updates-block">
     <h2>Updates</h2>
     <div class="form">
-      <div>Check for updates</div><div><label class="check"><input type="checkbox" id="f-updates"> When the dashboard starts, at most every 3 days</label> <button class="plain" id="check-update">Check now</button><div class="help" id="update-help">You have the latest version, 10.3.0 (checked 2 hours ago).</div></div>
+      <div>Check for updates</div><div><label class="check"><input type="checkbox" id="f-updates"> When the dashboard starts (at most every 3 days) and every 6 hours while it runs</label> <button class="plain" id="check-update">Check now</button><div class="help" id="update-help">You have the latest version, 10.3.0 (checked 2 hours ago).</div></div>
     </div>
     <p class="sub" style="font-size:12.5px">A check reads the latest version on npm; nothing about you or your sessions is sent.</p>
   </div>

@@ -704,6 +704,9 @@ export async function startDashboard({
     };
   };
   if (autoUpdates() && updateStale()) checkForUpdate();
+  // a dashboard left running checks again every 6 hours, so a new release shows without a restart
+  const updateTimer = setInterval(() => { if (autoUpdates()) checkForUpdate(); }, 6 * 3600 * 1000);
+  updateTimer.unref();
 
   async function settingsPayload() {
     // Keyed by workspace path: no prototype, so a workspace named __proto__ is a plain key
@@ -1111,6 +1114,7 @@ export async function startDashboard({
   function close() {
     if (closing) return closing;
     if (idleTimer) clearInterval(idleTimer);
+    clearInterval(updateTimer);
     watcher.close();
     if (discFile) removeDiscoveryIfOwn(process.pid, { file: discFile, token });
     closing = new Promise(resolve => {

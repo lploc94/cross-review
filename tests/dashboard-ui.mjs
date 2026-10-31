@@ -858,6 +858,8 @@ async function updateChecks(browser) {
     await page.waitFor(`/Version 99\\.0\\.0 is out/.test(document.getElementById("update-help").textContent)`);
     assert.match(await help(), /you have \d+\.\d+\.\d+\. Run npx @tlelabs\/cross-review@latest to update\.$/);
     assert.deepEqual(await page.evaluate(`(() => { const a = document.getElementById("update-link"); return [a.textContent, a.classList.contains("new")]; })()`), ["Update available: 99.0.0", true]);
+    // and a line under the version in the footer
+    assert.match(await page.evaluate(`(() => { const n = document.getElementById("update-note"); return n.hidden ? "" : n.textContent; })()`), /^⚠ Version 99\.0\.0 is out; you have \d+\.\d+\.\d+\. Run npx @tlelabs\/cross-review@latest to update\.$/);
     await page.screenshot(path.join(shots, "settings-updates-1400.png"));
     // the tick saves to the global file; a workspace has no Updates block
     await page.evaluate(`(() => { const c = document.getElementById("f-updates"); c.checked = true; c.dispatchEvent(new Event("change", { bubbles: true })); })()`);
@@ -886,8 +888,8 @@ async function plansChecks(browser) {
     return r.stdout.trim();
   };
   const sleep = ms => new Promise(r => setTimeout(r, ms));
-  // scrolled to the element, or as far as the page goes
-  const reached = id => `(Math.abs(document.getElementById("${id}").getBoundingClientRect().top) < 40 || (window.scrollY > 0 && window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 2))`;
+  // scrolled to the element (just under the pinned top bar), or as far as the page goes
+  const reached = id => `(Math.abs(document.getElementById("${id}").getBoundingClientRect().top - document.querySelector(".top").getBoundingClientRect().bottom) < 40 || (window.scrollY > 0 && window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 2))`;
   const t = Math.floor(Date.now() / 1000);
   const planRoot = path.join(tmp, "plans");
   const pfx = buildFixture(planRoot, { now: t, livePid: process.pid });

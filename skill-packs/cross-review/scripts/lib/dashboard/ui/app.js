@@ -147,6 +147,12 @@ function renderUpdate() {
   const link = $("#update-link");
   link.textContent = u && u.available ? `Update available: ${u.latest}` : "Update";
   link.classList.toggle("new", Boolean(u && u.available));
+  const note = $("#update-note");
+  const shown = !note.hidden;
+  note.hidden = !(u && u.available);
+  note.textContent = note.hidden ? "" : `⚠ Version ${u.latest} is out; you have ${u.current}. Run npx @tlelabs/cross-review@latest to update.`;
+  // the footer grew or shrank by a line: re-fit the paged lists above it
+  if (shown === note.hidden) window.dispatchEvent(new Event("resize"));
   const help = $("#update-help");
   $("#check-update").disabled = Boolean(u && u.checking);
   if (!u) help.textContent = "";
@@ -200,7 +206,7 @@ function activeRow(s) {
 
 function historyRow(s) {
   return `<tr data-go="${esc(sessionHref(s.ws, s.id))}"><td>${st(s.state, s.label)}</td>
-    <td>${skillIc(s.skill)}${inline(s.title)}<div class="line2">${esc(`${s.wsName} · ${s.skill}`)}</div></td>
+    <td class="brk">${skillIc(s.skill)}${inline(s.title)}<div class="line2">${esc(`${s.wsName} · ${s.skill}`)}</div></td>
     <td class="num">${s.rounds}</td><td class="soft">${esc(s.issues)}</td><td class="soft nw">${esc(modelOf(s))}</td>
     <td class="num mono nw">${s.reviewerSeconds ? clock(s.reviewerSeconds) : "—"}</td><td class="num line2 nw">${esc(when(s.createdAt))}</td></tr>`;
 }
@@ -1578,6 +1584,7 @@ async function start() {
     });
   }
   setInterval(tickClocks, 1000);
+  setInterval(loadUpdate, 3600 * 1000); // an open page asks again hourly, so the footer warning shows without a reload
 }
 
 if (typeof document !== "undefined") start();

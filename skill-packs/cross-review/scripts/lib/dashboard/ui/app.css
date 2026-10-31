@@ -16,9 +16,14 @@ a { color: var(--blue); text-decoration: none; cursor: pointer; } a:hover { text
 code { font-family: var(--mono); font-size: 12.5px; background: var(--rule2); padding: 0 4px; border-radius: 3px; }
 
 /* top bar */
-/* one column for everything: the bar's content shares the page's left and right edges; only its rule runs full width */
-.wrap { max-width: 1180px; margin: 0 auto; padding: 0 40px; }
-.top { border-bottom: 1px solid var(--rule); }
+/* one column for everything: the bar's content shares the page's left and right edges; only its rule runs full width.
+   1180px up to a ~1790px window, then a little wider on 2K/4K screens, up to 1400px */
+.wrap { max-width: clamp(1180px, 66vw, 1400px); margin: 0 auto; padding: 0 40px; }
+/* the bar stays pinned at the window top; --head is its height (set, not measured, so the sticky sidebar and
+   in-page jumps can keep clear of it) */
+:root { --head: 69px; }
+html { scroll-padding-top: var(--head); }
+.top { position: sticky; top: 0; z-index: 2; height: var(--head); background: var(--paper); border-bottom: 1px solid var(--rule); }
 .top .wrap { display: flex; align-items: baseline; gap: 40px; padding-top: 22px; }
 .top .name { font: 600 22px var(--serif); }
 .top nav a { display: inline-block; color: var(--soft); font-size: 15.5px; margin-right: 26px; padding-bottom: 16px; }
@@ -43,10 +48,15 @@ h2 { font: 600 17px var(--serif); margin: 34px 0 10px; }
 [data-i] .i, .with-i .i { margin-right: 6px; }
 .skill { color: var(--muted); margin-right: 8px; }
 .top .name .logo { width: 30px; height: 30px; vertical-align: -7px; margin-right: 9px; }
-/* footer: version and the project's links */
-.site-foot { border-top: 1px solid var(--rule); padding: 14px 0 22px; color: var(--muted); font-size: 12.5px; }
+/* the footer is fixed to the window bottom; --foot is its height (border, padding, one line; two with the update note),
+   kept clear by body and the sticky sidebar */
+:root { --foot: calc(21px + 1.55 * 12.5px); }
+:root:has(#update-note:not([hidden])) { --foot: calc(23px + 2 * 1.55 * 12.5px); }
+body { padding-bottom: var(--foot); }
+.site-foot { position: fixed; left: 0; right: 0; bottom: 0; z-index: 2; background: var(--paper); border-top: 1px solid var(--rule); padding: 10px 0; color: var(--muted); font-size: 12.5px; }
 .site-foot a { color: var(--soft); }
 .site-foot a.new { color: var(--amber); font-weight: 500; }
+.update-note { color: var(--amber); font-weight: 500; margin-top: 2px; }
 #updates-block { display: none; } #updates-block.on { display: block; }
 label.check { margin-right: 12px; }
 label.check input { vertical-align: -1px; margin: 0 6px 0 0; }
@@ -81,7 +91,7 @@ td.soft { color: var(--soft); font-size: 13px; }
 .steps b { color: var(--ink); font-weight: 600; }
 .steps .arrow { color: var(--muted); padding: 0 10px; }
 .grid { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 40px; align-items: start; }
-aside { position: sticky; top: 20px; }
+aside { position: sticky; top: calc(var(--head) + 20px); max-height: calc(100vh - var(--head) - 40px - var(--foot)); overflow-y: auto; }   /* a long issue list scrolls on its own instead of hiding below the screen */
 aside h3 { font: 600 13px var(--sans); margin: 0 0 6px; }
 aside section + section { margin-top: 28px; }
 
@@ -166,6 +176,8 @@ th.w-session { width: 46%; }
 .pager:empty { display: none; }
 .pager a.off { color: var(--muted); pointer-events: none; }
 td.clip, td.clip > div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* a title with a long unbroken token (a test name, a path) breaks inside it instead of widening the table */
+td.brk { overflow-wrap: anywhere; }
 
 /* empty states use the full-body avatars */
 .empty td { border-bottom: 1px solid var(--rule); padding: 18px 10px 14px; }
@@ -185,7 +197,10 @@ td.clip, td.clip > div { white-space: nowrap; overflow: hidden; text-overflow: e
 .trail b { font-weight: 600; }
 .act .think { color: var(--soft); }
 .act .bad { color: var(--red); }
-#issues-box { display: none; } #issues-box.on { display: block; }
+/* in a session's sidebar only the issue list scrolls; Session and the Issues heading stay in place */
+#detail aside { display: flex; flex-direction: column; }
+#issues-box { display: none; } #issues-box.on { display: flex; flex-direction: column; min-height: 0; }
+#ledger { overflow-y: auto; min-height: 0; }
 .bubble h3 { font: 600 14px var(--sans); margin: 10px 0 4px; } .bubble h3:first-child { margin-top: 0; }
 .bubble p { margin: 0 0 6px; } .bubble p:last-child { margin-bottom: 0; }
 .bubble ul, .bubble ol { margin: 4px 0 6px; padding-left: 20px; }
@@ -204,7 +219,7 @@ th.right, td.right { text-align: right; }
 .error { color: var(--red); font-size: 13px; margin: 6px 0 0; }
 .error:empty { display: none; }
 /* settings save as you change them: this note shows that they did */
-.save-state { position: fixed; right: 24px; bottom: 20px; display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 4px; border: 1px solid var(--rule); background: var(--sheet); color: var(--soft); font-size: 13px; box-shadow: 0 2px 8px rgba(28, 27, 25, .08); opacity: 0; pointer-events: none; transition: opacity .2s; }
+.save-state { position: fixed; right: 24px; bottom: calc(var(--foot) + 12px); display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 4px; border: 1px solid var(--rule); background: var(--sheet); color: var(--soft); font-size: 13px; box-shadow: 0 2px 8px rgba(28, 27, 25, .08); opacity: 0; pointer-events: none; transition: opacity .2s; }
 .save-state.on { opacity: 1; }
 .save-state.saved { color: var(--green); }
 .save-state.failed { color: var(--red); border-color: #e9c9c4; }
@@ -267,3 +282,8 @@ li.task .i { color: var(--muted); margin-top: 3px; flex: none; } li.task.met .i 
 .doc pre { margin: 8px 0; }
 .toc { font-size: 13px; } .toc a { display: block; color: var(--soft); padding: 2px 0; cursor: pointer; }
 .toc a.sub { padding-left: 12px; font-size: 12.5px; } .toc a:hover { color: var(--ink); }
+/* a message with a table takes the full column, and long code tokens (paths, calls) in its cells break so the table
+   fits, while plain words stay whole; a table still too wide scrolls sideways inside it, never down */
+.bubble:has(table) { max-width: 100%; }
+.bubble td code, .doc td code { overflow-wrap: anywhere; }
+.bubble, .doc { overflow-x: auto; overflow-y: hidden; }
