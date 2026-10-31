@@ -48,15 +48,14 @@ h2 { font: 600 17px var(--serif); margin: 34px 0 10px; }
 [data-i] .i, .with-i .i { margin-right: 6px; }
 .skill { color: var(--muted); margin-right: 8px; }
 .top .name .logo { width: 30px; height: 30px; vertical-align: -7px; margin-right: 9px; }
-/* the footer is fixed to the window bottom; --foot is its height (border, padding, one line; two with the update note),
-   kept clear by body and the sticky sidebar */
+/* the footer is fixed to the window bottom and keeps to one line (cut with … in a narrow window), so --foot, its height
+   (border, padding, one line), stays true; body, the sticky sidebar and the save note keep clear of it */
 :root { --foot: calc(21px + 1.55 * 12.5px); }
-:root:has(#update-note:not([hidden])) { --foot: calc(23px + 2 * 1.55 * 12.5px); }
 body { padding-bottom: var(--foot); }
 .site-foot { position: fixed; left: 0; right: 0; bottom: 0; z-index: 2; background: var(--paper); border-top: 1px solid var(--rule); padding: 10px 0; color: var(--muted); font-size: 12.5px; }
+.site-foot .wrap { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .site-foot a { color: var(--soft); }
 .site-foot a.new { color: var(--amber); font-weight: 500; }
-.update-note { color: var(--amber); font-weight: 500; margin-top: 2px; }
 #updates-block { display: none; } #updates-block.on { display: block; }
 label.check { margin-right: 12px; }
 label.check input { vertical-align: -1px; margin: 0 6px 0 0; }
@@ -283,7 +282,8 @@ li.task .i { color: var(--muted); margin-top: 3px; flex: none; } li.task.met .i 
 .toc { font-size: 13px; } .toc a { display: block; color: var(--soft); padding: 2px 0; cursor: pointer; }
 .toc a.sub { padding-left: 12px; font-size: 12.5px; } .toc a:hover { color: var(--ink); }
 /* a message with a table takes the full column, and long code tokens (paths, calls) in its cells break so the table
-   fits, while plain words stay whole; a table still too wide scrolls sideways inside it, never down */
+   fits, while plain words stay whole; a table still too wide scrolls sideways in its own box (.tbl, from
+   markdown.js), never down, so the scroll bar sits under the table and not at the end of a long plan */
 .bubble:has(table) { max-width: 100%; }
 .bubble td code, .doc td code { overflow-wrap: anywhere; }
-.bubble, .doc { overflow-x: auto; overflow-y: hidden; }
+.tbl { overflow-x: auto; overflow-y: hidden; }

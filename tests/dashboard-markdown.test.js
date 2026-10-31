@@ -46,10 +46,10 @@ test("renderField: one line stays inline; several lines (fenced code) render as 
 
 test("tables: header, divider, body; cells escaped and inline; ragged rows padded or cut", () => {
   const html = renderMarkdown("Before\n| Decision | Reason |\n|---|:--|\n| Dates in `UTC` | <script>x</script> |\n| only one |\n| a | b | extra |\nafter");
-  assert.match(html, /<p>Before<\/p><table><thead><tr><th>Decision<\/th><th>Reason<\/th><\/tr><\/thead><tbody>/);
+  assert.match(html, /<p>Before<\/p><div class="tbl"><table><thead><tr><th>Decision<\/th><th>Reason<\/th><\/tr><\/thead><tbody>/);
   assert.match(html, /<tr><td>Dates in <code>UTC<\/code><\/td><td>&lt;script&gt;x&lt;\/script&gt;<\/td><\/tr>/);
   assert.match(html, /<tr><td>only one<\/td><td><\/td><\/tr>/);
-  assert.match(html, /<tr><td>a<\/td><td>b<\/td><\/tr><\/tbody><\/table><p>after<\/p>/);
+  assert.match(html, /<tr><td>a<\/td><td>b<\/td><\/tr><\/tbody><\/table><\/div><p>after<\/p>/);
   assert.doesNotMatch(html, /extra|<script/);
   // a pipe line without a divider is text; a pipe inside a code span does not split the cell
   assert.doesNotMatch(renderMarkdown("| not | a table |\nplain"), /<table/);

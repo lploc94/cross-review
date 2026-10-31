@@ -48,8 +48,11 @@
   [data-i] .i, .with-i .i { margin-right: 6px; }
   .skill { color: var(--muted); margin-right: 8px; }
   .top .name .logo { width: 30px; height: 30px; vertical-align: -7px; margin-right: 9px; }
-  /* footer: version and the project's links */
-  .site-foot { border-top: 1px solid var(--rule); padding: 14px 0 22px; color: var(--muted); font-size: 12.5px; }
+  /* footer: version and the project's links, fixed to the window bottom on one line; --foot is its height */
+  :root { --foot: calc(21px + 1.55 * 12.5px); }
+  body { padding-bottom: var(--foot); }
+  .site-foot { position: fixed; left: 0; right: 0; bottom: 0; z-index: 2; background: var(--paper); border-top: 1px solid var(--rule); padding: 10px 0; color: var(--muted); font-size: 12.5px; }
+  .site-foot .wrap { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .site-foot a { color: var(--soft); }
   .status .what .i { width: 18px; height: 18px; vertical-align: -3px; margin-right: 8px; }
   .status .what .i { color: var(--c); }
@@ -82,7 +85,11 @@
   .steps b { color: var(--ink); font-weight: 600; }
   .steps .arrow { color: var(--muted); padding: 0 10px; }
   .grid { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 40px; align-items: start; }
-  aside { position: sticky; top: calc(var(--head) + 20px); }
+  aside { position: sticky; top: calc(var(--head) + 20px); max-height: calc(100vh - var(--head) - 40px - var(--foot)); overflow-y: auto; }
+  /* in a session's sidebar only the issue list scrolls */
+  #detail aside { display: flex; flex-direction: column; }
+  #issues-box { display: flex; flex-direction: column; min-height: 0; }
+  #ledger { overflow-y: auto; min-height: 0; }
   aside h3 { font: 600 13px var(--sans); margin: 0 0 6px; }
   aside section + section { margin-top: 28px; }
 
@@ -155,7 +162,7 @@
   button { font: 500 13px var(--sans); padding: 6px 14px; border-radius: 4px; border: 1px solid var(--ink); background: var(--ink); color: var(--paper); cursor: pointer; }
   button.plain { background: transparent; color: var(--ink); border-color: var(--rule); }
   /* settings save as you change them: this note shows that they did */
-  .save-state { position: fixed; right: 24px; bottom: 20px; display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 4px; border: 1px solid var(--rule); background: var(--sheet); color: var(--soft); font-size: 13px; box-shadow: 0 2px 8px rgba(28, 27, 25, .08); opacity: 0; pointer-events: none; transition: opacity .2s; }
+  .save-state { position: fixed; right: 24px; bottom: calc(var(--foot) + 12px); display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 4px; border: 1px solid var(--rule); background: var(--sheet); color: var(--soft); font-size: 13px; box-shadow: 0 2px 8px rgba(28, 27, 25, .08); opacity: 0; pointer-events: none; transition: opacity .2s; }
   .save-state.on { opacity: 1; }
   .save-state.saved { color: var(--green); }
   .save-state.failed { color: var(--red); border-color: #e9c9c4; }
@@ -207,6 +214,12 @@
   .doc pre { margin: 8px 0; }
   .toc { font-size: 13px; } .toc a { display: block; color: var(--soft); padding: 2px 0; }
   .toc a.sub { padding-left: 12px; font-size: 12.5px; } .toc a:hover { color: var(--ink); }
+  /* a message with a table takes the full column; long code tokens in cells break; a table too wide scrolls in its own box */
+  .bubble:has(table) { max-width: 100%; }
+  .bubble td code, .doc td code { overflow-wrap: anywhere; }
+  .tbl { overflow-x: auto; overflow-y: hidden; }
+  /* a History title with a long unbroken token breaks inside it */
+  td.brk { overflow-wrap: anywhere; }
 </style>
 </head>
 <body>
@@ -256,10 +269,6 @@
   <div class="grid">
     <div id="thread"></div>
     <aside>
-      <section>
-        <h3>Issues</h3>
-        <div id="ledger"></div>
-      </section>
       <section class="facts">
         <h3>Session</h3>
         <div><span>Reviewer</span><span>Codex</span></div>
@@ -269,6 +278,10 @@
         <div><span>Reviewer time</span><span id="f-time"></span></div>
         <div><span>Started</span><span>15 Oct, 14:02</span></div>
         <div><span>Folder</span><a data-i="folder">open</a></div>
+      </section>
+      <section id="issues-box">
+        <h3>Issues</h3>
+        <div id="ledger"></div>
       </section>
     </aside>
   </div>

@@ -69,6 +69,25 @@ const d = await startDashboard({ root, port: 0, open: false, discoveryFile: null
 // Settings save as they change; this note says when every save is done
 const SAVED = `document.getElementById("save-state").classList.contains("saved")`;
 const browser = await launchChrome(bin, path.join(tmp, "profile"));
+// A full-page shot draws the fixed footer where the window ends, over the page; put it back at the page end for the
+// shot (through the stylesheet: the page's CSP refuses an added <style>)
+const FOOT_AT_END = `(() => { const s = document.styleSheets[0]; s.insertRule("body { padding-bottom: 0 !important; }", s.cssRules.length); s.insertRule(".site-foot { position: static !important; }", s.cssRules.length); })()`;
+const FOOT_FIXED = `(() => { const s = document.styleSheets[0]; s.deleteRule(s.cssRules.length - 1); s.deleteRule(s.cssRules.length - 1); })()`;
+const newPage = browser.newPage;
+browser.newPage = async (...args) => {
+  const p = await newPage(...args);
+  const screenshot = p.screenshot;
+  p.screenshot = async (file, opts = {}) => {
+    if (opts.fullPage === false) return screenshot(file, opts);
+    await p.evaluate(FOOT_AT_END);
+    try {
+      await screenshot(file, opts);
+    } finally {
+      await p.evaluate(FOOT_FIXED);
+    }
+  };
+  return p;
+};
 try {
   const sessions = await (await fetch(`http://127.0.0.1:${d.port}/api/sessions`, { headers: { Authorization: `Bearer ${d.token}` } })).json();
   const page = await browser.newPage(1400, 1300);
@@ -858,8 +877,8 @@ async function updateChecks(browser) {
     await page.waitFor(`/Version 99\\.0\\.0 is out/.test(document.getElementById("update-help").textContent)`);
     assert.match(await help(), /you have \d+\.\d+\.\d+\. Run npx @tlelabs\/cross-review@latest to update\.$/);
     assert.deepEqual(await page.evaluate(`(() => { const a = document.getElementById("update-link"); return [a.textContent, a.classList.contains("new")]; })()`), ["Update available: 99.0.0", true]);
-    // and a line under the version in the footer
-    assert.match(await page.evaluate(`(() => { const n = document.getElementById("update-note"); return n.hidden ? "" : n.textContent; })()`), /^⚠ Version 99\.0\.0 is out; you have \d+\.\d+\.\d+\. Run npx @tlelabs\/cross-review@latest to update\.$/);
+    // the link's tooltip gives the command
+    assert.match(await page.evaluate(`document.getElementById("update-link").title`), /^Version 99\.0\.0 is out; you have \d+\.\d+\.\d+\. Run npx @tlelabs\/cross-review@latest to update\.$/);
     await page.screenshot(path.join(shots, "settings-updates-1400.png"));
     // the tick saves to the global file; a workspace has no Updates block
     await page.evaluate(`(() => { const c = document.getElementById("f-updates"); c.checked = true; c.dispatchEvent(new Event("change", { bubbles: true })); })()`);
@@ -872,6 +891,12 @@ async function updateChecks(browser) {
     const other = await browser.newPage(1400, 900);
     await other.goto(`${d11.url}#/`);
     await other.waitFor(`document.getElementById("update-link").textContent === "Update available: 99.0.0"`);
+    // in a narrow window the footer keeps to one line, so --foot (what body and the sidebar keep clear) is its height
+    const narrow = await browser.newPage(420, 700);
+    await narrow.goto(`${d11.url}#/`);
+    await narrow.waitFor(`document.getElementById("update-link").textContent === "Update available: 99.0.0"`);
+    const foot = await narrow.evaluate(`(() => { const p = document.createElement("div"); p.style.height = "var(--foot)"; document.body.append(p); const want = p.getBoundingClientRect().height; p.remove(); return { got: document.querySelector(".site-foot").getBoundingClientRect().height, want }; })()`);
+    assert.ok(Math.abs(foot.got - foot.want) < 0.5, `footer ${foot.got}px, --foot ${foot.want}px`);
   } finally {
     fs.writeFileSync(globalFile, before);
     await d11.close();
@@ -1066,7 +1091,7 @@ async function plansChecks(browser) {
       tabs: getComputedStyle(document.querySelector(".ptabs")).display, target: getComputedStyle(document.getElementById("p-target")).display,
       note: !document.getElementById("p-note").hidden, kind: document.getElementById("p-kind").textContent,
       first: document.querySelector("#doc").firstElementChild.tagName, intro: document.querySelector("#doc p").textContent,
-      h2: [...document.querySelectorAll("#doc h2")].map(h => h.textContent), toc: document.querySelectorAll("#toc a").length, table: !!document.querySelector("#doc table"),
+      h2: [...document.querySelectorAll("#doc h2")].map(h => h.textContent), toc: document.querySelectorAll("#toc a").length, table: !!document.querySelector("#doc .tbl > table"),
     })`);
     assert.deepEqual(fb, { tabs: "none", target: "none", note: true, kind: "markdown", first: "P", intro: "An invented opening line.", h2: ["Options", "Open questions"], toc: 2, table: true });
     await page.screenshot(path.join(shots, "plan-fallback-1400.png"));

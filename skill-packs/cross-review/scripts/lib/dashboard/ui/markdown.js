@@ -115,7 +115,8 @@ export function renderMarkdown(text) {
       const body = [];
       for (i += 2; i < lines.length && lines[i].trim() && lines[i].includes("|"); i++) body.push(row(tableCells(lines[i]), "td"));
       i--;
-      html.push(`<table><thead>${row(head, "th")}</thead><tbody>${body.join("")}</tbody></table>`);
+      // in its own box, so a table too wide for the message or page scrolls sideways there
+      html.push(`<div class="tbl"><table><thead>${row(head, "th")}</thead><tbody>${body.join("")}</tbody></table></div>`);
       continue;
     }
     const ul = line.match(/^\s*[-*+]\s+(.*)$/);
