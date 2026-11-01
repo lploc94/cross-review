@@ -193,6 +193,49 @@ export function parseReviewInput(text, knownNames) {
   return values;
 }
 
+const namesByDir = new Map();
+/** Placeholder names in <skillsDir>/<skill>/references/prompts.md, as the runner reads them; null when missing. */
+function skillNames(skill, skillsDir) {
+  const dir = skillsDir || defaultSkillsDir(skill);
+  const key = `${dir}\0${skill}`;
+  if (!namesByDir.has(key)) {
+    let names = null;
+    try {
+      names = placeholderNames(dir, skill);
+    } catch {}
+    namesByDir.set(key, names);
+  }
+  return namesByDir.get(key);
+}
+
+/**
+ * Placeholder values of a stored round input, split the way the runner split it: only the
+ * placeholders of the session's prompts (state.skills_dir, else the default) start a
+ * section, so other `## HEADINGS` stay inside the value. Without the prompts, every
+ * `## NAME` and `NAME:` counts.
+ */
+export function inputValues(text, skill, skillsDir = null) {
+  if (!text) return {};
+  let names = skill ? skillNames(skill, skillsDir) : null;
+  if (!names) {
+    names = new Set();
+    for (const m of text.matchAll(/^##[ \t]+([A-Z][A-Z_0-9]+)[ \t]*$/gm)) names.add(m[1]);
+    for (const m of text.matchAll(/^([A-Z][A-Z_0-9]+)[ \t]*:/gm)) names.add(m[1]);
+  }
+  return parseReviewInput(text, names);
+}
+
+/** Placeholder values of the input stored for `round` (inputs/round-NNN.md); null when there is none. */
+export function roundInputValues(sessionDir, round, skill, skillsDir = null) {
+  let text;
+  try {
+    text = fs.readFileSync(path.join(sessionDir, "inputs", `round-${String(round).padStart(3, "0")}.md`), "utf8");
+  } catch {
+    return null;
+  }
+  return inputValues(text, skill, skillsDir);
+}
+
 async function render(skill, template, skillsDir, values) {
   const result = await runRunner(
     ["render", "--skill", skill, "--template", template, "--skills-dir", skillsDir],

@@ -15,10 +15,10 @@ import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
 import { resolveSpawn } from "./lib/command.js";
 import { parseOutputMarkdown } from "./lib/parse.js";
-import { beginSession, waitSession, replySession, endSession, DEFAULT_MAX_WAIT_S } from "./lib/review-core.js";
+import { beginSession, waitSession, replySession, endSession, roundInputValues, DEFAULT_MAX_WAIT_S } from "./lib/review-core.js";
 import { getReviewer } from "./lib/reviewers/index.js";
 import { flushLineTimes } from "./lib/line-times.js";
-import { convergence, issueIds } from "./lib/convergence.js";
+import { convergence, disputedIds, issueIds } from "./lib/convergence.js";
 import { ensureCrossReviewDir } from "./lib/config.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -1601,7 +1601,12 @@ function cmdPoll(argv) {
 
         // Convergence / stalemate detection
         if (result.json.status === "completed" && rounds.length >= 2) {
-          const c = convergence(rounds[rounds.length - 2].issue_ids, currentRoundObj.issue_ids);
+          const reply = roundInputValues(stateDir, currentRoundObj.round || rounds.length, state.skill_name, state.skills_dir);
+          const verdict = result.json.review && result.json.review.verdict && result.json.review.verdict.status;
+          const c = convergence(rounds[rounds.length - 2].issue_ids, currentRoundObj.issue_ids, {
+            disputed: disputedIds(reply),
+            approved: verdict === "APPROVE",
+          });
           if (c) result.json.convergence = c;
         }
       }

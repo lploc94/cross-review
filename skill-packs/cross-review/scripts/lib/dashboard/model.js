@@ -9,8 +9,9 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { parseOutputMarkdown } from "../parse.js";
-import { computeNext, defaultSkillsDir, isPeerSkill, parseReviewInput, placeholderNames } from "../review-core.js";
-import { convergence, issueIds } from "../convergence.js";
+import { computeNext, inputValues, isPeerSkill } from "../review-core.js";
+import { convergence, disputedIds, issueEntry, issueIds } from "../convergence.js";
+export { inputValues };
 import { getReviewer } from "../reviewers/index.js";
 import { readLineTimes } from "../line-times.js";
 import { attachTimes, humanize } from "./activity.js";
@@ -116,47 +117,15 @@ function readLog(file, reviewer, round) {
   }
 }
 
-const namesByDir = new Map();
-/** Placeholder names in <skillsDir>/<skill>/references/prompts.md, as the runner reads them; null when missing. */
-function skillNames(skill, skillsDir) {
-  const dir = skillsDir || defaultSkillsDir(skill);
-  const key = `${dir}\0${skill}`;
-  if (!namesByDir.has(key)) {
-    let names = null;
-    try {
-      names = placeholderNames(dir, skill);
-    } catch {}
-    namesByDir.set(key, names);
-  }
-  return namesByDir.get(key);
-}
-
-/**
- * Placeholder values of a stored round input, split the way the runner split it: only the
- * placeholders of the session's prompts (state.skills_dir, else the default) start a
- * section, so other `## HEADINGS` stay inside the value. Without the prompts, every
- * `## NAME` and `NAME:` counts.
- */
-export function inputValues(text, skill, skillsDir = null) {
-  if (!text) return {};
-  let names = skill ? skillNames(skill, skillsDir) : null;
-  if (!names) {
-    names = new Set();
-    for (const m of text.matchAll(/^##[ \t]+([A-Z][A-Z_0-9]+)[ \t]*$/gm)) names.add(m[1]);
-    for (const m of text.matchAll(/^([A-Z][A-Z_0-9]+)[ \t]*:/gm)) names.add(m[1]);
-  }
-  return parseReviewInput(text, names);
-}
-
 /** `ISSUE-N: …` lines of FIXED_ITEMS / DISPUTED_ITEMS → [{id, text, location}]. */
 export function parseAgentReply(text) {
   const out = [];
   for (const line of String(text || "").split("\n")) {
-    const m = line.match(/ISSUE-(\d+)\b\s*:?\s*(.*)$/);
-    if (!m) continue;
-    const rest = m[2].trim();
+    const e = issueEntry(line);
+    if (!e) continue;
+    const rest = e.rest;
     const loc = rest.match(/(?:^|[\s(`])((?:[\w.-]+\/)*[\w.-]+\.[A-Za-z0-9]+:\d+(?:-\d+)?)/);
-    out.push({ id: Number(m[1]), text: rest, location: loc ? loc[1] : null });
+    out.push({ id: e.id, text: rest, location: loc ? loc[1] : null });
   }
   return out;
 }
@@ -243,13 +212,23 @@ function effectiveRounds(parsed, { isAlive }) {
       } else if (r.outcome && r.outcome.turnCompleted) {
         const review = parseOutputMarkdown(r.outcome.reviewText, skill);
         final = { status: "completed", round: r.round, review, thread_id: r.outcome.threadId || null, synthesized: true };
-        // What the runner's poll would add: stalemate when the same issues stay open twice
-        const prev = i > 0 ? parsed.rounds[i - 1].entry : null;
-        const c = prev ? convergence(prev.issue_ids, issueIds(review)) : null;
-        if (c) final.convergence = c;
       } else {
         final = { status: "failed", round: r.round, error: (r.outcome && r.outcome.turnFailed && r.outcome.failMessage) || TEXT.noTurn, thread_id: (r.outcome && r.outcome.threadId) || null, synthesized: true };
       }
+    }
+    // The runner's convergence, worked out again from the files: rounds that runners before
+    // the reply check (or nobody) polled carry a stalemate flag the rule no longer gives
+    if (final && final.status === "completed" && i > 0) {
+      const prev = parsed.rounds[i - 1];
+      const prevIds = prev.entry.issue_ids || issueIds(prev.final && prev.final.review);
+      const verdict = final.review && final.review.verdict && final.review.verdict.status;
+      const c = convergence(prevIds, issueIds(final.review), {
+        disputed: r.input == null ? null : disputedIds(inputValues(r.input, skill, state.skills_dir)),
+        approved: verdict === "APPROVE",
+      });
+      final = { ...final };
+      if (c) final.convergence = c;
+      else delete final.convergence;
     }
     const status = running ? "running" : final ? final.status : (r.entry.status || "stopped");
     const startedAt = r.entry.started_at || null;
