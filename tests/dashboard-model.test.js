@@ -155,6 +155,19 @@ test("the running story ends with checking now and Round 3 in progress", () => {
   assert.equal(detail.thread.at(-1).kind, "running");
   assert.ok(summary.now && summary.now.length > 0);
   assert.equal(detail.facts.caller.title, "Claude Code");
+  // In progress shows what the latest finished review raised, while round 3 runs
+  assert.deepEqual(summary.newIssues, { round: 2, count: 1 });
+  assert.equal(summary.issueCount, 3);
+});
+
+test("newIssues: the latest review's raised count, null before any review and for peer skills", () => {
+  assert.deepEqual(at("waiting").summary.newIssues, { round: 2, count: 1 });
+  assert.equal(at("think").summary.newIssues, null);
+  const dir = writeSession(path.join(tmp, "extra", ".cross-review", "sessions"), "review-impl-20261010-003", {
+    skill: "review-impl", mode: "working-tree", created: fx.now, inputs: ["## USER_REQUEST\nInvented.\n"],
+    rounds: [{ status: "running", started: fx.now - 30, elapsed: 0, acts: [] }],
+  });
+  assert.equal(classify(readSession(dir), { now: fx.now, isAlive: () => true }).summary.newIssues, null);
 });
 
 test("waiting, stopped and peer stories say what the mock says", () => {

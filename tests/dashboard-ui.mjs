@@ -105,6 +105,7 @@ try {
     active: [...document.querySelectorAll("#active tr")].map(tr => ({
       st: !!tr.querySelector(".st svg"), skill: !!tr.querySelector(".skill svg"), warn: !!tr.querySelector(".warn"),
       go: tr.dataset.go, forText: tr.querySelector("[data-since]")?.textContent,
+      where: tr.cells[1]?.querySelector(".line2")?.textContent, now2: tr.cells[2]?.querySelector(".line2")?.textContent,
     })),
     history: document.querySelectorAll("#history tr[data-go]").length,
     demo: !!document.getElementById("demo"),
@@ -129,6 +130,11 @@ try {
   }
   assert.equal(dom.active.filter(r => r.warn).length, sessions.active.filter(s => s.warn).length);
   assert.ok(dom.active.some(r => r.warn), "the fixture has a warned session");
+  // Each row's second lines: the model after the round, the issues so far and what the latest review raised
+  for (const row of dom.active) assert.ok(row.where.split(" · ").length >= 4, row.where);
+  const runningRow = dom.active.find(r => r.go.endsWith(`/${path.basename(fx.sessions.running)}`));
+  assert.equal(runningRow.now2, "3 issues · 1 new in round 2");
+  assert.ok(dom.active.filter(r => r.warn).every(r => r.now2.includes(" new in round ")), JSON.stringify(dom.active));
 
   // History: the newest finished sessions, a page that fits the window; filters work in the page
   const pagerText = await page.evaluate(`document.getElementById("h-pager").textContent`);
@@ -696,6 +702,7 @@ try {
   await settingsAtOnceChecks(browser);
   await otherModelChecks(browser);
   await updateChecks(browser);
+  await lateCatalogChecks(browser);
 
   await plansChecks(browser);
 
@@ -811,6 +818,26 @@ async function settingsAtOnceChecks(browser) {
     await detail.waitFor(`/^Model A · /.test(document.getElementById("f-model").textContent)`);
   } finally {
     await d9.close();
+  }
+}
+
+/** A model list that arrives after the Sessions page drew names the default model in In progress too, not only in History. */
+async function lateCatalogChecks(browser) {
+  let release;
+  const late = { ...catalog, listModels: () => new Promise(r => { release = () => r([{ slug: "model-a", name: "Model A", description: "", efforts: ["high"] }]); }) };
+  const d12 = await startDashboard({ root, port: 0, open: false, discoveryFile: null, catalogs: { codex: late } });
+  const page = await browser.newPage(1400, 1000);
+  try {
+    await page.goto(`${d12.url}#/`);
+    await page.waitFor(`document.querySelectorAll("#active tr[data-go]").length > 0`);
+    const before = await page.evaluate(`document.querySelector("#active tr[data-go] .line2").textContent`);
+    assert.match(before, / · Codex default$/);
+    release();
+    await page.waitFor(`document.getElementById("history").textContent.includes("Model A · Codex default")`);
+    const active = await page.evaluate(`[...document.querySelectorAll("#active tr[data-go]")].map(tr => tr.cells[1].querySelector(".line2").textContent)`);
+    assert.ok(active.every(s => s.endsWith(" · Model A · Codex default")), JSON.stringify(active));
+  } finally {
+    await d12.close();
   }
 }
 
