@@ -804,6 +804,49 @@ test("open_dashboard: a dashboard that cannot start only adds dashboard_error; u
   }
 });
 
+test("Follow reviews off: begin and every reply register the workspace with a running dashboard; a failure changes nothing", async () => {
+  const ws = freshWorkspace("register");
+  const saved = { follow: hooks.follow, register: hooks.register };
+  const registered = [];
+  try {
+    hooks.follow = () => { throw new Error("follow must not run"); };
+    hooks.register = args => { registered.push(args.workingDir); return { ws: "x" }; };
+    setCodexOutput("### ISSUE-1: Something\n- Category: correctness\n- Severity: high\n- Problem: p\n\n### VERDICT\n- Status: REVISE\n");
+    const s = await beginSession({ skill: "review-plan", inputText: inputFor("review-plan", "rg"), workingDir: ws });
+    assert.deepEqual(registered, [ws]);
+    assert.equal(s.dashboard_url, undefined);
+    assert.equal(s.dashboard_error, undefined);
+    await waitSession(s.session_dir, { maxWaitSeconds: 30 });
+    await replySession(s.session_dir, { inputText: inputFor("review-plan", "rg2") });
+    assert.deepEqual(registered, [ws, ws]);
+    await waitSession(s.session_dir, { maxWaitSeconds: 30 });
+
+    hooks.register = () => { throw new Error("invented failure"); };
+    const replied = await replySession(s.session_dir, { inputText: inputFor("review-plan", "rg3") });
+    assert.equal(replied.round, 3);
+    await waitSession(s.session_dir, { maxWaitSeconds: 30 });
+    const t = await beginSession({ skill: "review-plan", inputText: inputFor("review-plan", "rg"), workingDir: ws });
+    assert.ok(t.session_dir);
+    assert.equal(t.dashboard_error, undefined);
+    await waitSession(t.session_dir, { maxWaitSeconds: 30 });
+    await endSession(s.session_dir);
+    await endSession(t.session_dir);
+
+    // Follow reviews on: begin follows (and registers through it), so register is not called at begin
+    putConfig(path.join(ws, ".cross-review", "config.json"), { open_dashboard: true });
+    registered.length = 0;
+    hooks.register = args => { registered.push(args.workingDir); return { ws: "x" }; };
+    hooks.follow = () => ({ url: "http://127.0.0.1:1/invented" });
+    const f = await beginSession({ skill: "review-plan", inputText: inputFor("review-plan", "rg"), workingDir: ws });
+    assert.equal(f.dashboard_url, "http://127.0.0.1:1/invented");
+    assert.deepEqual(registered, []);
+    await waitSession(f.session_dir, { maxWaitSeconds: 30 });
+    await endSession(f.session_dir);
+  } finally {
+    Object.assign(hooks, saved);
+  }
+});
+
 // ---------- reviewer environment and nested reviews ----------
 
 function sessionCount(ws) {

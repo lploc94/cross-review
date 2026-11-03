@@ -268,6 +268,23 @@ test("list stream: a new event line changes Now; final.txt moves the session to 
 
 // ---------- 4b ----------
 
+test("watcher: a registered workspace whose folder is deleted leaves the list at the next scan", async () => {
+  const root = mk("prune-root");
+  const outside = mk("prune-ws");
+  fs.mkdirSync(path.join(outside, ".cross-review", "sessions"), { recursive: true });
+  const w = createListWatcher({ root });
+  try {
+    w.addWorkspace(outside);
+    const listed = () => w.snapshot({ maxScanAgeMs: 0 }).workspaces.some(x => x.path === outside);
+    assert.ok(listed());
+    fs.rmSync(outside, { recursive: true, force: true });
+    await sleep(5); // a scan in the same millisecond is still fresh
+    assert.equal(listed(), false);
+  } finally {
+    w.close();
+  }
+});
+
 test("watcher: warn after 1200 s, no reply after 1 h, stopped leaves after 1 h — no file changes", async () => {
   const root = mk("clock");
   const base = 1_800_000_000;

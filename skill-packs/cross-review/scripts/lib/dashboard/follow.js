@@ -2,7 +2,8 @@
 // browser; Follow plans (`open_plans`) shows a plan loop-plan just finished the same way.
 // It reuses the dashboard named in ~/.cross-review/dashboard.json when that one answers,
 // otherwise starts a detached one that exits after 30 minutes with no page open, registers
-// the workspace with it, and opens the page.
+// the workspace with it, and opens the page. With Follow reviews off, `begin` and `reply` only
+// register the workspace with a dashboard that is already running (registerWithDashboard).
 //
 // Never throws: any failure comes back as { error } and the review goes on.
 
@@ -38,7 +39,10 @@ function pidAlive(pid) {
   }
 }
 
-/** The dashboard in the discovery file when its process lives and /api/health answers. */
+/**
+ * The dashboard in the discovery file when its process lives and /api/health answers with that
+ * pid (a stale file whose port another program took never gets the workspace).
+ */
 async function liveDashboard(file, fetchFn) {
   const info = readDiscovery(file);
   if (!info || !pidAlive(info.pid) || !info.port || !info.token) return null;
@@ -47,9 +51,35 @@ async function liveDashboard(file, fetchFn) {
       headers: { Authorization: `Bearer ${info.token}` },
       signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS),
     });
-    return res.ok ? info : null;
+    return res.ok && (await res.json().catch(() => ({}))).pid === info.pid ? info : null;
   } catch {
     return null;
+  }
+}
+
+/** Register `workingDir` with the dashboard `info`; { ws } (its key) or { error }. */
+async function addWorkspace(info, workingDir, fetchFn) {
+  const res = await fetchFn(`http://127.0.0.1:${info.port}/api/workspaces`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${info.token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ path: workingDir }),
+    signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok || typeof body.ws !== "string") return { error: `the dashboard did not take the workspace: ${body.error || res.status}` };
+  return { ws: body.ws };
+}
+
+/**
+ * Follow reviews off: list `workingDir` in the dashboard that is already running, if any.
+ * Never starts one, never opens a page. Returns { ws } or { error }.
+ */
+export async function registerWithDashboard({ workingDir, fetch: fetchFn = globalThis.fetch, file = discoveryFile() }) {
+  try {
+    const info = await liveDashboard(file, fetchFn);
+    return info ? await addWorkspace(info, workingDir, fetchFn) : { error: "no dashboard is running" };
+  } catch (e) {
+    return { error: `could not reach the dashboard: ${e.message}` };
   }
 }
 
@@ -76,15 +106,9 @@ export async function followInDashboard({
       }
       if (!info) return { error: `dashboard did not start within ${Math.round(waitMs / 1000)} s` };
     }
-    const res = await fetchFn(`http://127.0.0.1:${info.port}/api/workspaces`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${info.token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ path: workingDir }),
-      signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS),
-    });
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok || typeof body.ws !== "string") return { error: `the dashboard did not take the workspace: ${body.error || res.status}` };
-    const page = hash ? hash(body.ws) : `#/s/${encodeURIComponent(body.ws)}/${path.basename(sessionDir)}`;
+    const added = await addWorkspace(info, workingDir, fetchFn);
+    if (added.error) return added;
+    const page = hash ? hash(added.ws) : `#/s/${encodeURIComponent(added.ws)}/${path.basename(sessionDir)}`;
     const url = `http://127.0.0.1:${info.port}/?t=${info.token}${page}`;
     const opened = await openBrowser(url);
     if (opened && opened.ok === false) return { url, error: `could not open the browser: ${opened.error}; open ${url}` };

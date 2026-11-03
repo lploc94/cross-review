@@ -50,8 +50,8 @@ export const SKILL_TEMPLATES = {
   },
 };
 
-/** Replaceable in tests: the Follow reviews step (default: dashboard/follow.js, loaded on first use). */
-export const hooks = { follow: null };
+/** Replaceable in tests: the Follow reviews step and the register-only step (default: dashboard/follow.js, loaded on first use). */
+export const hooks = { follow: null, register: null };
 
 export class ReviewError extends Error {
   constructor(message, code = "UNKNOWN_ERROR") {
@@ -274,16 +274,28 @@ function checkSelection(reviewerModule, model, effort) {
   if (r && r.ok === false) throw new ReviewError(r.message, "INVALID_SELECTION");
 }
 
+// The workspace as init resolved it: <ws>/.cross-review/sessions/<id>
+const workspaceOf = sessionDir => path.dirname(path.dirname(path.dirname(path.resolve(sessionDir))));
+
 /** Follow reviews: open the session in the dashboard. Failures only become dashboard_error. */
 async function follow(sessionDir) {
   try {
     const fn = hooks.follow || (await import("./dashboard/follow.js")).followInDashboard;
-    // The workspace as init resolved it: <ws>/.cross-review/sessions/<id>
-    const r = await fn({ sessionDir, workingDir: path.dirname(path.dirname(path.dirname(sessionDir))) });
+    const r = await fn({ sessionDir, workingDir: workspaceOf(sessionDir) });
     // a page that exists but did not open is an error; its text carries the link
     return r && r.url && !r.error ? { dashboard_url: r.url } : { dashboard_error: (r && r.error) || "the dashboard did not answer" };
   } catch (e) {
     return { dashboard_error: e.message };
+  }
+}
+
+/** List the session's workspace in a dashboard that is already running; silent, never fails. */
+async function register(sessionDir) {
+  try {
+    const fn = hooks.register || (await import("./dashboard/follow.js")).registerWithDashboard;
+    await fn({ workingDir: workspaceOf(sessionDir) });
+  } catch {
+    // no dashboard, or it did not answer: the review goes on
   }
 }
 
@@ -329,6 +341,7 @@ export async function beginSession({ skill, mode, inputText, inputFile, workingD
   const out = { session_dir: sessionDir, round: 1, status: "running" };
   if (analysisPrompt !== null) out.analysis_prompt = analysisPrompt;
   if (settings.open_dashboard === true) Object.assign(out, await follow(sessionDir));
+  else await register(sessionDir);
   return out;
 }
 
@@ -442,6 +455,8 @@ export async function replySession(sessionDir, { inputText, inputFile, model, ef
   if (model) sources.model = "requested";
   if (effort) sources.effort = "requested";
   updateState(sessionDir, { ended_at: null, end_outcome: null, ...(model || effort ? { settings_sources: sources } : {}) });
+  // a dashboard restarted since `begin` lists this workspace again
+  await register(sessionDir);
   return result;
 }
 
