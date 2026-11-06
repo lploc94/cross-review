@@ -142,6 +142,8 @@ export function createListWatcher({ root, now = () => Math.floor(Date.now() / 10
   function rescan() {
     scanned.clear();
     for (const ws of findWorkspaces(realRoot, depth)) scanned.set(wsKey(ws), ws);
+    // a registered folder that was deleted (a merged worktree) leaves the list
+    for (const [k, v] of registered) if (!isWorkspace(v)) registered.delete(k);
     lastScan = Date.now();
   }
 
