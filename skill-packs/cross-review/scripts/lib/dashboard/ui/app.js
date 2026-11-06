@@ -191,11 +191,22 @@ const modelOf = s => {
   return c && c.defaultModel ? `${modelName(c.defaultModel, c.models)} · ${label} default` : `${label} default`;
 };
 
+/** In progress: all issues so far and what the latest finished review raised; "" before the first review. */
+function issuesNow(s) {
+  const n = s.newIssues;
+  if (!n) return "";
+  if (!s.issueCount) return `No issues in round ${n.round}`;
+  return `${s.issueCount} ${s.issueCount === 1 ? "issue" : "issues"} · ${n.count || "none"} new in round ${n.round}`;
+}
+
 function activeRow(s) {
-  const where = `${s.wsName} · ${s.skill} · round ${s.round}${s.state === "waiting" ? " returned" : ""}`;
+  const where = `${s.wsName} · ${s.skill} · round ${s.round}${s.state === "waiting" ? " returned" : ""} · ${modelOf(s)}`;
+  const issues = issuesNow(s);
+  // the warning shares the second line with the issues, so every row keeps two lines
+  const line2 = [issues && esc(issues), s.warn && `<span class="warn with-i">${ic("warn")}${esc(s.warn)}</span>`].filter(Boolean).join(" · ");
   return `<tr data-go="${esc(sessionHref(s.ws, s.id))}"><td>${st(s.state, s.label)}</td>
     <td class="clip" title="${esc(`${s.title}\n${where}`)}">${skillIc(s.skill)}${inline(s.title)}<div class="line2">${esc(where)}</div></td>
-    <td class="soft clip" title="${esc(s.now)}">${esc(s.now)}${s.warn ? `<div class="warn with-i">${ic("warn")}${esc(s.warn)}</div>` : ""}</td>
+    <td class="soft clip" title="${esc([s.now, issues, s.warn].filter(Boolean).join("\n"))}">${esc(s.now)}${line2 ? `<div class="line2">${line2}</div>` : ""}</td>
     <td class="num mono" data-since="${Number(s.since) || 0}">${clock(nowS() - s.since)}</td></tr>`;
 }
 
@@ -1156,7 +1167,7 @@ function followCatalog(s) {
 
 /** Session pages and the History list name models from the catalogs: draw them again when one changes. */
 function redrawFacts() {
-  if (data) renderHistory();
+  if (data) renderSessions();
   if (view && view.detail) {
     view.sig = null;
     renderDetail(view);

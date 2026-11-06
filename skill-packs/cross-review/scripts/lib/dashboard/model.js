@@ -574,6 +574,7 @@ export function classify(parsed, { now = Math.floor(Date.now() / 1000), isAlive 
 
   const reviewerSeconds = rounds.reduce((t, r) => t + (r.running ? 0 : r.secs || 0), 0);
   const lastVerdict = [...rounds].reverse().find(r => verdictOf(r.final));
+  const lastReview = peer ? null : story.findLast(x => x.who === "rv" && !x.failed);
   const summary = {
     id: parsed.id,
     skill: parsed.skill,
@@ -590,6 +591,9 @@ export function classify(parsed, { now = Math.floor(Date.now() / 1000), isAlive 
     // the latest round's verdict, a reviewer that finished unpolled included
     verdict: lastVerdict ? verdictOf(lastVerdict.final) : null,
     issues: issuesColumn(ledger, peer),
+    issueCount: ledger.length,
+    // what the latest finished review raised; null before one and for peer skills
+    newIssues: lastReview ? { round: lastReview.round, count: Object.values(lastReview.did).filter(d => d === "raised").length } : null,
     model: state.model || null,
     reviewer: state.reviewer || "codex",
     caller: state.caller && state.caller.name ? { name: String(state.caller.name), title: state.caller.title ? String(state.caller.title) : null } : null,
