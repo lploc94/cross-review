@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { renderSkillTemplate } from './lib/render-skill.js';
 import { commandAvailable, resolveSpawn } from '../skill-packs/cross-review/scripts/lib/command.js';
 import { compilePrompts } from '../skill-packs/cross-review/scripts/build-prompts.js';
+import { agentMarkdown, agentNameForSkill } from '../skill-packs/cross-review/scripts/lib/reviewers/agy.js';
 
 // `npx @tlelabs/cross-review dashboard`: run the dashboard from the package itself; no install step runs
 if (process.argv[2] === 'dashboard') {
@@ -404,18 +405,8 @@ try {
   const stagedAgyAgents = path.join(stagedAgyPlugin, 'agents');
   fs.mkdirSync(stagedAgyAgents, { recursive: true });
   for (const skill of RUNNER_SKILLS) {
-    const agentName = `cross-reviewer-${skill}`;
-    const body = fs.readFileSync(path.join(stagedRuntime, 'prompts', 'compiled', `${skill}.compiled.md`), 'utf8').trim();
-    const agentMd = [
-      '---',
-      `name: ${agentName}`,
-      `description: Autonomous Principal Technical Reviewer for ${skill} (cross-review)`,
-      '---',
-      '',
-      body,
-      '',
-    ].join('\n');
-    fs.writeFileSync(path.join(stagedAgyAgents, `${agentName}.md`), agentMd, 'utf8');
+    const body = fs.readFileSync(path.join(stagedRuntime, 'prompts', 'compiled', `${skill}.compiled.md`), 'utf8');
+    fs.writeFileSync(path.join(stagedAgyAgents, `${agentNameForSkill(skill)}.md`), agentMarkdown(skill, body), 'utf8');
   }
 
   // 3. Verify runner works

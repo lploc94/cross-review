@@ -145,6 +145,32 @@ export function agentNameForSkill(skillName) {
   return skillName ? `cross-reviewer-${skillName}` : "";
 }
 
+// An agent whose front matter has no `tools:` gets no shell from agy (1.5.3): only file reads,
+// web search and MCP, so the reviewer could run no test or spike. These names come
+// from the `init.tools` event of a plain `agy --output-format stream-json` turn. A name agy's
+// registry lacks fails the whole turn ("tool ... not found in registry"), and so do call_mcp_tool,
+// list_resources and read_resource although `init` lists them: every agent gets those anyway.
+// No file-editing tools: the reviewer must not change project files (scratch files go through the shell).
+export const agentTools = [
+  "run_command", "command_status", "send_command_input",
+  "view_file", "grep_search", "list_dir", "find_by_name",
+  "search_web", "read_url_content",
+];
+
+/** The agent file for one review skill: front matter, then the compiled system prompt. */
+export function agentMarkdown(skillName, body) {
+  return [
+    "---",
+    `name: ${agentNameForSkill(skillName)}`,
+    `description: Autonomous Principal Technical Reviewer for ${skillName} (cross-review)`,
+    `tools: [${agentTools.join(", ")}]`,
+    "---",
+    "",
+    body.trim(),
+    "",
+  ].join("\n");
+}
+
 /**
  * Ensure the global Antigravity reviewer agent exists under $HOME/.gemini/config without touching workingDir.
  * If the installer already placed the agent in ~/.gemini/config/plugins/cross-review/agents/<name>.md, use it;
@@ -160,16 +186,7 @@ export function ensureAgyAgent(skillName, systemPromptFile) {
   const fallbackAgentPath = path.join(fallbackDir, `${agentName}.md`);
   if (fs.existsSync(systemPromptFile)) {
     try {
-      const body = fs.readFileSync(systemPromptFile, "utf8").trim();
-      const content = [
-        "---",
-        `name: ${agentName}`,
-        `description: Autonomous Principal Technical Reviewer for ${skillName} (cross-review)`,
-        "---",
-        "",
-        body,
-        "",
-      ].join("\n");
+      const content = agentMarkdown(skillName, fs.readFileSync(systemPromptFile, "utf8"));
       fs.mkdirSync(fallbackDir, { recursive: true });
       fs.writeFileSync(fallbackAgentPath, content, "utf8");
     } catch {

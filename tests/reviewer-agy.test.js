@@ -127,7 +127,16 @@ test("buildCommand: flag order, sandboxes, resume by conversation id", () => {
   ]);
   const fallbackAgent = path.join(process.env.HOME, ".gemini", "config", "agents", "cross-reviewer-review-impl.md");
   assert.ok(fs.existsSync(fallbackAgent), "global fallback agent created under $HOME/.gemini/config/agents/");
-  assert.match(fs.readFileSync(fallbackAgent, "utf8"), /name: cross-reviewer-review-impl/);
+  const fallbackText = fs.readFileSync(fallbackAgent, "utf8");
+  assert.match(fallbackText, /name: cross-reviewer-review-impl/);
+  // without `tools:` agy gives the agent no shell; a name outside agy's registry fails the turn
+  const tools = fallbackText.match(/^tools: \[(.*)\]$/m);
+  assert.ok(tools, "fallback agent declares its tools");
+  assert.deepEqual(tools[1].split(", "), agy.agentTools);
+  assert.ok(agy.agentTools.includes("run_command"));
+  for (const notInRegistry of ["call_mcp_tool", "list_resources", "read_resource", "read_file"]) {
+    assert.ok(!agy.agentTools.includes(notInRegistry), `${notInRegistry} is not declarable`);
+  }
   assert.deepEqual(fs.readdirSync(workDir), [], "workingDir is never mutated with .agents/");
 });
 

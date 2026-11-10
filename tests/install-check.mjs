@@ -195,6 +195,7 @@ for (const skill of RUNNER_SKILLS) {
   if (!fs.existsSync(agentFile)) { failures.push(`agy: missing agent ${agentFile}`); continue; }
   const text = fs.readFileSync(agentFile, "utf8");
   check(new RegExp(`^name: ${agentName}$`, "m").test(text), `agy: ${agentName}.md lacks name front matter`);
+  check(/^tools: \[.*\brun_command\b.*\]$/m.test(text), `agy: ${agentName}.md does not grant run_command (no shell for the reviewer)`);
   check(text.includes("## 1. Authority Hierarchy") && text.includes("# Active Skill Rubric:"), `agy: ${agentName}.md lacks 3-layer prompt content`);
   check(!text.includes(".cross-review-staging-"), `agy: ${agentName}.md contains staging path`);
 }

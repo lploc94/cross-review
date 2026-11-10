@@ -184,6 +184,12 @@ Besides the prompts and outputs, a session keeps what the dashboard needs to ret
 
 ## Breaking Changes
 
+### pack 11.1.2: a shell for the Antigravity reviewer
+- **Reviewer agents** (`agentMarkdown` in `lib/reviewers/agy.js`, used by the installer and `ensureAgyAgent`): `cross-reviewer-<skill>.md` now declares `tools: [run_command, command_status, send_command_input, view_file, grep_search, list_dir, find_by_name, search_web, read_url_content]`. agy (1.5.3) gives an agent without `tools:` no shell, so every agy review since 11.0.0 ran no test or spike; asked to run `echo`, the reviewer answered that no shell tool was exposed. The names come from agy's `init.tools` event; a name its registry lacks fails the whole turn, and so do `call_mcp_tool`, `list_resources` and `read_resource` (every agent gets them anyway). No file-editing tools.
+- **Update**: install again (`npx @tlelabs/cross-review@latest`); the runner rewrites the fallback agents in `~/.gemini/config/agents/` on the next agy review.
+- **Going back to 11.1.1**: `npx @tlelabs/cross-review@11.1.1` (agy reviewers lose the shell again).
+- `package.json` and `manifest.json` 11.1.2.
+
 ### pack 11.1.1: stalemate only after disputes
 - **Runner** (`lib/convergence.js`, `poll`): a round is a stalemate (`convergence.stalemate`, `next: done`) only when it repeats the previous round's open ISSUE ids with no new ones, its verdict is not `APPROVE`, and the agent's reply that started it (`inputs/round-NNN.md`) disputed every one of them (`DISPUTED_ITEMS`, or `DISAGREED_POINTS` for the peer skills) without also listing it as fixed. Before, the same ids twice were enough, so an issue reopened after a partial fix, or an `APPROVE` that listed closed issues again, ended the review as a stalemate; all 7 stalemates flagged in 208 stored sessions were of these kinds. A reply line counts only when it starts with `ISSUE-N` (after a list marker or `**`/`` ` ``/`[`), so "None (ISSUE-3 closed)" disputes nothing. A round with no stored reply (low-level `resume`) is never a stalemate.
 - **Dashboard**: works convergence out again from the files for every completed round, so sessions an older runner flagged show by the new rule; an `end --outcome stalemate` (`meta.verdict`) still shows as a stalemate. Also: wider layout, scrolling sidebar and issue list, pinned top bar, one-line footer, periodic update check (every 6 hours while it runs).
