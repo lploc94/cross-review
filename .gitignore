@@ -14,6 +14,11 @@ node_modules/
 
 # macOS
 .DS_Store
+
+# Agent instructions and tool indexes (local, per machine)
+/CLAUDE.md
+/AGENTS.md
+/GEMINI.md
 .gitnexus
 
 # Working documents (project-level, not shipped)

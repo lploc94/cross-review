@@ -28,7 +28,7 @@ jobs:
       - name: Test
         shell: bash
         run: node test-default-timeout.js && node test-stall-recovery.js && node test-timeout-resume.js && node --test "tests/*.test.js"
-      # The installer under a temporary HOME, as in CLAUDE.md; never the runner's real HOME.
+      # The installer under a temporary HOME; never the runner's real HOME.
       - name: Install check
         if: runner.os != 'Windows'
         run: |

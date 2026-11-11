@@ -222,7 +222,7 @@ test("validate reviewers: unknown reviewer, unknown key, Claude effort, skills",
   assert.ok(validateConfig(JSON.parse('{"reviewers": {"__proto__": {"model": "m"}}}')).join().includes("unknown reviewer"));
 });
 
-// The steps Breaking Changes gives to go back to 10.3.x, as a pure function: the 10.3 keys
+// The steps CHANGELOG.md gives to go back to 10.3.x, as a pure function: the 10.3 keys
 // and reviewer names are written out here, not taken from the current validator.
 const KEYS_10_3 = ["reviewer", "model", "effort", "open_dashboard", "track_plans", "open_plans", "check_updates", "skills"];
 function rollbackTo103(cfg) {
